@@ -4,10 +4,16 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-16
+
 ### Added
 
 - Complete documentation in `docs/`, mirrored to the GitHub wiki.
-- Contributing guide, security policy and this changelog.
+- Contributing guide, code of conduct, security policy, issue and pull request templates, and this changelog.
+
+### Changed
+
+- The action is listed as "notmyfault flaky test detector", because GitHub Marketplace names cannot match an existing GitHub account. Usage is unchanged: `uses: tashikomaaa/notmyfault@v1`.
 
 ### Fixed
 
@@ -23,5 +29,6 @@ All notable changes to this project are documented here. The format follows [Kee
 - Pull request comment kept up to date, job summary with the most unreliable tests, and step outputs.
 - Quarantine mode, so that known flaky tests stop blocking merges.
 
-[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/tashikomaaa/notmyfault/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/tashikomaaa/notmyfault/releases/tag/v1.0.0

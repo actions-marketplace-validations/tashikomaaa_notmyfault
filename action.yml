@@ -1,4 +1,4 @@
-name: notmyfault
+name: notmyfault flaky test detector
 description: Tells whether a failing test is your fault, a known flaky test or already broken on main. No server, no dependencies.
 author: Aldwin Moutarlier
 branding:
