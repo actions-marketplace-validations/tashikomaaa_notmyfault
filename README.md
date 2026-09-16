@@ -8,6 +8,7 @@
 [![Release](https://img.shields.io/github/v/release/tashikomaaa/notmyfault?sort=semver)](https://github.com/tashikomaaa/notmyfault/releases)
 [![GitHub Marketplace](https://img.shields.io/badge/marketplace-notmyfault-blue?logo=github)](https://github.com/marketplace/actions/notmyfault-flaky-test-detector)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![flaky tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/tashikomaaa/notmyfault/notmyfault-history/badges/ci-test.json)](docs/recipes.md#show-a-flaky-tests-badge)
 
 [Website](https://notmyfault.aldwin.fr) · [Getting started](docs/getting-started.md) · [Documentation](docs/README.md) · [Live demo](https://github.com/tashikomaaa/notmyfault-demo/pull/1) · [Changelog](CHANGELOG.md)
 

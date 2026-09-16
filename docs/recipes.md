@@ -135,6 +135,18 @@ jobs:
 
 Filter them with the `flaky-test` label, or assign them in your triage routine.
 
+## Show a flaky tests badge
+
+Every update of the history also writes `badges/<key>.json` on the history branch, counting the known and probably flaky tests of that key. shields.io turns it into a badge:
+
+```md
+![flaky tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/<owner>/<repo>/notmyfault-history/badges/<key>.json)
+```
+
+With the default key of a workflow named `CI` and a job named `test`, `<key>` is `ci-test`. The badge is green at zero and yellow otherwise, and follows the history within minutes of each run on a tracked branch.
+
+It only works for public repositories: shields.io cannot read files of private ones.
+
 ## Build the history faster with scheduled runs
 
 History only grows when tests run on a tracked branch. Scheduled runs happen on the default branch, so they count. Running the suite a few times a day surfaces flaky tests much sooner, especially in quiet repositories:

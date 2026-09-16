@@ -14,6 +14,7 @@ import {
 } from "./analyze";
 import { readContext, runUrl, type RunContext } from "./context";
 import { GitStore } from "./git-store";
+import { badgePath, renderBadge } from "./badge";
 import { FLAKY_LABEL, planFlakyIssues } from "./flaky-issues";
 import { applyQuarantine, isActive, parseQuarantine, type QuarantineEntry } from "./quarantine";
 import { GitHubApiError, GitHubClient } from "./github";
@@ -45,6 +46,9 @@ const BRANCH_README = `# notmyfault history
 
 This branch is maintained by the [notmyfault](https://github.com/tashikomaaa/notmyfault) GitHub Action.
 It stores the recent outcome of each test, so failures can be told apart: new, flaky or already broken.
+
+- \`history/<key>.json\`: the history of a test suite.
+- \`badges/<key>.json\`: a [shields.io endpoint](https://shields.io/badges/endpoint-badge) counting its flaky tests.
 
 The branch is rewritten as a single commit on every update. Deleting it simply resets the history.
 `;
@@ -384,6 +388,7 @@ async function recordHistory(
       {
         message: `Record ${key} (run ${context.runId || "local"}, attempt ${context.runAttempt})`,
         extraFiles: { "README.md": BRANCH_README },
+        derivedFiles: (content) => ({ [badgePath(key)]: renderBadge(parseHistory(content), now, EVIDENCE_TTL_DAYS) }),
       },
     );
     io.info(pushed ? `History updated on branch "${settings.branch}".` : "Nothing new to record.");

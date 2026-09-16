@@ -285,6 +285,9 @@ function hasNewError(history, test) {
 function blockingFailures(analysis, tolerated) {
   return analysis.failures.filter((failure) => !failure.quarantined && !tolerated.has(failure.verdict));
 }
+function countFlakyTests(history, now, evidenceTtlDays) {
+  return rankFlakyTests(history, now, evidenceTtlDays, Number.POSITIVE_INFINITY).length;
+}
 function rankFlakyTests(history, now, evidenceTtlDays, limit) {
   const ranked = [];
   for (const [id, test] of Object.entries(history.tests)) {
@@ -419,6 +422,7 @@ var GitStore = class {
   /**
    * Rewrites `path` with the result of `update` (skipped when it returns
    * undefined). `update` may run several times, always on the latest content.
+   * `derivedFiles` writes more files computed from that result, in the same commit.
    * Resolves to whether a commit was pushed.
    */
   async update(path, update, options) {
@@ -427,7 +431,8 @@ var GitStore = class {
       const head = await this.fetchHead();
       const next = update(head ? await this.readFile(head, path) : void 0);
       if (next === void 0) return false;
-      const commit = await this.commit(head, { ...options.extraFiles, [path]: next }, options.message);
+      const files = { ...options.extraFiles, ...options.derivedFiles?.(next), [path]: next };
+      const commit = await this.commit(head, files, options.message);
       let conflict;
       try {
         const output = await this.git([
@@ -546,6 +551,17 @@ function run(args, env, input) {
 }
 function sleep(ms) {
   return new Promise((resolve2) => setTimeout(resolve2, ms));
+}
+
+// src/badge.ts
+function badgePath(key) {
+  return `badges/${key}.json`;
+}
+function renderBadge(history, now, evidenceTtlDays) {
+  const flaky = countFlakyTests(history, now, evidenceTtlDays);
+  const badge2 = { schemaVersion: 1, label: "flaky tests", message: String(flaky), color: flaky === 0 ? "19a08e" : "fcbd34" };
+  return `${JSON.stringify(badge2, null, 1)}
+`;
 }
 
 // src/flaky-issues.ts
@@ -1408,6 +1424,9 @@ var BRANCH_README = `# notmyfault history
 This branch is maintained by the [notmyfault](https://github.com/tashikomaaa/notmyfault) GitHub Action.
 It stores the recent outcome of each test, so failures can be told apart: new, flaky or already broken.
 
+- \`history/<key>.json\`: the history of a test suite.
+- \`badges/<key>.json\`: a [shields.io endpoint](https://shields.io/badges/endpoint-badge) counting its flaky tests.
+
 The branch is rewritten as a single commit on every update. Deleting it simply resets the history.
 `;
 async function run2(env = process.env, io = new ActionIO(env), now = /* @__PURE__ */ new Date()) {
@@ -1660,7 +1679,8 @@ async function recordHistory(store, key, results, context, settings, io, now) {
       },
       {
         message: `Record ${key} (run ${context.runId || "local"}, attempt ${context.runAttempt})`,
-        extraFiles: { "README.md": BRANCH_README }
+        extraFiles: { "README.md": BRANCH_README },
+        derivedFiles: (content) => ({ [badgePath(key)]: renderBadge(parseHistory(content), now, EVIDENCE_TTL_DAYS) })
       }
     );
     io.info(pushed ? `History updated on branch "${settings.branch}".` : "Nothing new to record.");

@@ -49,10 +49,15 @@ The history is stored in your repository, on the branch named by `history-branch
 ```
 notmyfault-history
 ├── README.md            explains what the branch is
-└── history/
-    ├── ci-test.json     one file per key
+├── history/
+│   ├── ci-test.json     one file per key
+│   └── ci-e2e.json
+└── badges/
+    ├── ci-test.json     a badge counting the flaky tests of each key
     └── ci-e2e.json
 ```
+
+Each badge file is a [shields.io endpoint](https://shields.io/badges/endpoint-badge), written in the same commit as its history: the number of known and probably flaky tests, see [Recipes](recipes.md#show-a-flaky-tests-badge).
 
 The branch always holds **a single commit without parent**, authored by `github-actions[bot]`. Each update replaces it, so the branch never grows. Deleting the branch resets the history.
 

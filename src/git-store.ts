@@ -46,12 +46,18 @@ export class GitStore {
   /**
    * Rewrites `path` with the result of `update` (skipped when it returns
    * undefined). `update` may run several times, always on the latest content.
+   * `derivedFiles` writes more files computed from that result, in the same commit.
    * Resolves to whether a commit was pushed.
    */
   async update(
     path: string,
     update: (current: string | undefined) => string | undefined,
-    options: { message: string; extraFiles?: Record<string, string>; attempts?: number },
+    options: {
+      message: string;
+      extraFiles?: Record<string, string>;
+      derivedFiles?: (content: string) => Record<string, string>;
+      attempts?: number;
+    },
   ): Promise<boolean> {
     const attempts = options.attempts ?? 6;
     for (let attempt = 1; ; attempt++) {
@@ -59,7 +65,8 @@ export class GitStore {
       const next = update(head ? await this.readFile(head, path) : undefined);
       if (next === undefined) return false;
 
-      const commit = await this.commit(head, { ...options.extraFiles, [path]: next }, options.message);
+      const files = { ...options.extraFiles, ...options.derivedFiles?.(next), [path]: next };
+      const commit = await this.commit(head, files, options.message);
       let conflict: Error;
       try {
         const output = await this.git([

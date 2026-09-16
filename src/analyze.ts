@@ -203,6 +203,11 @@ export function blockingFailures(analysis: Analysis, tolerated: ReadonlySet<Verd
   return analysis.failures.filter((failure) => !failure.quarantined && !tolerated.has(failure.verdict));
 }
 
+/** Tests known or probably flaky in the history, for the badge. */
+export function countFlakyTests(history: History, now: Date, evidenceTtlDays: number): number {
+  return rankFlakyTests(history, now, evidenceTtlDays, Number.POSITIVE_INFINITY).length;
+}
+
 /** Most unreliable tests in the history, for the job summary. */
 export function rankFlakyTests(history: History, now: Date, evidenceTtlDays: number, limit: number): RankedTest[] {
   const ranked: RankedTest[] = [];

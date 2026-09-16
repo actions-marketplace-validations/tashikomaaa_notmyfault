@@ -229,6 +229,10 @@ describe("run", () => {
       const result = await simulate({ pays, totals: "pass" });
       expect(result.code).toBe(0);
     }
+    const badge = execFileSync("git", ["-C", join(root, "remote", "acme", "shop.git"), "show", "notmyfault-history:badges/ci-test.json"], {
+      encoding: "utf8",
+    });
+    expect(JSON.parse(badge)).toMatchObject({ label: "flaky tests", message: "1" });
     expect(storedHistory()).toMatchObject({
       runs: 8,
       tests: { "unit › checkout › pays": { outcomes: "pfpfppfp" }, "unit › checkout › totals": { outcomes: "pppppppp" } },
