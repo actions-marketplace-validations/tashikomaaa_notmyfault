@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>notmyfault: is that failing test your fault?</title>
+  <meta name="description" content="A GitHub Action that remembers how every test behaves on your main branch, and tells each pull request which failures are new, which tests are flaky and which were already broken.">
+  <meta name="theme-color" content="#F7C65C" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#2B1D10" media="(prefers-color-scheme: dark)">
+  <link rel="canonical" href="https://notyourfault.aldwin.fr/">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://notyourfault.aldwin.fr/">
+  <meta property="og:title" content="notmyfault: is that failing test your fault?">
+  <meta property="og:description" content="A GitHub Action that tells each pull request which failures are new, which tests are flaky and which were already broken.">
+  <meta property="og:image" content="https://notyourfault.aldwin.fr/assets/social-preview.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="preload" href="fonts/fredoka.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="style.css">
+  <script src="main.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="hero">
+    <nav class="nav wrap" aria-label="Main">
+      <a class="brand" href="./">
+        <img src="assets/logo.png" alt="" width="44" height="44">
+        <span>notmyfault</span>
+      </a>
+      <ul>
+        <li><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/README.md">Documentation</a></li>
+        <li><a href="#demo">Demo</a></li>
+        <li><a href="https://github.com/tashikomaaa/notmyfault">GitHub</a></li>
+      </ul>
+    </nav>
+
+    <div class="hero-body wrap">
+      <div class="hero-copy">
+        <h1>It’s not your fault.</h1>
+        <p class="lede">A test just failed on your pull request. notmyfault remembers how every test behaves on your main branch, and tells you which failures are new, which tests are known to be flaky and which were broken before you touched anything.</p>
+        <p class="actions">
+          <a class="button" href="#quick-start">Add it to your workflow</a>
+          <a class="button button-quiet" href="https://github.com/tashikomaaa/notmyfault-demo/pull/1">See a real pull request</a>
+        </p>
+        <p class="fineprint">A free GitHub Action. MIT licensed, nothing to host.</p>
+      </div>
+
+      <figure class="hero-comment">
+        <img class="peek" src="assets/mascot.png" alt="" width="360" height="312">
+        <div class="comment" role="img" aria-label="A notmyfault comment: 3 tests failed, 1 looks related to this change. A new failure, a test already failing on main, and a known flaky test.">
+          <p class="comment-author"><span class="avatar" aria-hidden="true"></span> github-actions <span class="bot">bot</span> commented</p>
+          <p class="comment-title"><img src="assets/verdict-new.png" alt="" width="244" height="244"> 3 tests failed, 1 looks related to this change</p>
+          <ul class="comment-rows">
+            <li>
+              <img class="stamp" src="assets/verdict-new.png" alt="" width="244" height="244">
+              <code>checkout › applies percentage discount codes</code>
+              <span><strong>New failure.</strong> Passed the last 20 runs on <code>main</code>.</span>
+            </li>
+            <li>
+              <img class="stamp" src="assets/verdict-broken.png" alt="" width="245" height="245">
+              <code>search › finds products regardless of accents</code>
+              <span><strong>Already failing on <code>main</code>.</strong> Failed the last 8 runs there.</span>
+            </li>
+            <li>
+              <img class="stamp" src="assets/verdict-flaky.png" alt="" width="244" height="244">
+              <code>payments › confirms card payments with the sandbox bank</code>
+              <span><strong>Known flaky.</strong> Passed when the same commit was re-run.</span>
+            </li>
+          </ul>
+          <p class="comment-foot"><strong>Quarantine:</strong> 1 failure not tolerated, so this check fails.</p>
+        </div>
+      </figure>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="band band-night story" aria-labelledby="story-title">
+      <div class="wrap">
+        <h2 id="story-title">You have re-run that build before.</h2>
+        <img class="comic" src="assets/comic-strip.jpg" width="1600" height="529" loading="lazy" alt="Three-panel comic. A developer panics in front of a red build. The croissant mascot rushes in with the test's history in a notebook. The croissant points out &quot;flaky&quot; and the developer relaxes with a coffee.">
+      </div>
+    </section>
+
+    <section class="band" aria-labelledby="verdicts-title">
+      <div class="wrap">
+        <div class="section-head">
+          <h2 id="verdicts-title">Every failure gets a verdict</h2>
+          <p>Each failed test is checked against its recent runs on main, retries within the run and re-runs of the same commit. The first rule that matches decides, and the comment says why in one sentence.</p>
+        </div>
+        <div class="verdicts">
+          <article class="verdict">
+            <img src="assets/verdict-new.png" alt="" width="244" height="244" loading="lazy">
+            <div>
+              <h3>New failure</h3>
+              <p>Nothing in the history explains it.</p>
+              <p class="todo"><strong>What to do:</strong> assume your change caused it and reproduce it locally.</p>
+            </div>
+          </article>
+          <article class="verdict">
+            <img src="assets/verdict-suspect.png" alt="" width="244" height="244" loading="lazy">
+            <div>
+              <h3>Suspect</h3>
+              <p>It failed once or twice on main, between two successful runs. Flaky, or a breakage fixed right after: too early to tell.</p>
+              <p class="todo"><strong>What to do:</strong> read the message. If it looks unrelated, re-run the job. A pass on the same commit proves it flaky.</p>
+            </div>
+          </article>
+          <article class="verdict">
+            <img src="assets/verdict-broken.png" alt="" width="245" height="245" loading="lazy">
+            <div>
+              <h3>Already failing</h3>
+              <p>The latest runs on main failed too, so the problem predates your pull request.</p>
+              <p class="todo"><strong>What to do:</strong> nothing in your pull request. Update your branch once main is fixed.</p>
+            </div>
+          </article>
+          <article class="verdict">
+            <img src="assets/verdict-flaky.png" alt="" width="244" height="244" loading="lazy">
+            <div>
+              <h3>Flaky</h3>
+              <p><em>Known flaky</em> when a retry or a re-run proved it, <em>probably flaky</em> when it keeps failing in isolation.</p>
+              <p class="todo"><strong>What to do:</strong> re-run if it blocks you, then fix the test, or let quarantine mode tolerate it.</p>
+            </div>
+          </article>
+        </div>
+        <p class="more"><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/verdicts.md">Read every rule and threshold</a></p>
+      </div>
+    </section>
+
+    <section class="band band-alt" aria-labelledby="how-title">
+      <div class="wrap how">
+        <div>
+          <h2 id="how-title">How it works</h2>
+          <ol class="steps">
+            <li>
+              <h3>Runs on main build the history</h3>
+              <p>After every run on your default branch, notmyfault records the outcome of each test on a <code>notmyfault-history</code> branch of your repository. A single commit, rewritten each time, so it never grows.</p>
+            </li>
+            <li>
+              <h3>Pull requests are compared with it</h3>
+              <p>When a test fails on a pull request, notmyfault looks at its last 50 runs on main, at retries within the run and at re-runs of the same commit.</p>
+            </li>
+            <li>
+              <h3>The comment explains every failure</h3>
+              <p>One comment per pull request, updated on every push. The job summary also ranks your least reliable tests.</p>
+            </li>
+          </ol>
+        </div>
+        <figure class="screenshot">
+          <picture>
+            <source media="(prefers-color-scheme: dark)" srcset="assets/pr-comment-dark.png">
+            <img src="assets/pr-comment-light.png" width="1268" height="997" loading="lazy" alt="A notmyfault comment on a pull request: one new failure related to the change, one test already failing on main and one known flaky test. Quarantine mode fails the check.">
+          </picture>
+          <figcaption>A real comment, on <a href="https://github.com/tashikomaaa/notmyfault-demo/pull/1">a pull request of the demo repository</a>.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="band band-night" id="quick-start" aria-labelledby="start-title">
+      <div class="wrap start">
+        <div class="start-copy">
+          <img class="start-sticker" src="assets/sticker-passed.png" alt="" width="360" height="287" loading="lazy">
+          <h2 id="start-title">Add it after your test step</h2>
+          <p>Your tests need to write JUnit XML, and almost every runner can: Vitest, Jest, pytest, Go, Maven, Gradle, cargo-nextest, Playwright, PHPUnit, RSpec, .NET.</p>
+          <ul class="notes">
+            <li><code>if: ${{ !cancelled() }}</code> runs notmyfault when the tests fail, which is exactly when you need it.</li>
+            <li>Runs on pushes to main build the history. Pull requests read it.</li>
+            <li>The permissions let notmyfault store its history and comment.</li>
+          </ul>
+          <p class="more"><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/getting-started.md">Follow the getting started guide</a></p>
+        </div>
+        <div class="code">
+          <button class="copy" type="button" data-copy="workflow" hidden>Copy</button>
+          <pre id="workflow"><code>on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: write        # store the history
+  pull-requests: write   # comment on pull requests
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: npm ci
+      - run: npm test       # writes JUnit XML to reports/
+
+      - uses: tashikomaaa/notmyfault@v1
+        if: ${{ !cancelled() }}
+        with:
+          junit: reports/**/*.xml</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="band band-butter" aria-labelledby="quarantine-title">
+      <div class="wrap quarantine">
+        <img src="assets/sticker-works-on-main.png" alt="The croissant mascot in sunglasses, above the words &quot;Works on main (sometimes)&quot;." width="331" height="283" loading="lazy">
+        <div>
+          <h2 id="quarantine-title">Stop flaky tests from blocking merges</h2>
+          <p>In quarantine mode, notmyfault decides whether the check fails. Known flaky tests stop blocking, failures that look real still do, and when in doubt, it blocks.</p>
+          <pre><code>- run: npm test
+  continue-on-error: true
+
+- uses: tashikomaaa/notmyfault@v1
+  with:
+    junit: reports/**/*.xml
+    mode: quarantine</code></pre>
+          <p class="more"><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/quarantine.md">Read the quarantine guide</a></p>
+        </div>
+      </div>
+    </section>
+
+    <section class="band" id="demo" aria-labelledby="demo-title">
+      <div class="wrap">
+        <div class="section-head">
+          <h2 id="demo-title">See it on real pull requests</h2>
+          <p>The <a href="https://github.com/tashikomaaa/notmyfault-demo">demo repository</a> is a small shop with a flaky payment test and a search test broken on main. Each of its open pull requests gets a different comment.</p>
+        </div>
+        <ul class="demos">
+          <li>
+            <img src="assets/verdict-new.png" alt="" width="244" height="244" loading="lazy">
+            <a href="https://github.com/tashikomaaa/notmyfault-demo/pull/1">#1 Support fixed-amount discount codes</a>
+            <p>A new failure caused by the change, next to a test already failing on main and a known flaky test. Quarantine blocks the merge.</p>
+          </li>
+          <li>
+            <img src="assets/verdict-suspect.png" alt="" width="244" height="244" loading="lazy">
+            <a href="https://github.com/tashikomaaa/notmyfault-demo/pull/2">#2 Charge the reduced VAT rate on coffee beans, again</a>
+            <p>A suspect failure: the test failed once on main, when the same change landed and was reverted.</p>
+          </li>
+          <li>
+            <img src="assets/verdict-passed.png" alt="" width="244" height="244" loading="lazy">
+            <a href="https://github.com/tashikomaaa/notmyfault-demo/pull/3">#3 Explain how to run the tests</a>
+            <p>Two failures, neither of them related to a README change. Quarantine lets the check pass.</p>
+          </li>
+          <li>
+            <img src="assets/verdict-passed.png" alt="" width="244" height="244" loading="lazy">
+            <a href="https://github.com/tashikomaaa/notmyfault-demo/pull/4">#4 Find products regardless of accents again</a>
+            <p>A fix for the test broken on main. The flaky test failed, passed on a re-run, and the comment turned green.</p>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="band band-alt" aria-labelledby="host-title">
+      <div class="wrap host">
+        <div class="section-head">
+          <h2 id="host-title">Nothing to host</h2>
+          <p>notmyfault runs inside your workflow and keeps everything in your repository.</p>
+        </div>
+        <dl class="facts">
+          <div>
+            <dt>No server, no account</dt>
+            <dd>The history lives on a branch of your repository, as private as your code.</dd>
+          </div>
+          <div>
+            <dt>Zero runtime dependencies</dt>
+            <dd>One bundled file, rebuilt and verified by CI. Nothing to audit but the repository.</dd>
+          </div>
+          <div>
+            <dt>A couple of seconds</dt>
+            <dd>It parses the reports, pushes one small commit and calls the API once or twice.</dd>
+          </div>
+          <div>
+            <dt>Free</dt>
+            <dd>MIT licensed. It runs in your own workflows and calls no paid service.</dd>
+          </div>
+        </dl>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer-body">
+      <img src="assets/sticker-not-my-fault.png" alt="The croissant mascot holding a sign reading &quot;Not my fault&quot;." width="360" height="263" loading="lazy">
+      <div>
+        <ul class="footer-links">
+          <li><a href="https://github.com/tashikomaaa/notmyfault">Source code</a></li>
+          <li><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/README.md">Documentation</a></li>
+          <li><a href="https://github.com/marketplace/actions/notmyfault-flaky-test-detector">GitHub Marketplace</a></li>
+          <li><a href="https://github.com/tashikomaaa/notmyfault/blob/main/CHANGELOG.md">Changelog</a></li>
+          <li><a href="https://github.com/tashikomaaa/notmyfault/issues">Report an issue</a></li>
+        </ul>
+        <p>notmyfault is MIT licensed, made by Aldwin Moutarlier.</p>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

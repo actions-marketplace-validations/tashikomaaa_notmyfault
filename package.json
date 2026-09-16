@@ -13,6 +13,7 @@
     "build": "esbuild src/index.ts --bundle --platform=node --target=node24 --format=esm --outfile=dist/index.js --legal-comments=none",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "site": "node scripts/site.ts _site",
     "check": "npm run typecheck && npm run build && npm test"
   },
   "keywords": [

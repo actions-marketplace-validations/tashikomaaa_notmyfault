@@ -46,6 +46,8 @@ npm run check   # typecheck, build dist/ and run all tests
 | `docs/` | Documentation, mirrored to the wiki. Images are in `docs/assets/` |
 | `brand/` | Original artwork: mascot, banner, badges, stickers. See [brand/README.md](brand/README.md) |
 | `scripts/wiki.ts` | Converts `docs/` into wiki pages |
+| `site/` | The website at [notyourfault.aldwin.fr](https://notyourfault.aldwin.fr) |
+| `scripts/site.ts` | Builds `site/` with the images it shares with `docs/assets/` |
 
 [How it works](docs/how-it-works.md) describes the behavior these files implement.
 
@@ -65,6 +67,7 @@ npm run check   # typecheck, build dist/ and run all tests
 - `test/main.test.ts` simulates complete workflow runs, with a local bare repository and a fake GitHub API.
 - `test/dist.test.ts` runs the bundled `dist/index.js` as GitHub Actions would.
 - `test/docs.test.ts` checks that documentation links resolve and that every input and output is documented.
+- `test/site.test.ts` builds the website and checks that every file it links to exists.
 
 ## Documentation
 
@@ -78,6 +81,19 @@ To preview the wiki conversion locally:
 mkdir -p /tmp/notmyfault-wiki
 node scripts/wiki.ts docs /tmp/notmyfault-wiki tashikomaaa/notmyfault
 ```
+
+## Website
+
+[notyourfault.aldwin.fr](https://notyourfault.aldwin.fr) is a static page in `site/`, with no build tool. It uses the images of `docs/assets/`, copied in when it is built, and self-hosted fonts under the SIL Open Font License. The `Site` workflow deploys it on every push to `main` that changes it.
+
+To preview it locally:
+
+```sh
+npm run site
+npx serve _site   # or any static file server
+```
+
+The server sends a strict content security policy: no inline styles or scripts, and nothing loaded from other domains.
 
 ## Pull requests
 

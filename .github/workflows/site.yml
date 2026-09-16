@@ -1,0 +1,49 @@
+name: Site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - site/**
+      - docs/assets/**
+      - brand/logo.png
+      - brand/social-preview.jpg
+      - scripts/site.ts
+      - .github/workflows/site.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: site
+      url: https://notyourfault.aldwin.fr
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Build
+        run: node scripts/site.ts _site
+
+      - name: Upload to notyourfault.aldwin.fr
+        env:
+          SSH_KEY: ${{ secrets.SITE_SSH_KEY }}
+          # The key of the server, so the upload cannot be sent anywhere else.
+          KNOWN_HOST: 165.227.236.170 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIZ11dICilUApiO4Os5ogZEsmErXxgsCAARcZhWWo/1y
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/site
+          chmod 600 ~/.ssh/site
+          printf '%s\n' "$KNOWN_HOST" > ~/.ssh/known_hosts
+          # The key only allows rsync into the site directory of the server.
+          rsync -rlz --delete --chmod=D755,F644 -e "ssh -i ~/.ssh/site -o IdentitiesOnly=yes" _site/ deploy@165.227.236.170:

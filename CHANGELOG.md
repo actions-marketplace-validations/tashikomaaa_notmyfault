@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
+- Website at [notyourfault.aldwin.fr](https://notyourfault.aldwin.fr).
 - Tests that pass while failing on the tracked branch are listed as fixed in the report, with a `fixed` output. A pull request that fixes a test gets a comment even when nothing failed ([#1](https://github.com/tashikomaaa/notmyfault/issues/1)).
 
 ## [1.1.0] - 2026-09-16
