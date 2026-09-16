@@ -87,7 +87,7 @@ Every rule and threshold is documented in [Reading the report](docs/verdicts.md)
 
 ## Contributing
 
-Issues and pull requests are welcome, and JUnit reports that notmyfault misreads are especially valuable. See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: [SECURITY.md](SECURITY.md).
+Issues and pull requests are welcome, and JUnit reports that notmyfault misreads are especially valuable. See [CONTRIBUTING.md](CONTRIBUTING.md) and the [code of conduct](CODE_OF_CONDUCT.md). Security issues: [SECURITY.md](SECURITY.md).
 
 ## License
 

@@ -1,0 +1,37 @@
+name: A JUnit report is misread
+description: A test gets the wrong outcome, is missing, or is identified wrongly.
+title: "Misread report: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks! Reports from real test runners are the best way to improve notmyfault: yours will become a test case.
+        Anonymize test names or messages if needed, but keep the XML structure intact.
+  - type: input
+    id: runner
+    attributes:
+      label: Test runner and version
+      placeholder: e.g. pytest 8.4.1, jest-junit 16.0.0, gotestsum 1.12.3
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is wrong
+      description: Which test, what notmyfault reported, and what you expected.
+      placeholder: "`checkout › pays` is reported as passed after a retry, but it failed."
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: The JUnit report
+      description: Attach the file by dragging it here. You can also paste the relevant part inside an ```xml code block.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: notmyfault version
+      placeholder: e.g. v1.0.1

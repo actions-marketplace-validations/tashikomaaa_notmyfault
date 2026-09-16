@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/tashikomaaa/notmyfault/blob/main/docs/README.md
+    about: Guides, configuration reference, recipes and FAQ.
+  - name: Report a security vulnerability
+    url: https://github.com/tashikomaaa/notmyfault/security/advisories/new
+    about: Please report vulnerabilities privately, not in a public issue.

@@ -1,0 +1,41 @@
+name: A verdict looks wrong
+description: A failure was called new, suspect, already failing or flaky, and it should not have been.
+title: "Wrong verdict: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before opening, please check [Reading the report](https://github.com/tashikomaaa/notmyfault/blob/main/docs/verdicts.md), which lists every rule.
+  - type: textarea
+    id: verdict
+    attributes:
+      label: Verdict and explanation shown
+      description: Copy the row from the pull request comment or the job summary.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and why
+    validations:
+      required: true
+  - type: textarea
+    id: history
+    attributes:
+      label: History of the test
+      description: |
+        The entry of the test in the history file, from:
+        `git fetch origin notmyfault-history && git show FETCH_HEAD:history/<key>.json`
+      render: json
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Workflow
+      description: The notmyfault step and the events the workflow runs on.
+      render: yaml
+  - type: input
+    id: version
+    attributes:
+      label: notmyfault version
+      placeholder: e.g. v1.0.1

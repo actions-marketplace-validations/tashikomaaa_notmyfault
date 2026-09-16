@@ -1,6 +1,6 @@
 # Contributing to notmyfault
 
-Thanks for helping! Contributions of every size are welcome.
+Thanks for helping! Contributions of every size are welcome. Everyone taking part in this project is expected to follow the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## Ways to help
 

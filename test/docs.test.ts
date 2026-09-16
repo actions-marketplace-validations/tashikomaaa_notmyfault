@@ -10,6 +10,7 @@ const markdownFiles = [
   "CONTRIBUTING.md",
   "SECURITY.md",
   "CHANGELOG.md",
+  "CODE_OF_CONDUCT.md",
   ...readdirSync(join(root, "docs"))
     .filter((file) => file.endsWith(".md"))
     .map((file) => `docs/${file}`),

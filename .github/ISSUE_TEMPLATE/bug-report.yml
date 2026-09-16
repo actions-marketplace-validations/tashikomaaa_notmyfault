@@ -1,0 +1,52 @@
+name: Bug report
+description: "Something else does not work: an error, a warning, a missing comment, a crash."
+title: "Bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        [Troubleshooting](https://github.com/tashikomaaa/notmyfault/blob/main/docs/troubleshooting.md) explains every error and warning notmyfault logs: the answer may already be there.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs of the notmyfault step
+      description: Expand the step in the workflow run and paste its output.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Workflow
+      description: The relevant part of your workflow file, including `permissions` and events.
+      render: yaml
+  - type: input
+    id: version
+    attributes:
+      label: notmyfault version
+      placeholder: e.g. v1.0.1
+    validations:
+      required: true
+  - type: dropdown
+    id: runner
+    attributes:
+      label: Runner
+      options:
+        - GitHub-hosted Linux
+        - GitHub-hosted macOS
+        - GitHub-hosted Windows
+        - Self-hosted
+        - GitHub Enterprise Server
