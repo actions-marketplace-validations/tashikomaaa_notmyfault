@@ -4,6 +4,7 @@ notmyfault is a GitHub Action that remembers how every test behaves on your defa
 
 ## Start here
 
+- [Live demo](https://github.com/tashikomaaa/notmyfault-demo/pull/1): a real pull request with a new failure, a test already broken on `main` and a flaky test.
 - [Getting started](getting-started.md): add notmyfault to a workflow in five minutes.
 - [Reading the report](verdicts.md): what each verdict means and what to do about it.
 

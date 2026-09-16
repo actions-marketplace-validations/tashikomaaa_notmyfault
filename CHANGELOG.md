@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- Demo repository with a real pull request, and a screenshot of its comment in the README.
+
 ## [1.0.1] - 2026-09-16
 
 ### Added

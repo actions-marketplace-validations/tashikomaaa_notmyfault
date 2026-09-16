@@ -6,27 +6,25 @@
 
 [![CI](https://github.com/tashikomaaa/notmyfault/actions/workflows/ci.yml/badge.svg)](https://github.com/tashikomaaa/notmyfault/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/tashikomaaa/notmyfault?sort=semver)](https://github.com/tashikomaaa/notmyfault/releases)
+[![GitHub Marketplace](https://img.shields.io/badge/marketplace-notmyfault-blue?logo=github)](https://github.com/marketplace/actions/notmyfault-flaky-test-detector)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-[Getting started](docs/getting-started.md) · [Documentation](docs/README.md) · [Wiki](https://github.com/tashikomaaa/notmyfault/wiki) · [Changelog](CHANGELOG.md)
+[Getting started](docs/getting-started.md) · [Documentation](docs/README.md) · [Live demo](https://github.com/tashikomaaa/notmyfault-demo/pull/1) · [Changelog](CHANGELOG.md)
 
 </div>
 
 notmyfault is a GitHub Action that remembers how every test behaves on your default branch. When a pull request turns red, it tells you which failures are **new**, which tests are **known to be flaky** and which were **already broken** before you touched anything.
 
----
-
-### 🔴 3 tests failed, 1 looks related to this change
-
-| | Test | Why |
-|:-:|---|---|
-| 🔴 | <code>checkout › applies discount codes</code> | **New failure.** Passed the last 50 runs on `main`. |
-| ⚫ | <code>search › indexes new products</code> | **Already failing on `main`.** Failed the last 2 runs there. |
-| 🟡 | <code>payments › retries declined cards</code> | **Known flaky.** Failed 4 of the last 50 runs on `main`; passed when the same commit was re-run on 2026-09-14. |
-
-<sub>🔁 Passed only after a retry: <code>cart › merges guest cart</code> · Reported by notmyfault</sub>
-
----
+<p align="center">
+  <a href="https://github.com/tashikomaaa/notmyfault-demo/pull/1">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pr-comment-dark.png">
+      <img alt="notmyfault comment on a pull request: one new failure related to the change, one test already failing on main, one known flaky test" src="docs/assets/pr-comment-light.png" width="720">
+    </picture>
+  </a>
+  <br>
+  <sub>A real comment, on <a href="https://github.com/tashikomaaa/notmyfault-demo/pull/1">this pull request</a> of the <a href="https://github.com/tashikomaaa/notmyfault-demo">demo repository</a>.</sub>
+</p>
 
 ## Why notmyfault
 
