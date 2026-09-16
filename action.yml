@@ -32,6 +32,9 @@ inputs:
   comment:
     description: Post (and keep updated) a comment on pull requests.
     default: "true"
+  annotations:
+    description: Annotate failed tests next to their code, in pull requests and in the workflow run.
+    default: "true"
   record:
     description: Record this run in the history.
     default: "true"

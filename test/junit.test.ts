@@ -96,6 +96,40 @@ describe("parseJUnit", () => {
   });
 });
 
+describe("location hints", () => {
+  it("are collected for failed tests only", () => {
+    const results = fixture("vitest.xml");
+    expect(results.find((r) => r.outcome === "passed")!.hints).toBeUndefined();
+    expect(results.find((r) => r.outcome === "failed")!.hints).toEqual({
+      names: ["test/cart.test.ts"],
+      references: [{ file: "test/cart.test.ts", line: 14 }],
+    });
+  });
+
+  it("read the file and line attributes of the test case, or the file of its suite", () => {
+    const [withLine, fromSuite] = parseJUnit(
+      `<testsuite name="Cart" file="tests/Unit/CartTest.php">` +
+        `<testcase name="a" classname="Cart" file="tests/test_cart.py" line="12"><failure/></testcase>` +
+        `<testcase name="b" classname="Cart" line="nope"><failure/></testcase>` +
+        `</testsuite>`,
+    );
+    expect(withLine!.hints).toMatchObject({ file: "tests/test_cart.py", line: 12, names: ["Cart"] });
+    expect(fromSuite!.hints).toEqual({ file: "tests/Unit/CartTest.php", names: ["Cart"], references: [] });
+  });
+
+  it("find file:line references in the failure output", () => {
+    const jest = fixture("jest.xml").find((r) => r.outcome === "failed")!;
+    expect(jest.hints!.references).toEqual([{ file: "/app/math.test.js", line: 10 }]);
+    const pytest = fixture("pytest.xml").find((r) => r.title === "tests.test_db › test_migration")!;
+    expect(pytest.hints).toEqual({ names: ["tests.test_db", "pytest"], references: [{ file: "conftest.py", line: 8 }] });
+    const [surefire] = parseJUnit(
+      `<testcase name="pays" classname="com.acme.OrderTest"><failure message="boom">java.lang.AssertionError: boom
+	at com.acme.OrderTest.pays(OrderTest.java:42)</failure></testcase>`,
+    );
+    expect(surefire!.hints!.references).toEqual([{ file: "OrderTest.java", line: 42 }]);
+  });
+});
+
 describe("combineReports", () => {
   it("keeps the worst outcome when a test appears in several reports", () => {
     const a: TestResult[] = [

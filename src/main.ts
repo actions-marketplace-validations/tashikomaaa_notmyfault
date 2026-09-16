@@ -1,17 +1,28 @@
+import { statSync } from "node:fs";
 import { glob, readFile } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { ActionIO } from "./actions";
-import { analyze, blockingFailures, rankFlakyTests, type Verdict } from "./analyze";
+import { analyze, blockingFailures, rankFlakyTests, type Analysis, type Verdict } from "./analyze";
 import { readContext, runUrl, type RunContext } from "./context";
 import { GitStore } from "./git-store";
 import { GitHubApiError, GitHubClient } from "./github";
 import { emptyHistory, parseHistory, recordRun, serializeHistory, type History } from "./history";
 import { combineReports, parseJUnit, type TestResult } from "./junit";
-import { commentMarker, renderComment, renderSummary, type Mode, type ReportContext } from "./report";
+import { locate } from "./locate";
+import {
+  commentMarker,
+  plainExplanation,
+  renderComment,
+  renderSummary,
+  type Mode,
+  type ReportContext,
+} from "./report";
 
 const EVIDENCE_TTL_DAYS = 30;
 const RETENTION_DAYS = 90;
 const RANKING_SIZE = 10;
+/** GitHub shows 10 annotations of each level per step. */
+const MAX_ANNOTATIONS_PER_LEVEL = 10;
 const VERDICTS: readonly Verdict[] = ["new", "suspect", "broken", "flaky"];
 
 const BRANCH_README = `# notmyfault history
@@ -31,6 +42,7 @@ export interface Settings {
   trackedBranches: string[];
   key: string;
   comment: boolean;
+  annotations: boolean;
   record: boolean;
   window: number;
 }
@@ -97,6 +109,7 @@ async function evaluate(
   for (const fixed of analysis.fixed) io.info(`fixed    ${fixed.test.title}`);
   io.endGroup();
 
+  if (settings.annotations) annotate(analysis, reportContext, context.workspace, io);
   if (settings.record) await recordHistory(store, historyPath, results, context, settings, io, now);
 
   io.appendSummary(renderSummary(analysis, rankFlakyTests(history, now, EVIDENCE_TTL_DAYS, RANKING_SIZE), reportContext));
@@ -152,6 +165,7 @@ export function readSettings(io: ActionIO, context: RunContext): Settings {
     trackedBranches: splitList(io.input("track-branches", context.defaultBranch ?? "main")),
     key: sanitizeKey(io.input("key", `${context.workflow}-${context.job}`)),
     comment: io.booleanInput("comment", true),
+    annotations: io.booleanInput("annotations", true),
     record: io.booleanInput("record", true),
     window: io.integerInput("window", 50, 5),
   };
@@ -202,6 +216,21 @@ export async function findFiles(patterns: string[], workspace: string): Promise<
     }
   }
   return [...found].sort();
+}
+
+/** Annotates each failed test the report locates in the workspace, most actionable verdicts first. */
+function annotate(analysis: Analysis, context: ReportContext, workspace: string, io: ActionIO): void {
+  const isFile = (path: string) => statSync(join(workspace, path), { throwIfNoEntry: false })?.isFile() ?? false;
+  const emitted = { error: 0, notice: 0 };
+  for (const failure of analysis.failures) {
+    const level = failure.verdict === "new" || failure.verdict === "suspect" ? "error" : "notice";
+    if (emitted[level] === MAX_ANNOTATIONS_PER_LEVEL) continue;
+    const location = locate(failure.test, workspace, isFile);
+    if (!location) continue;
+    const message = [plainExplanation(failure, context), failure.test.message].filter(Boolean).join("\n");
+    io.annotation(level, message, { file: location.file, line: location.line, title: failure.test.title });
+    emitted[level]++;
+  }
 }
 
 async function loadHistory(store: GitStore, path: string, settings: Settings, io: ActionIO): Promise<History> {

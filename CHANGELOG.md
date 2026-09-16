@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- Failed tests are annotated next to their code with their verdict, when the report tells where they live: an error for new and suspect failures, a notice for flaky and already failing tests. Turn it off with `annotations: false` ([#4](https://github.com/tashikomaaa/notmyfault/issues/4)).
+
 ### Changed
 
 - A test proven flaky counts as already failing only once it fails too many runs in a row on the tracked branch to be bad luck: from 3 failures for a test that rarely fails to 10 for one failing most of the time, instead of always 3 ([#3](https://github.com/tashikomaaa/notmyfault/issues/3)).

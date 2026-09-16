@@ -270,6 +270,19 @@ describe("run", () => {
     expect(result.logs).toContain('::error::Input "mode" must be "report" or "quarantine", got "strict"');
   });
 
+  it("annotates failed tests it finds in the workspace, unless told not to", async () => {
+    writeFileSync(join(root, "workspace", "checkout.test.ts"), "");
+    for (let run = 0; run < 2; run++) await simulate({ totals: "pass" });
+
+    const pr = await simulate({ totals: "fail: expected 1 to be 2 at checkout.test.ts:7:3" }, { event: "pull_request" });
+    expect(pr.logs).toContain(
+      "::error file=checkout.test.ts,line=7,title=checkout › totals::New failure. Passed the last 2 runs on main.%0Aexpected 1 to be 2 at checkout.test.ts:7:3",
+    );
+
+    const quiet = await simulate({ totals: "fail: at checkout.test.ts:7:3" }, { event: "pull_request", inputs: { annotations: "false" } });
+    expect(quiet.logs).not.toContain("::error file=");
+  });
+
   it("keeps working when the history cannot be read", async () => {
     rmSync(join(root, "remote"), { recursive: true, force: true });
     const result = await simulate({ ok: "fail" });

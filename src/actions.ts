@@ -60,6 +60,17 @@ export class ActionIO {
     this.command("error", message);
   }
 
+  /** A workflow annotation on a file, shown in the run summary and next to the code of pull requests. */
+  annotation(level: "error" | "warning" | "notice", message: string, properties: Record<string, string | number | undefined>): void {
+    const escapeProperty = (value: string) =>
+      value.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A").replace(/:/g, "%3A").replace(/,/g, "%2C");
+    const list = Object.entries(properties)
+      .filter(([, value]) => value !== undefined)
+      .map(([key, value]) => `${key}=${escapeProperty(String(value))}`)
+      .join(",");
+    this.command(`${level} ${list}`, message);
+  }
+
   group(title: string): void {
     this.command("group", title);
   }

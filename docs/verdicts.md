@@ -1,6 +1,6 @@
 # Reading the report
 
-notmyfault reports in two places: a comment on the pull request and the job summary. Both have the same structure.
+notmyfault reports in two places: a comment on the pull request and the job summary. Both have the same structure. It also [annotates failed tests](#annotations) next to their code.
 
 ## The headline
 
@@ -97,6 +97,25 @@ A test that passes while it is failing on the tracked branch is listed as **fixe
 The rule is the one of *already failing*: 1 or more failed runs in a row on the tracked branch for a test without proof of flakiness, or a streak too long to be bad luck for a flaky one. A known flaky test passing after a few failures is not a fix, just flakiness.
 
 A fix is worth knowing about, so notmyfault comments on a pull request that fixes a test even when nothing failed.
+
+## Annotations
+
+When the report tells where a failed test lives, notmyfault annotates it with its verdict and the first line of its failure message. Annotations appear in the workflow run and, on pull requests, next to the code in the **Files changed** tab when the annotated file is part of the change.
+
+| Verdict | Annotation |
+|---|---|
+| New failure, suspect | error |
+| Already failing, known or probably flaky | notice |
+
+GitHub shows up to 10 annotations of each kind per step, and the most actionable verdicts come first.
+
+notmyfault only annotates files that exist in the repository. To find them, it looks, in order, at:
+
+1. the `file` and `line` attributes of the test case, or the `file` attribute of its suite;
+2. class and suite names that are paths, like the ones Vitest writes, or module and class names: `tests.test_api` for `tests/test_api.py`, `com.acme.OrderTest` for `src/test/java/com/acme/OrderTest.java`;
+3. `file:line` references in the failure output, which give the line of the file found above, or the first file of the repository they mention.
+
+[Test runners](test-runners.md#annotations) details what each runner provides. Set [`annotations: false`](configuration.md#annotations) to turn them off.
 
 ## Live examples
 

@@ -16,9 +16,24 @@ export interface TestResult {
   outcome: Outcome;
   /** First line of the first failure message, if any. */
   message?: string;
+  /** What the report tells about where a failed test lives, to annotate it. */
+  hints?: LocationHints;
+}
+
+export interface LocationHints {
+  /** The file and line attributes of the test case, or the file attribute of its suite. */
+  file?: string;
+  line?: number;
+  /** Class and suite names, which some runners set to the test file. */
+  names: string[];
+  /** file:line references found in the failure output, in order. */
+  references: { file: string; line: number }[];
 }
 
 const MAX_MESSAGE_LENGTH = 300;
+const MAX_REFERENCES = 20;
+// A path ending with an extension, then a line number: "test/cart.test.ts:14:25", "(OrderTest.java:42)".
+const REFERENCE = /(?:^|[\s(['"])((?:[\w@.-]+\/|\/)*[\w@-][\w@.-]*\.[a-z][a-z0-9]{0,5}):(\d+)/gi;
 
 /**
  * Parses one JUnit XML document. Repeated test cases inside the same
@@ -28,7 +43,7 @@ const MAX_MESSAGE_LENGTH = 300;
 export function parseJUnit(xml: string): TestResult[] {
   const root: TestResult[] = [];
   const groups: TestResult[][] = [root];
-  collect(parseXml(xml), "", root, groups);
+  collect(parseXml(xml), { name: "" }, root, groups);
   return combineReports(groups.map(mergeAttempts));
 }
 
@@ -54,12 +69,18 @@ function severity(outcome: Outcome): number {
   return { skipped: 0, passed: 1, flaky: 2, failed: 3 }[outcome];
 }
 
-function collect(element: XmlElement, suite: string, group: TestResult[], groups: TestResult[][]): void {
+interface Suite {
+  name: string;
+  file?: string;
+}
+
+function collect(element: XmlElement, suite: Suite, group: TestResult[], groups: TestResult[][]): void {
   for (const child of element.children) {
     if (child.name === "testsuite") {
       const suiteGroup: TestResult[] = [];
       groups.push(suiteGroup);
-      collect(child, child.attrs.name ?? suite, suiteGroup, groups);
+      const file = child.attrs.file ?? suite.file;
+      collect(child, { name: child.attrs.name ?? suite.name, ...(file ? { file } : {}) }, suiteGroup, groups);
     } else if (child.name === "testcase") {
       const result = toResult(child, suite);
       if (result) group.push(result);
@@ -69,7 +90,7 @@ function collect(element: XmlElement, suite: string, group: TestResult[], groups
   }
 }
 
-function toResult(testcase: XmlElement, suite: string): TestResult | undefined {
+function toResult(testcase: XmlElement, suite: Suite): TestResult | undefined {
   const name = normalize(testcase.attrs.name ?? "");
   if (!name) return undefined;
   const classname = normalize(testcase.attrs.classname ?? "");
@@ -101,13 +122,32 @@ function toResult(testcase: XmlElement, suite: string): TestResult | undefined {
   else outcome = "passed";
 
   const result: TestResult = {
-    id: joinDistinct([normalize(suite), classname, name]),
-    title: joinDistinct([classname || normalize(suite), name]),
+    id: joinDistinct([normalize(suite.name), classname, name]),
+    title: joinDistinct([classname || normalize(suite.name), name]),
     outcome,
   };
   const message = firstMessage(failures[0] ?? flakyAttempts[0]);
   if (message) result.message = message;
+  if (outcome === "failed") result.hints = locationHints(testcase, suite, failures);
   return result;
+}
+
+function locationHints(testcase: XmlElement, suite: Suite, failures: XmlElement[]): LocationHints {
+  const hints: LocationHints = {
+    names: [...new Set([testcase.attrs.classname ?? "", suite.name].map(normalize).filter(Boolean))],
+    references: [],
+  };
+  const file = testcase.attrs.file ?? suite.file;
+  if (file) hints.file = file;
+  const line = Number(testcase.attrs.line);
+  if (Number.isInteger(line) && line > 0) hints.line = line;
+  for (const failure of failures) {
+    for (const match of `${failure.attrs.message ?? ""}\n${failure.text}`.matchAll(REFERENCE)) {
+      if (hints.references.length === MAX_REFERENCES) return hints;
+      hints.references.push({ file: match[1]!, line: Number(match[2]) });
+    }
+  }
+  return hints;
 }
 
 /**

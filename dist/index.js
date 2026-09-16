@@ -1,6 +1,7 @@
 // src/main.ts
+import { statSync } from "node:fs";
 import { glob, readFile } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, join as join2, relative, resolve } from "node:path";
 
 // src/actions.ts
 import { appendFileSync } from "node:fs";
@@ -54,6 +55,12 @@ var ActionIO = class {
   }
   error(message) {
     this.command("error", message);
+  }
+  /** A workflow annotation on a file, shown in the run summary and next to the code of pull requests. */
+  annotation(level, message, properties) {
+    const escapeProperty = (value) => value.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A").replace(/:/g, "%3A").replace(/,/g, "%2C");
+    const list = Object.entries(properties).filter(([, value]) => value !== void 0).map(([key, value]) => `${key}=${escapeProperty(String(value))}`).join(",");
+    this.command(`${level} ${list}`, message);
   }
   group(title) {
     this.command("group", title);
@@ -691,10 +698,12 @@ function parseStartTag(input, lt, stack) {
 
 // src/junit.ts
 var MAX_MESSAGE_LENGTH = 300;
+var MAX_REFERENCES = 20;
+var REFERENCE = /(?:^|[\s(['"])((?:[\w@.-]+\/|\/)*[\w@-][\w@.-]*\.[a-z][a-z0-9]{0,5}):(\d+)/gi;
 function parseJUnit(xml) {
   const root = [];
   const groups = [root];
-  collect(parseXml(xml), "", root, groups);
+  collect(parseXml(xml), { name: "" }, root, groups);
   return combineReports(groups.map(mergeAttempts));
 }
 function combineReports(reports) {
@@ -717,7 +726,8 @@ function collect(element, suite, group, groups) {
     if (child.name === "testsuite") {
       const suiteGroup = [];
       groups.push(suiteGroup);
-      collect(child, child.attrs.name ?? suite, suiteGroup, groups);
+      const file = child.attrs.file ?? suite.file;
+      collect(child, { name: child.attrs.name ?? suite.name, ...file ? { file } : {} }, suiteGroup, groups);
     } else if (child.name === "testcase") {
       const result = toResult(child, suite);
       if (result) group.push(result);
@@ -755,13 +765,32 @@ function toResult(testcase, suite) {
   else if (flakyAttempts.length > 0) outcome = "flaky";
   else outcome = "passed";
   const result = {
-    id: joinDistinct([normalize(suite), classname, name]),
-    title: joinDistinct([classname || normalize(suite), name]),
+    id: joinDistinct([normalize(suite.name), classname, name]),
+    title: joinDistinct([classname || normalize(suite.name), name]),
     outcome
   };
   const message = firstMessage(failures[0] ?? flakyAttempts[0]);
   if (message) result.message = message;
+  if (outcome === "failed") result.hints = locationHints(testcase, suite, failures);
   return result;
+}
+function locationHints(testcase, suite, failures) {
+  const hints = {
+    names: [...new Set([testcase.attrs.classname ?? "", suite.name].map(normalize).filter(Boolean))],
+    references: []
+  };
+  const file = testcase.attrs.file ?? suite.file;
+  if (file) hints.file = file;
+  const line = Number(testcase.attrs.line);
+  if (Number.isInteger(line) && line > 0) hints.line = line;
+  for (const failure of failures) {
+    for (const match of `${failure.attrs.message ?? ""}
+${failure.text}`.matchAll(REFERENCE)) {
+      if (hints.references.length === MAX_REFERENCES) return hints;
+      hints.references.push({ file: match[1], line: Number(match[2]) });
+    }
+  }
+  return hints;
 }
 function mergeAttempts(results) {
   const byId = /* @__PURE__ */ new Map();
@@ -798,6 +827,50 @@ function joinDistinct(parts) {
     if (part && part !== kept[kept.length - 1]) kept.push(part);
   }
   return kept.join(" \u203A ");
+}
+
+// src/locate.ts
+import { posix } from "node:path";
+function locate(test, workspace, exists) {
+  const hints = test.hints;
+  if (!hints) return void 0;
+  const found = (path) => {
+    const relative2 = toRelative(path, workspace);
+    return relative2 !== void 0 && exists(relative2) ? relative2 : void 0;
+  };
+  const candidates = [...hints.file ? [hints.file] : [], ...hints.names.flatMap(fileNames)];
+  for (const candidate of candidates) {
+    const file = found(candidate);
+    if (!file) continue;
+    const line = candidate === hints.file && hints.line ? hints.line : hints.references.find((reference) => sameFile(reference.file, file, workspace))?.line;
+    return line ? { file, line } : { file };
+  }
+  for (const reference of hints.references) {
+    const file = found(reference.file);
+    if (file) return { file, line: reference.line };
+  }
+  return void 0;
+}
+function fileNames(name) {
+  if (!/^[\w$]+(\.[\w$]+)+$/.test(name)) return [name];
+  const path = name.replace(/\./g, "/");
+  return [name, `${path}.py`, `src/test/java/${path}.java`, `src/test/kotlin/${path}.kt`];
+}
+function toRelative(path, workspace) {
+  let relative2 = path.replace(/\\/g, "/");
+  if (relative2.startsWith("/")) {
+    const root = `${workspace.replace(/\\/g, "/").replace(/\/+$/, "")}/`;
+    if (!relative2.startsWith(root)) return void 0;
+    relative2 = relative2.slice(root.length);
+  }
+  relative2 = posix.normalize(relative2);
+  const parts = relative2.split("/");
+  if (relative2 === "." || parts[0] === ".." || parts.includes("node_modules") || /^[a-z]:/i.test(relative2)) return void 0;
+  return relative2;
+}
+function sameFile(reference, file, workspace) {
+  const relative2 = toRelative(reference, workspace);
+  return relative2 !== void 0 && (relative2 === file || file.endsWith(`/${relative2}`));
 }
 
 // src/report.ts
@@ -875,6 +948,9 @@ function headline(analysis) {
   const yours = analysis.failures.filter((f) => f.verdict === "new" || f.verdict === "suspect").length;
   if (yours === 0) return `${badge("passed", "\u{1F7E2}", 32)} ${plural(failed, "test")} failed, none of them look like your fault`;
   return `${badge("new", "\u{1F534}", 32)} ${plural(failed, "test")} failed, ${yours} ${yours === 1 ? "looks" : "look"} related to this change`;
+}
+function plainExplanation(failure, context) {
+  return explain(failure, context).replace(/\*\*|`/g, "");
 }
 function explain(failure, context) {
   const where = branches(context);
@@ -985,6 +1061,7 @@ function escapeHtml(value) {
 var EVIDENCE_TTL_DAYS = 30;
 var RETENTION_DAYS = 90;
 var RANKING_SIZE = 10;
+var MAX_ANNOTATIONS_PER_LEVEL = 10;
 var VERDICTS = ["new", "suspect", "broken", "flaky"];
 var BRANCH_README = `# notmyfault history
 
@@ -1041,6 +1118,7 @@ async function evaluate(results, context, settings, store, io, now) {
   for (const test of analysis.retried) io.info(`retried  ${test.title}`);
   for (const fixed of analysis.fixed) io.info(`fixed    ${fixed.test.title}`);
   io.endGroup();
+  if (settings.annotations) annotate(analysis, reportContext, context.workspace, io);
   if (settings.record) await recordHistory(store, historyPath, results, context, settings, io, now);
   io.appendSummary(renderSummary(analysis, rankFlakyTests(history, now, EVIDENCE_TTL_DAYS, RANKING_SIZE), reportContext));
   if (settings.comment && context.pullRequest) {
@@ -1088,6 +1166,7 @@ function readSettings(io, context) {
     trackedBranches: splitList(io.input("track-branches", context.defaultBranch ?? "main")),
     key: sanitizeKey(io.input("key", `${context.workflow}-${context.job}`)),
     comment: io.booleanInput("comment", true),
+    annotations: io.booleanInput("annotations", true),
     record: io.booleanInput("record", true),
     window: io.integerInput("window", 50, 5)
   };
@@ -1129,6 +1208,19 @@ async function findFiles(patterns, workspace) {
     }
   }
   return [...found].sort();
+}
+function annotate(analysis, context, workspace, io) {
+  const isFile = (path) => statSync(join2(workspace, path), { throwIfNoEntry: false })?.isFile() ?? false;
+  const emitted = { error: 0, notice: 0 };
+  for (const failure of analysis.failures) {
+    const level = failure.verdict === "new" || failure.verdict === "suspect" ? "error" : "notice";
+    if (emitted[level] === MAX_ANNOTATIONS_PER_LEVEL) continue;
+    const location = locate(failure.test, workspace, isFile);
+    if (!location) continue;
+    const message = [plainExplanation(failure, context), failure.test.message].filter(Boolean).join("\n");
+    io.annotation(level, message, { file: location.file, line: location.line, title: failure.test.title });
+    emitted[level]++;
+  }
 }
 async function loadHistory(store, path, settings, io) {
   try {

@@ -108,6 +108,11 @@ function headline(analysis: Analysis): string {
   return `${badge("new", "🔴", 32)} ${plural(failed, "test")} failed, ${yours} ${yours === 1 ? "looks" : "look"} related to this change`;
 }
 
+/** The explanation of a verdict without Markdown, for annotations. */
+export function plainExplanation(failure: FailureVerdict, context: ReportContext): string {
+  return explain(failure, context).replace(/\*\*|`/g, "");
+}
+
 function explain(failure: FailureVerdict, context: ReportContext): string {
   const where = branches(context);
   switch (failure.verdict) {

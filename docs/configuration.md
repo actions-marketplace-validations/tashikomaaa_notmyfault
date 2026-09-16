@@ -20,6 +20,7 @@
 | [`track-branches`](#track-branches) | the default branch | Branches whose runs build the history |
 | [`key`](#key) | `<workflow>-<job>` | Name of the test suite in the history |
 | [`comment`](#comment) | `true` | Comment on pull requests |
+| [`annotations`](#annotations) | `true` | Annotate failed tests next to their code |
 | [`record`](#record) | `true` | Record the run in the history |
 | [`window`](#window) | `50` | Runs remembered per test |
 
@@ -71,7 +72,11 @@ Set it when one job runs several suites, or when matrix jobs run the same tests 
 
 ### `comment`
 
-When `true`, notmyfault comments on pull requests. A comment is created only when a test failed or needed a retry. Once it exists, it is updated on every run, including when everything passes again. Set `comment: false` to rely on the job summary only.
+When `true`, notmyfault comments on pull requests. A comment is created only when a test failed, needed a retry or was fixed. Once it exists, it is updated on every run, including when everything passes again. Set `comment: false` to rely on the job summary only.
+
+### `annotations`
+
+When `true`, each failed test the report lets notmyfault find in the repository gets an annotation with its verdict: an error for new and suspect failures, a notice for flaky and already failing tests. Annotations appear in the workflow run and, on pull requests, next to the code in the Files changed tab. See [Annotations](verdicts.md#annotations). Set `annotations: false` if your test runner already annotates failures and you prefer fewer of them.
 
 ### `record`
 

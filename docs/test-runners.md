@@ -170,6 +170,20 @@ Retries within a run are the fastest way for notmyfault to prove a test flaky. I
 
 Runners that only report the final outcome of a retried test hide the retry from notmyfault. Flakiness is still detected through re-runs of the same commit and through the history.
 
+## Annotations
+
+notmyfault [annotates failed tests](verdicts.md#annotations) when it can find their file in the repository. What it finds depends on the report:
+
+| Runner | File | Line |
+|---|---|---|
+| Vitest | From the class name, the test file path | From the failure output |
+| Jest | From paths of the repository in the stack trace | From the stack trace |
+| Playwright | From the suite name, when `testDir` is the repository root | From the failure output |
+| pytest | From the module name, or the `file` attribute with `-o junit_family=xunit1` | With `-o junit_family=xunit1` |
+| Maven Surefire and Gradle | From the class name, under `src/test/java` or `src/test/kotlin` at the repository root | From the stack trace |
+| Go, cargo-nextest | Usually not found: reports give package or crate names, and file names relative to the package | |
+| Others | From `file` attributes, or paths of the repository in the failure output | From `line` attributes or the failure output |
+
 ## Tips for stable test names
 
 notmyfault follows each test by its name: the suite, the class name and the test name. See [How it works](how-it-works.md#test-identity).
