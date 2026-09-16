@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-16
+
 ### Added
 
 - The `suites` input reports several test suites in one step and one pull request comment, each with its own history: suites of one job, or the same tests run in several environments ([#5](https://github.com/tashikomaaa/notmyfault/issues/5)).
@@ -61,7 +63,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - Pull request comment kept up to date, job summary with the most unreliable tests, and step outputs.
 - Quarantine mode, so that known flaky tests stop blocking merges.
 
-[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/tashikomaaa/notmyfault/compare/v1.0.0...v1.0.1
