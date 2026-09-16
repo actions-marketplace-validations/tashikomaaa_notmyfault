@@ -84,6 +84,10 @@ When rules 1 to 5 match but the test fails with an error never seen on the track
 
 The comment includes the first line of the failure message of up to 10 failed tests, truncated to 300 characters. The full output stays in your test logs.
 
+## Tests quarantined by hand
+
+A failure of a test listed in [`quarantine`](configuration.md#quarantine) keeps its verdict, followed by *Quarantined by hand until 2026-10-01: PayPal sandbox outage*. It never blocks in quarantine mode, and the quarantine line of the report counts it.
+
 ## Tests that passed only after a retry
 
 A test that failed and then passed within the same run did not fail the build, but it is still worth knowing about. Such tests are listed at the bottom of the comment, and each occurrence is recorded as proof of flakiness.

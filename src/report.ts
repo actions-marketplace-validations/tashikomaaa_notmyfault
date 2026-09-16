@@ -6,6 +6,8 @@ export type Mode = "report" | "quarantine";
 export interface ReportContext {
   /** Identifies the pull request comment. */
   key: string;
+  /** Failures quarantined by hand, which never block. */
+  quarantined?: number;
   trackedBranches: string[];
   /** Tracked-branch runs recorded before this one. */
   historyRuns: number;
@@ -111,7 +113,9 @@ function renderBody(suites: SuiteReport[], context: ReportContext): string[] {
   }
 
   if (context.mode === "quarantine" && all.failures.length > 0) {
-    const tolerated = [...context.tolerated].map((v) => `\`${v}\``).join(", ") || "nothing";
+    const verdicts = [...context.tolerated].map((v) => `\`${v}\``).join(", ") || "nothing";
+    const byHand = context.quarantined ? `, and ${plural(context.quarantined, "failure")} quarantined by hand` : "";
+    const tolerated = `${verdicts}${byHand}`;
     lines.push(
       context.blocking === 0
         ? `🛡️ **Quarantine:** every failure is tolerated (${tolerated}), so this check passes.`
@@ -152,7 +156,8 @@ function renderSuite(analysis: Analysis, context: ReportContext): string[] {
     for (const failure of analysis.failures.slice(0, MAX_ROWS)) {
       // In a column of its own, GitHub shrinks the badge to a dot: it sits next to the explanation instead.
       const icon = badge(failure.verdict, EMOJI[failure.verdict], 24);
-      lines.push(`| ${code(failure.test.title)} | ${icon} ${explain(failure, context)} |`);
+      const byHand = failure.quarantined ? ` ${quarantineNote(failure.quarantined)}` : "";
+      lines.push(`| ${code(failure.test.title)} | ${icon} ${explain(failure, context)}${byHand} |`);
     }
     if (analysis.failures.length > MAX_ROWS) {
       lines.push(`| _…and ${analysis.failures.length - MAX_ROWS} more_ | |`);
@@ -176,6 +181,13 @@ function headline(analysis: Analysis): string {
   const yours = analysis.failures.filter((f) => f.verdict === "new" || f.verdict === "suspect").length;
   if (yours === 0) return `${badge("passed", "🟢", 32)} ${plural(failed, "test")} failed, none of them look like your fault`;
   return `${badge("new", "🔴", 32)} ${plural(failed, "test")} failed, ${yours} ${yours === 1 ? "looks" : "look"} related to this change`;
+}
+
+/** Why a failure does not block, for tests quarantined by hand. */
+export function quarantineNote(quarantined: { until: string; reason?: string }, markdown = true): string {
+  const reason = quarantined.reason ? `: ${markdown ? escapeHtml(quarantined.reason) : quarantined.reason}` : "";
+  const note = `Quarantined by hand until ${quarantined.until}${reason}.`;
+  return markdown ? `_${note}_` : note;
 }
 
 /** The explanation of a verdict without Markdown, for annotations. */

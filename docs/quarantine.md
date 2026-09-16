@@ -37,6 +37,23 @@ If branch protection requires this job's check, the requirement now means "no fa
 
 Tolerating `new` defeats the purpose and is never a good idea.
 
+## Quarantine tests by hand
+
+Sometimes you know a test is unreliable before notmyfault can prove it: a new test, a repository that just adopted notmyfault, a third-party sandbox having an outage. List it in [`quarantine`](configuration.md#quarantine), with the last day it should be tolerated:
+
+```yaml
+      - uses: tashikomaaa/notmyfault@v1
+        with:
+          junit: reports/**/*.xml
+          mode: quarantine
+          quarantine: |
+            2026-10-01 e2e › checkout › pays with PayPal # PayPal sandbox outage
+```
+
+Until that day, its failures keep their verdict, are marked *quarantined by hand until 2026-10-01: PayPal sandbox outage* in the report, and never block. After that day, notmyfault warns on every run so that the entry does not outlive its reason: remove it, or push the date back.
+
+Unlike skipping the test, it keeps running, so the history keeps learning, and it comes back on its own.
+
 ## Safety nets
 
 Quarantine mode is built to fail closed:

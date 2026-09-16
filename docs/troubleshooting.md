@@ -29,6 +29,10 @@ No file matched the `junit` patterns, or the patterns of one of the `suites`, wh
 
 The files exist, but none of them contains a `<testcase>` element. The pattern may match unrelated XML files, or the test runner may have crashed before writing results. Narrow the pattern and open the file to check its content.
 
+### `Input "quarantine" expects "YYYY-MM-DD test name # reason" per line, got "…"`
+
+A line of [`quarantine`](configuration.md#quarantine) does not start with a valid date followed by a test name. Dates are written `2026-10-01`.
+
 ### `N failing test(s) are not tolerated in quarantine mode: …`
 
 Quarantine mode worked as intended: these failures are not covered by `tolerate`. The pull request comment and the job summary explain each verdict. See [Reading the report](verdicts.md).
@@ -92,6 +96,10 @@ Add `pull-requests: write` to the job permissions, or set `comment: false`.
 ### `Could not comment on the pull request. Tokens are read-only on pull requests from forks; the job summary has the full report.`
 
 Expected for pull requests from forks. See [Pull requests from forks](security.md#pull-requests-from-forks).
+
+### `The quarantine of "…" expired on …: remove it, or push the date back if the test is still unreliable.`
+
+A [`quarantine`](configuration.md#quarantine) entry is past its date and no longer applies: failures of that test block again. Remove the line once the test is fixed, or set a later date.
 
 ### `Skipping <file>: …`
 

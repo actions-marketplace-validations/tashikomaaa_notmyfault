@@ -407,6 +407,25 @@ describe("run", () => {
     expect(result.logs).toContain('::warning::Could not update flaky test issues. Does the job have "issues: write" permission?');
   });
 
+  it("never blocks on tests quarantined by hand, until their date", async () => {
+    await simulate({ totals: "pass", pays: "pass" });
+    const quarantine = "2099-01-01 checkout › totals # sandbox outage\n2020-01-01 checkout › pays";
+    const pr = await simulate(
+      { totals: "fail", pays: "fail" },
+      { event: "pull_request", inputs: { mode: "quarantine", quarantine } },
+    );
+    expect(pr.code).toBe(1);
+    expect(pr.outputs).toMatchObject({ failed: "2", "new-failures": "2", quarantined: "1", blocking: "1" });
+    expect(pr.logs).toContain('::warning::The quarantine of "checkout › pays" expired on 2020-01-01');
+    expect(pr.logs).toContain("new      checkout › totals (quarantined until 2099-01-01)");
+    expect(pr.logs).toContain("::error::1 failing test(s) are not tolerated in quarantine mode: checkout › pays");
+    expect(api.comments[0]!.body).toContain("_Quarantined by hand until 2099-01-01: sandbox outage._");
+
+    const invalid = await simulate({ totals: "pass" }, { inputs: { quarantine: "soon checkout › totals" } });
+    expect(invalid.code).toBe(1);
+    expect(invalid.logs).toContain('::error::Input "quarantine" expects "YYYY-MM-DD test name # reason" per line');
+  });
+
   it("keeps working when the history cannot be read", async () => {
     rmSync(join(root, "remote"), { recursive: true, force: true });
     const result = await simulate({ ok: "fail" });

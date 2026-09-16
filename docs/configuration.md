@@ -16,6 +16,7 @@
 | [`suites`](#suites) | none | Several suites, each with its own history, in one comment |
 | [`mode`](#mode) | `report` | `report` or `quarantine` |
 | [`tolerate`](#tolerate) | `flaky` | Verdicts that do not fail the step in quarantine mode |
+| [`quarantine`](#quarantine) | none | Tests quarantined by hand, until a date |
 | [`token`](#token) | `${{ github.token }}` | Token used to store the history and comment |
 | [`history-branch`](#history-branch) | `notmyfault-history` | Branch holding the history |
 | [`track-branches`](#track-branches) | the default branch | Branches whose runs build the history |
@@ -69,6 +70,22 @@ Comma-separated verdicts that do not fail the step in quarantine mode: any of `n
 |:---:|:---:|:---:|:---:|
 | `new` | `suspect` | `broken` | `flaky` |
 | New failure | Suspect | Already failing | Known or probably flaky |
+
+### `quarantine`
+
+Tests whose failures never block, until a date. One test per line: the last day the quarantine applies, the test, then optionally `#` and a reason.
+
+```yaml
+quarantine: |
+  2026-10-01 e2e › checkout › pays with PayPal # PayPal sandbox outage
+  2026-09-30 cart › *discount*
+```
+
+- The test is matched by the title shown in the report or by its full identity, and `*` matches anything.
+- Until the end of that day, in UTC, a failure of the test keeps its verdict but is marked *quarantined by hand* in the report, never blocks in quarantine mode, and is annotated as a notice.
+- After that day, the entry no longer applies and each run warns about it.
+
+Use it when you know a test is unreliable before the history can prove it. See [Quarantine tests by hand](quarantine.md#quarantine-tests-by-hand).
 
 ### `token`
 
@@ -134,6 +151,7 @@ How many recent runs on tracked branches are remembered for each test. Minimum 5
 | `broken-failures` | Failures of tests already failing on a tracked branch |
 | `retried` | Tests that passed only after a retry |
 | `fixed` | Tests failing on a tracked branch that pass in this run |
+| `quarantined` | Failures of tests quarantined by hand |
 | `slower` | Passing tests that took much longer than usual on a tracked branch |
 | `blocking` | Failures not covered by `tolerate` |
 

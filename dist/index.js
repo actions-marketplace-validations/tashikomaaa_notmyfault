@@ -283,7 +283,7 @@ function hasNewError(history, test) {
   return known.length > 0 && test.message !== void 0 && !known.includes(errorFingerprint(test.message));
 }
 function blockingFailures(analysis, tolerated) {
-  return analysis.failures.filter((failure) => !tolerated.has(failure.verdict));
+  return analysis.failures.filter((failure) => !failure.quarantined && !tolerated.has(failure.verdict));
 }
 function rankFlakyTests(history, now, evidenceTtlDays, limit) {
   const ranked = [];
@@ -601,7 +601,9 @@ function renderBody(suites, context) {
     lines.push(...renderSuite(suite.analysis, context));
   }
   if (context.mode === "quarantine" && all.failures.length > 0) {
-    const tolerated = [...context.tolerated].map((v) => `\`${v}\``).join(", ") || "nothing";
+    const verdicts = [...context.tolerated].map((v) => `\`${v}\``).join(", ") || "nothing";
+    const byHand = context.quarantined ? `, and ${plural(context.quarantined, "failure")} quarantined by hand` : "";
+    const tolerated = `${verdicts}${byHand}`;
     lines.push(
       context.blocking === 0 ? `\u{1F6E1}\uFE0F **Quarantine:** every failure is tolerated (${tolerated}), so this check passes.` : `\u274C **Quarantine:** ${plural(context.blocking, "failure")} not tolerated (${tolerated}), so this check fails.`,
       ""
@@ -635,7 +637,8 @@ function renderSuite(analysis, context) {
     lines.push("| Test | Why |", "|---|---|");
     for (const failure of analysis.failures.slice(0, MAX_ROWS)) {
       const icon = badge(failure.verdict, EMOJI[failure.verdict], 24);
-      lines.push(`| ${code(failure.test.title)} | ${icon} ${explain(failure, context)} |`);
+      const byHand = failure.quarantined ? ` ${quarantineNote(failure.quarantined)}` : "";
+      lines.push(`| ${code(failure.test.title)} | ${icon} ${explain(failure, context)}${byHand} |`);
     }
     if (analysis.failures.length > MAX_ROWS) {
       lines.push(`| _\u2026and ${analysis.failures.length - MAX_ROWS} more_ | |`);
@@ -657,6 +660,11 @@ function headline(analysis) {
   const yours = analysis.failures.filter((f) => f.verdict === "new" || f.verdict === "suspect").length;
   if (yours === 0) return `${badge("passed", "\u{1F7E2}", 32)} ${plural(failed, "test")} failed, none of them look like your fault`;
   return `${badge("new", "\u{1F534}", 32)} ${plural(failed, "test")} failed, ${yours} ${yours === 1 ? "looks" : "look"} related to this change`;
+}
+function quarantineNote(quarantined, markdown = true) {
+  const reason = quarantined.reason ? `: ${markdown ? escapeHtml(quarantined.reason) : quarantined.reason}` : "";
+  const note = `Quarantined by hand until ${quarantined.until}${reason}.`;
+  return markdown ? `_${note}_` : note;
 }
 function plainExplanation(failure, context) {
   return explain(failure, context).replace(/\*\*|`/g, "");
@@ -903,6 +911,42 @@ function plural2(n, word) {
 }
 function times2(n) {
   return n === 1 ? "once" : n === 2 ? "twice" : `${n} times`;
+}
+
+// src/quarantine.ts
+var LINE = /^(\d{4}-\d{2}-\d{2})\s+(.+?)(?:\s+#\s+(.*))?$/;
+function parseQuarantine(input) {
+  const entries = [];
+  for (const line of input.split("\n").map((part) => part.trim()).filter(Boolean)) {
+    const match = LINE.exec(line);
+    const until = match?.[1];
+    if (!match || !until || Number.isNaN(Date.parse(`${until}T00:00:00Z`)) || (/* @__PURE__ */ new Date(`${until}T00:00:00Z`)).toISOString().slice(0, 10) !== until) {
+      throw new Error(`Input "quarantine" expects "YYYY-MM-DD test name # reason" per line, got "${line}"`);
+    }
+    const entry = { pattern: match[2].trim(), until };
+    if (match[3]?.trim()) entry.reason = match[3].trim();
+    entries.push(entry);
+  }
+  return entries;
+}
+function isActive(entry, now) {
+  return now.toISOString().slice(0, 10) <= entry.until;
+}
+function matches(entry, test) {
+  const escaped = entry.pattern.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const pattern = new RegExp(`^${escaped.join(".*")}$`);
+  return pattern.test(test.title) || pattern.test(test.id);
+}
+function applyQuarantine(analysis, entries, now) {
+  const active = entries.filter((entry) => isActive(entry, now));
+  let quarantined = 0;
+  for (const failure of analysis.failures) {
+    const entry = active.find((candidate) => matches(candidate, failure.test));
+    if (!entry) continue;
+    failure.quarantined = entry.reason ? { until: entry.until, reason: entry.reason } : { until: entry.until };
+    quarantined++;
+  }
+  return quarantined;
 }
 
 // src/github.ts
@@ -1359,6 +1403,12 @@ async function evaluate(loaded, context, settings, store, io, now) {
     suites.push({ ...suite, history, analysis: analyze(suite.results, history, now, EVIDENCE_TTL_DAYS) });
   }
   const named = suites.length > 1;
+  for (const entry of settings.quarantine.filter((candidate) => !isActive(candidate, now))) {
+    io.warning(
+      `The quarantine of "${entry.pattern}" expired on ${entry.until}: remove it, or push the date back if the test is still unreliable.`
+    );
+  }
+  const quarantined = suites.reduce((total, suite) => total + applyQuarantine(suite.analysis, settings.quarantine, now), 0);
   const sum = (count3) => suites.reduce((total, suite) => total + count3(suite.analysis), 0);
   const failures = suites.flatMap((suite) => suite.analysis.failures);
   const blocking = suites.flatMap((suite) => blockingFailures(suite.analysis, settings.tolerated));
@@ -1368,7 +1418,8 @@ async function evaluate(loaded, context, settings, store, io, now) {
     historyRuns: suites[0].history.runs,
     mode: settings.mode,
     tolerated: settings.tolerated,
-    blocking: blocking.length
+    blocking: blocking.length,
+    quarantined
   };
   const url = runUrl(context);
   if (url) reportContext.runUrl = url;
@@ -1378,7 +1429,8 @@ async function evaluate(loaded, context, settings, store, io, now) {
     );
     for (const failure of analysis.failures) {
       const reason = failure.usually ? ` (${failure.usually} on ${settings.trackedBranches.join(", ")}, but with a new error)` : "";
-      io.info(`${failure.verdict.padEnd(8)} ${failure.test.title}${reason}`);
+      const byHand = failure.quarantined ? ` (quarantined until ${failure.quarantined.until})` : "";
+      io.info(`${failure.verdict.padEnd(8)} ${failure.test.title}${reason}${byHand}`);
     }
     for (const test of analysis.retried) io.info(`retried  ${test.title}`);
     for (const fixed of analysis.fixed) io.info(`fixed    ${fixed.test.title}`);
@@ -1413,6 +1465,7 @@ async function evaluate(loaded, context, settings, store, io, now) {
   io.setOutput("retried", sum((a) => a.retried.length));
   io.setOutput("fixed", sum((a) => a.fixed.length));
   io.setOutput("slower", sum((a) => a.slower.length));
+  io.setOutput("quarantined", quarantined);
   io.setOutput("blocking", blocking.length);
   if (settings.mode === "quarantine" && blocking.length > 0) {
     const names = blocking.slice(0, 5).map((f) => f.test.title).join(", ");
@@ -1434,12 +1487,14 @@ function readSettings(io, context) {
     }
     tolerated.add(value);
   }
+  const quarantine = parseQuarantine(io.input("quarantine"));
   const token = io.input("token");
   if (!token) throw new Error('Input "token" is empty. Pass `token: ${{ github.token }}`.');
   return {
     suites,
     mode,
     tolerated,
+    quarantine,
     token,
     branch: io.input("history-branch", "notmyfault-history"),
     trackedBranches: splitList(io.input("track-branches", context.defaultBranch ?? "main")),
@@ -1517,11 +1572,12 @@ function annotate(failures, context, workspace, io) {
   const isFile = (path) => statSync(join2(workspace, path), { throwIfNoEntry: false })?.isFile() ?? false;
   const emitted = { error: 0, notice: 0 };
   for (const failure of failures) {
-    const level = failure.verdict === "new" || failure.verdict === "suspect" ? "error" : "notice";
+    const level = (failure.verdict === "new" || failure.verdict === "suspect") && !failure.quarantined ? "error" : "notice";
     if (emitted[level] === MAX_ANNOTATIONS_PER_LEVEL) continue;
     const location = locate(failure.test, workspace, isFile);
     if (!location) continue;
-    const message = [plainExplanation(failure, context), failure.test.message].filter(Boolean).join("\n");
+    const explanation = [plainExplanation(failure, context), failure.quarantined && quarantineNote(failure.quarantined, false)];
+    const message = [explanation.filter(Boolean).join(" "), failure.test.message].filter(Boolean).join("\n");
     io.annotation(level, message, { file: location.file, line: location.line, title: failure.test.title });
     emitted[level]++;
   }

@@ -17,6 +17,9 @@ inputs:
       `report` only reports and never fails the step. `quarantine` fails the step when a failure is not
       tolerated: combine it with `continue-on-error: true` on your test step so known flaky tests stop blocking merges.
     default: report
+  quarantine:
+    description: Tests quarantined by hand, one "YYYY-MM-DD test name # reason" per line. Their failures never block, until the end of that day.
+    required: false
   tolerate:
     description: Verdicts that do not fail the step in quarantine mode, comma-separated. Any of new, suspect, broken, flaky.
     default: flaky
@@ -65,6 +68,8 @@ outputs:
     description: Tests failing on a tracked branch that pass in this run.
   slower:
     description: Passing tests that took much longer than usual on a tracked branch.
+  quarantined:
+    description: Failures of tests quarantined by hand.
   blocking:
     description: Failures not covered by `tolerate`.
 

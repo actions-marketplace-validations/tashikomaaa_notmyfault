@@ -209,6 +209,14 @@ describe("renderComment", () => {
     expect([0, 999, 1000, 2450, 59_949, 60_000, 125_400].map(duration)).toEqual(["0 ms", "999 ms", "1.0 s", "2.5 s", "59.9 s", "1 min 0 s", "2 min 5 s"]);
   });
 
+  it("says which failures are quarantined by hand", () => {
+    const analysis = analyze([{ id: "pays", title: "pays", outcome: "failed" }], emptyHistory(), NOW, 30);
+    analysis.failures[0]!.quarantined = { until: "2026-10-01", reason: "PayPal <sandbox> outage" };
+    const body = renderComment(analysis, context({ mode: "quarantine", blocking: 0, quarantined: 1 }));
+    expect(body).toContain("_Quarantined by hand until 2026-10-01: PayPal &lt;sandbox&gt; outage._ |");
+    expect(body).toContain("🛡️ **Quarantine:** every failure is tolerated (`flaky`, and 1 failure quarantined by hand), so this check passes.");
+  });
+
   it("explains the quarantine decision", () => {
     const { analysis } = scenario();
     expect(renderComment(analysis, context({ mode: "quarantine", blocking: 2 }))).toContain(

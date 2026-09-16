@@ -14,6 +14,7 @@ import {
 import { readContext, runUrl, type RunContext } from "./context";
 import { GitStore } from "./git-store";
 import { FLAKY_LABEL, planFlakyIssues } from "./flaky-issues";
+import { applyQuarantine, isActive, parseQuarantine, type QuarantineEntry } from "./quarantine";
 import { GitHubApiError, GitHubClient } from "./github";
 import { emptyHistory, parseHistory, recordRun, serializeHistory, type History } from "./history";
 import { combineReports, parseJUnit, type TestResult } from "./junit";
@@ -22,6 +23,7 @@ import {
   commentMarker,
   duration,
   plainExplanation,
+  quarantineNote,
   renderSuitesComment,
   renderSuitesSummary,
   type Mode,
@@ -54,6 +56,8 @@ export interface Settings {
   suites: SuiteSettings[];
   mode: Mode;
   tolerated: Set<Verdict>;
+  /** Tests quarantined by hand, expired entries included. */
+  quarantine: QuarantineEntry[];
   token: string;
   branch: string;
   trackedBranches: string[];
@@ -120,6 +124,12 @@ async function evaluate(
     suites.push({ ...suite, history, analysis: analyze(suite.results, history, now, EVIDENCE_TTL_DAYS) });
   }
   const named = suites.length > 1;
+  for (const entry of settings.quarantine.filter((candidate) => !isActive(candidate, now))) {
+    io.warning(
+      `The quarantine of "${entry.pattern}" expired on ${entry.until}: remove it, or push the date back if the test is still unreliable.`,
+    );
+  }
+  const quarantined = suites.reduce((total, suite) => total + applyQuarantine(suite.analysis, settings.quarantine, now), 0);
   const sum = (count: (analysis: Analysis) => number) => suites.reduce((total, suite) => total + count(suite.analysis), 0);
   const failures = suites.flatMap((suite) => suite.analysis.failures);
   const blocking = suites.flatMap((suite) => blockingFailures(suite.analysis, settings.tolerated));
@@ -130,6 +140,7 @@ async function evaluate(
     mode: settings.mode,
     tolerated: settings.tolerated,
     blocking: blocking.length,
+    quarantined,
   };
   const url = runUrl(context);
   if (url) reportContext.runUrl = url;
@@ -140,7 +151,8 @@ async function evaluate(
     );
     for (const failure of analysis.failures) {
       const reason = failure.usually ? ` (${failure.usually} on ${settings.trackedBranches.join(", ")}, but with a new error)` : "";
-      io.info(`${failure.verdict.padEnd(8)} ${failure.test.title}${reason}`);
+      const byHand = failure.quarantined ? ` (quarantined until ${failure.quarantined.until})` : "";
+      io.info(`${failure.verdict.padEnd(8)} ${failure.test.title}${reason}${byHand}`);
     }
     for (const test of analysis.retried) io.info(`retried  ${test.title}`);
     for (const fixed of analysis.fixed) io.info(`fixed    ${fixed.test.title}`);
@@ -178,6 +190,7 @@ async function evaluate(
   io.setOutput("retried", sum((a) => a.retried.length));
   io.setOutput("fixed", sum((a) => a.fixed.length));
   io.setOutput("slower", sum((a) => a.slower.length));
+  io.setOutput("quarantined", quarantined);
   io.setOutput("blocking", blocking.length);
 
   if (settings.mode === "quarantine" && blocking.length > 0) {
@@ -203,6 +216,7 @@ export function readSettings(io: ActionIO, context: RunContext): Settings {
     }
     tolerated.add(value as Verdict);
   }
+  const quarantine = parseQuarantine(io.input("quarantine"));
 
   const token = io.input("token");
   if (!token) throw new Error('Input "token" is empty. Pass `token: ${{ github.token }}`.');
@@ -211,6 +225,7 @@ export function readSettings(io: ActionIO, context: RunContext): Settings {
     suites,
     mode,
     tolerated,
+    quarantine,
     token,
     branch: io.input("history-branch", "notmyfault-history"),
     trackedBranches: splitList(io.input("track-branches", context.defaultBranch ?? "main")),
@@ -306,11 +321,12 @@ function annotate(failures: FailureVerdict[], context: ReportContext, workspace:
   const isFile = (path: string) => statSync(join(workspace, path), { throwIfNoEntry: false })?.isFile() ?? false;
   const emitted = { error: 0, notice: 0 };
   for (const failure of failures) {
-    const level = failure.verdict === "new" || failure.verdict === "suspect" ? "error" : "notice";
+    const level = (failure.verdict === "new" || failure.verdict === "suspect") && !failure.quarantined ? "error" : "notice";
     if (emitted[level] === MAX_ANNOTATIONS_PER_LEVEL) continue;
     const location = locate(failure.test, workspace, isFile);
     if (!location) continue;
-    const message = [plainExplanation(failure, context), failure.test.message].filter(Boolean).join("\n");
+    const explanation = [plainExplanation(failure, context), failure.quarantined && quarantineNote(failure.quarantined, false)];
+    const message = [explanation.filter(Boolean).join(" "), failure.test.message].filter(Boolean).join("\n");
     io.annotation(level, message, { file: location.file, line: location.line, title: failure.test.title });
     emitted[level]++;
   }

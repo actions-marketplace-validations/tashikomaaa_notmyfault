@@ -36,6 +36,8 @@ export interface FailureVerdict extends TestStats {
   verdict: Verdict;
   /** The verdict the history gives, when the failure is new only because its error was never seen on the tracked branch. */
   usually?: Exclude<Verdict, "new">;
+  /** Set when the test is quarantined by hand: its failure never blocks. */
+  quarantined?: { until: string; reason?: string };
 }
 
 export interface FixedTest extends TestStats {
@@ -190,7 +192,7 @@ function hasNewError(history: TestHistory | undefined, test: TestResult): boolea
 
 /** Failures that are not covered by the tolerated verdicts. */
 export function blockingFailures(analysis: Analysis, tolerated: ReadonlySet<Verdict>): FailureVerdict[] {
-  return analysis.failures.filter((failure) => !tolerated.has(failure.verdict));
+  return analysis.failures.filter((failure) => !failure.quarantined && !tolerated.has(failure.verdict));
 }
 
 /** Most unreliable tests in the history, for the job summary. */
