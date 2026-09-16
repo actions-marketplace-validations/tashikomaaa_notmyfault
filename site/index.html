@@ -94,7 +94,7 @@
             <img src="assets/verdict-new.png" alt="" width="244" height="244" loading="lazy">
             <div>
               <h3>New failure</h3>
-              <p>Nothing in the history explains it.</p>
+              <p>Nothing in the history explains it, or it failed with an error never seen on main, even if the test is known to be flaky.</p>
               <p class="todo"><strong>What to do:</strong> assume your change caused it and reproduce it locally.</p>
             </div>
           </article>
@@ -110,7 +110,7 @@
             <img src="assets/verdict-broken.png" alt="" width="245" height="245" loading="lazy">
             <div>
               <h3>Already failing</h3>
-              <p>The latest runs on main failed too, so the problem predates your pull request.</p>
+              <p>The latest runs on main failed too, so the problem predates your pull request. For a flaky test, it takes more failures in a row than bad luck explains.</p>
               <p class="todo"><strong>What to do:</strong> nothing in your pull request. Update your branch once main is fixed.</p>
             </div>
           </article>
@@ -149,7 +149,7 @@
             </li>
             <li>
               <h3>The comment explains every failure</h3>
-              <p>One comment per pull request, updated on every push. The job summary also ranks your least reliable tests.</p>
+              <p>One comment per pull request, updated on every push, and an annotation next to the code of each failed test. The job summary also ranks your least reliable tests.</p>
             </li>
           </ol>
         </div>
@@ -173,6 +173,7 @@
             <li><code>if: ${{ !cancelled() }}</code> runs notmyfault when the tests fail, which is exactly when you need it.</li>
             <li>Runs on pushes to main build the history. Pull requests read it.</li>
             <li>The permissions let notmyfault store its history and comment.</li>
+            <li>Several suites, or the same tests on several systems? List them in <code>suites</code>: one comment, and a history for each.</li>
           </ul>
           <p class="more"><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/getting-started.md">Follow the getting started guide</a></p>
         </div>

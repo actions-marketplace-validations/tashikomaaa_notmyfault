@@ -33,6 +33,7 @@ notmyfault is a GitHub Action that remembers how every test behaves on your defa
 </p>
 
 - **Stop re-running builds blindly.** Every failure comes with a verdict and the evidence behind it.
+- **See it next to the code.** Failed tests are annotated with their verdict in the Files changed tab.
 - **Stop flaky tests from blocking merges.** [Quarantine mode](docs/quarantine.md) fails the check only for failures that look real.
 - **Nothing to host.** No server, no account, no SaaS: the history lives on a branch of your own repository.
 - **Nothing to audit but this repository.** Zero runtime dependencies, one bundled file, rebuilt and verified by CI.
