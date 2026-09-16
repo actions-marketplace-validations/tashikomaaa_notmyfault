@@ -1,0 +1,159 @@
+# How it works
+
+This page describes exactly what notmyfault does, for those who want to trust it before relying on it. All numbers below are fixed in the code.
+
+```
+JUnit XML reports ──► parse ──► compare with the history ──► verdicts ──► comment, summary, outputs
+                                        ▲                                      │
+                                        └──── notmyfault-history branch ◄──────┘ record this run
+```
+
+## Reading reports
+
+notmyfault expands the `junit` globs in the workspace, skipping `node_modules` and `.git`, and parses every matched file with a small built-in XML parser that tolerates the imperfect XML some reporters write. Each `<testcase>` gets an outcome:
+
+| The `<testcase>` contains | Outcome |
+|---|---|
+| `<failure>` or `<error>` | failed |
+| `<skipped>` | skipped (ignored from then on) |
+| `<flakyFailure>` or `<flakyError>`, and no failure | passed after a retry |
+| nothing of the above | passed |
+
+When the same test appears more than once:
+
+- **Inside one `<testsuite>`**, the occurrences are attempts of the same test, in order. A failure followed by a pass means the test passed after a retry. A pass followed by a failure means it failed.
+- **In different suites or files**, the occurrences come from different environments, browsers or shards. The worst outcome wins: failed, then passed after a retry, then passed, then skipped.
+
+A file without any test case is not an error in itself, but if no test case is found at all, the step fails.
+
+## Test identity
+
+A test is identified by its suite name, class name and test name, joined with ` › `. Empty parts and parts equal to the previous one are dropped, and whitespace is collapsed.
+
+| Runner | `<testsuite name>` | `<testcase classname>` | `<testcase name>` | Identity |
+|---|---|---|---|---|
+| Vitest | `test/cart.test.ts` | `test/cart.test.ts` | `cart > empties` | `test/cart.test.ts › cart > empties` |
+| pytest | `pytest` | `tests.test_api` | `test_delete_user` | `pytest › tests.test_api › test_delete_user` |
+| Go | `github.com/acme/app/cache` | `github.com/acme/app/cache` | `TestExpire` | `github.com/acme/app/cache › TestExpire` |
+
+Reports show a shorter title, the class name (or suite name) and the test name.
+
+Because identity is based on names, renaming a test or moving it to another suite starts a new history, and tests with names that change on every run cannot be followed.
+
+## The history
+
+### Where it lives
+
+The history is stored in your repository, on the branch named by `history-branch` (default `notmyfault-history`):
+
+```
+notmyfault-history
+├── README.md            explains what the branch is
+└── history/
+    ├── ci-test.json     one file per key
+    └── ci-e2e.json
+```
+
+The branch always holds **a single commit without parent**, authored by `github-actions[bot]`. Each update replaces it, so the branch never grows. Deleting the branch resets the history.
+
+### What a history file contains
+
+```json
+{
+ "version": 1,
+ "updatedAt": "2026-09-16T10:04:12.000Z",
+ "runs": 128,
+ "tests": {
+  "unit › checkout › pays": {
+   "outcomes": "pppfpppppprpppfppp",
+   "failedOn": ["3f2a1b9c0d4e", "a41c07e9b2f3"],
+   "evidence": [{ "at": "2026-09-12T08:31:02.000Z", "sha": "a41c07e9b2f3", "kind": "rerun" }],
+   "lastSeen": "2026-09-16"
+  }
+ }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `runs` | Runs recorded on tracked branches |
+| `outcomes` | One letter per run on a tracked branch, oldest first: `p` passed, `f` failed, `r` passed after a retry. Only the last `window` runs are kept (50 by default). |
+| `failedOn` | The last 20 commits the test failed on, on any branch, as 12-character SHA prefixes |
+| `evidence` | Up to 10 proofs of flakiness: `retry` (passed after a retry in the same run) or `rerun` (passed on a commit it had failed on) |
+| `lastSeen` | Last day the test was recorded |
+
+The file contains test names, outcomes, short commit SHAs and dates. It contains no failure message, log or source code.
+
+### What each run records
+
+| | Run on a tracked branch | Any other run (pull request, other branch, merge queue) |
+|---|---|---|
+| Appends the outcome of every test to `outcomes` | yes | no |
+| Adds the commit to `failedOn` for failed tests | yes | yes |
+| Records `retry` evidence for tests that passed after a retry | yes | yes |
+| Records `rerun` evidence for tests that pass on a commit listed in `failedOn` | yes | yes |
+| Creates an entry for a test that only passed | yes | no |
+
+Runs that teach nothing new do not write anything. Pull requests from forks never write, because their token is read-only.
+
+The commit is `GITHUB_SHA`. For `pull_request` events, that is the merge commit GitHub creates for the run. Re-running the workflow run keeps the same commit, which is how re-runs prove flakiness. Pushing a new commit does not.
+
+### Forgetting
+
+- Tests not seen for **90 days** are removed from the history.
+- Evidence older than **90 days** is removed, and evidence older than **30 days** is ignored when classifying.
+- Outcomes beyond the last `window` runs are dropped.
+
+## Classification
+
+Only failed tests get a verdict. notmyfault first computes, from the history read at the start of the run:
+
+- **trailing failures**: failed runs at the end of `outcomes`;
+- **isolated failures**: `f` letters with a successful run on both sides;
+- **proof**: evidence from the last 30 days, or an `r` in `outcomes`.
+
+Then the first matching rule decides:
+
+| # | Condition | Verdict |
+|---|---|---|
+| 1 | 3 or more trailing failures | already failing |
+| 2 | proof | known flaky |
+| 3 | 1 or 2 trailing failures | already failing |
+| 4 | 3 or more isolated failures | probably flaky |
+| 5 | 1 or 2 isolated failures | suspect |
+| 6 | anything else | new |
+
+Why these numbers:
+
+- **Rule 1 before rule 2.** A flaky test failing three times in a row is far more likely broken than unlucky, and excusing it would hide a real problem.
+- **3 isolated failures for "probably flaky".** A commit that breaks a test followed by a commit that fixes it produces an isolated failure too. Requiring three keeps occasional breakages from excusing a test.
+- **30 days of proof.** A fixed flaky test should stop being excused on its own.
+
+The run being analyzed is recorded **after** classification, so a failure never explains itself.
+
+## Writing safely
+
+notmyfault never touches your checkout. To read and write the history, it:
+
+1. creates a scratch repository in `RUNNER_TEMP`, ignoring your global and system git configuration;
+2. fetches only the tip of the history branch (`--depth=1`);
+3. builds the new commit directly from git objects, without a working tree;
+4. pushes with `--force-with-lease`, so the push fails if another job updated the branch in between;
+5. on conflict, starts over from the latest version and applies the run again, up to 6 attempts with a random delay.
+
+A push reported as "up to date" is treated as a conflict too: it means another job pushed an identical commit, and this run's update would otherwise be lost.
+
+The token reaches git through environment variables, never on the command line, and is masked in the logs.
+
+## Pull request comments
+
+Each comment starts with a hidden marker, `<!-- notmyfault:<key> -->`. notmyfault looks for its marker among the pull request comments and updates that comment instead of adding a new one. It creates a comment only when a test failed or passed after a retry. One key means one comment.
+
+## Limits
+
+- **Only GitHub Actions** is supported.
+- **Names are identities**: renamed tests start over, tests with dynamic names are not followed, and two test cases sharing a name inside one suite are read as attempts of the same test.
+- **Retries** are only visible when the runner reports them, see [Test runners](test-runners.md#detecting-retries).
+- **One comment per key.** Jobs sharing a key overwrite each other's comment, see [Recipes](recipes.md#sharded-tests).
+- **Tested on Linux runners.** macOS and Windows runners have `git` and should work, but are not covered by the test suite yet.
+- **GitHub Enterprise Server** should work through `GITHUB_SERVER_URL` and `GITHUB_API_URL`, provided the runner supports the `node24` runtime, but is untested.

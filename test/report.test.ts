@@ -61,6 +61,22 @@ describe("renderComment", () => {
     expect(body).toContain("<pre>timeout &lt;5s&gt; &#124; retry</pre>");
   });
 
+  it("renders test names and messages as plain text, without Markdown", () => {
+    const title = "[Approve](https://evil.example) *bold* _it_ `tick` ~~s~~ \\ ![img](x)";
+    const analysis = analyze(
+      [{ id: "t", title, outcome: "failed", message: "see [here](https://evil.example)" }],
+      emptyHistory(),
+      NOW,
+      30,
+    );
+    const body = renderComment(analysis, context());
+    expect(body).not.toMatch(/\]\(https:\/\/evil|\*bold\*|_it_|`tick`|~~s~~|!\[img/);
+    expect(body).toContain(
+      "<code>&#91;Approve&#93;&#40;https://evil.example&#41; &#42;bold&#42; &#95;it&#95; &#96;tick&#96; &#126;&#126;s&#126;&#126; &#92; &#33;&#91;img&#93;&#40;x&#41;</code>",
+    );
+    expect(body).toContain("<pre>see &#91;here&#93;&#40;https://evil.example&#41;</pre>");
+  });
+
   it("reassures when no failure looks related to the change", () => {
     const history = emptyHistory();
     history.tests.t = { outcomes: "pfpfpfp", lastSeen: "2026-09-16" };

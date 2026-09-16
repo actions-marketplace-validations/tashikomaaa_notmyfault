@@ -888,8 +888,25 @@ function capitalize(value) {
 function code(value) {
   return `<code>${escapeHtml(value)}</code>`;
 }
+var ESCAPED = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "|": "&#124;",
+  "[": "&#91;",
+  "]": "&#93;",
+  "(": "&#40;",
+  ")": "&#41;",
+  "*": "&#42;",
+  _: "&#95;",
+  "`": "&#96;",
+  "~": "&#126;",
+  "\\": "&#92;",
+  "!": "&#33;"
+};
 function escapeHtml(value) {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/\|/g, "&#124;");
+  return value.replace(/[&<>"|[\]()*_`~\\!]/g, (char) => ESCAPED[char] ?? char);
 }
 
 // src/main.ts

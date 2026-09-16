@@ -171,11 +171,27 @@ function code(value: string): string {
   return `<code>${escapeHtml(value)}</code>`;
 }
 
+// Test names and messages come from reports, so they must render as plain
+// text: no HTML, no table breakage, and no Markdown links or emphasis, which
+// GitHub still parses between inline HTML tags.
+const ESCAPED: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "|": "&#124;",
+  "[": "&#91;",
+  "]": "&#93;",
+  "(": "&#40;",
+  ")": "&#41;",
+  "*": "&#42;",
+  _: "&#95;",
+  "`": "&#96;",
+  "~": "&#126;",
+  "\\": "&#92;",
+  "!": "&#33;",
+};
+
 function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/\|/g, "&#124;");
+  return value.replace(/[&<>"|[\]()*_`~\\!]/g, (char) => ESCAPED[char] ?? char);
 }
