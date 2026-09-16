@@ -36,6 +36,7 @@ notmyfault is a GitHub Action that remembers how every test behaves on your defa
 - **Stop re-running builds blindly.** Every failure comes with a verdict and the evidence behind it.
 - **See it next to the code.** Failed tests are annotated with their verdict in the Files changed tab.
 - **Stop flaky tests from blocking merges.** [Quarantine mode](docs/quarantine.md) fails the check only for failures that look real.
+- **Get them fixed.** An [issue per flaky test](docs/configuration.md#flaky-issues), a [badge](docs/recipes.md#show-a-flaky-tests-badge), a [report you can publish](docs/recipes.md#publish-the-history-with-github-pages), and [automatic re-runs](docs/recipes.md#re-run-flaky-failures-automatically).
 - **Nothing to host.** No server, no account, no SaaS: the history lives on a branch of your own repository.
 - **Nothing to audit but this repository.** Zero runtime dependencies, one bundled file, rebuilt and verified by CI.
 - **Any test runner.** Everything that writes JUnit XML: Vitest, Jest, pytest, Go, Maven, Gradle, cargo-nextest, Playwright, PHPUnit, RSpec, .NET…

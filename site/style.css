@@ -726,6 +726,16 @@ pre code {
   margin: 3rem 0 0;
 }
 
+.facts-wide {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2.5rem 3rem;
+}
+
+.facts dt a {
+  color: inherit;
+  text-decoration-color: var(--line);
+}
+
 .facts dt {
   font-family: var(--font-display);
   font-size: 1.3rem;
