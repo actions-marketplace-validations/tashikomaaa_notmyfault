@@ -133,7 +133,7 @@ notmyfault only annotates files that exist in the repository. To find them, it l
 
 ## Live examples
 
-The [demo repository](https://github.com/tashikomaaa/notmyfault-demo) runs notmyfault in quarantine mode, tolerating `flaky` and `broken`, on open pull requests:
+The [demo repository](https://github.com/tashikomaaa/notmyfault-demo) runs notmyfault in quarantine mode, tolerating `flaky` and `broken`, on open pull requests. Its flaky payment test also has a [tracking issue](https://github.com/tashikomaaa/notmyfault-demo/issues/5), opened by `flaky-issues`.
 
 | Pull request | What the comment shows |
 |---|---|
@@ -141,6 +141,7 @@ The [demo repository](https://github.com/tashikomaaa/notmyfault-demo) runs notmy
 | [#2 Charge the reduced VAT rate on coffee beans, again](https://github.com/tashikomaaa/notmyfault-demo/pull/2) | <img alt="" src="assets/verdict-suspect.png" width="24" align="absmiddle"> A suspect failure: the test failed once on `main`, when the same change landed and was reverted. Quarantine blocks the merge. |
 | [#3 Explain how to run the tests](https://github.com/tashikomaaa/notmyfault-demo/pull/3) | <img alt="" src="assets/verdict-passed.png" width="24" align="absmiddle"> Failures, none of them related to a README change. Quarantine lets the check pass. |
 | [#4 Find products regardless of accents again](https://github.com/tashikomaaa/notmyfault-demo/pull/4) | <img alt="" src="assets/verdict-passed.png" width="24" align="absmiddle"> A fix for the test broken on `main`, listed as fixed. The flaky test failed, then passed on a re-run: all tests passed. |
+| [#6 Load search synonyms on every query](https://github.com/tashikomaaa/notmyfault-demo/pull/6) | <img alt="" src="assets/verdict-passed.png" width="24" align="absmiddle"> Tests still pass, but one is listed as slower: 1.2 s, usually 1 ms. |
 
 ## The job summary
 
