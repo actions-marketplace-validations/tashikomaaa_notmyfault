@@ -135,6 +135,53 @@ jobs:
 
 Filter them with the `flaky-test` label, or assign them in your triage routine.
 
+## Re-run flaky failures automatically
+
+Re-running the same commit is the fastest way to prove a test flaky, and it unblocks the change. When every failed test is known or probably flaky, notmyfault adds a notice titled `notmyfault: only flaky tests failed` to its step. A second workflow can watch for it and re-run the failed jobs once, on its own:
+
+```yaml
+# .github/workflows/rerun-flaky.yml
+name: Re-run flaky failures
+
+on:
+  workflow_run:
+    workflows: [CI]          # the name of the workflow running notmyfault
+    types: [completed]
+
+permissions:
+  actions: write             # re-run the failed jobs
+  checks: read               # read the notice of notmyfault
+
+jobs:
+  rerun:
+    # Only the first attempt: a run failing again is not re-run forever.
+    if: github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.run_attempt == 1
+    runs-on: ubuntu-latest
+    steps:
+      - name: Re-run when every failed job only has flaky failures
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN: ${{ github.event.workflow_run.id }}
+        run: |
+          failed=$(gh api "repos/$REPO/actions/runs/$RUN/jobs?per_page=100" --jq '.jobs[] | select(.conclusion == "failure") | .id')
+          [ -n "$failed" ] || exit 0
+          for job in $failed; do
+            if ! gh api "repos/$REPO/check-runs/$job/annotations?per_page=100" --jq '.[].title' | grep -qx "notmyfault: only flaky tests failed"; then
+              echo "Job $job did not fail only because of flaky tests: not re-running."
+              exit 0
+            fi
+          done
+          gh api -X POST "repos/$REPO/actions/runs/$RUN/rerun-failed-jobs"
+          echo "Only flaky tests failed: re-running the failed jobs."
+```
+
+- It only re-runs when **every** failed job carries the notice, so a real failure in another job of the matrix is never re-run away.
+- Tests already failing on the tracked branch do not count as flaky: re-running them would not help.
+- The re-run is attempt 2 of the same run: when the test passes, notmyfault records the proof, and the next failure of that test is recognized as known flaky.
+- The workflow only reads the run and asks GitHub to re-run it, it never checks out code, so it is safe for pull requests from forks too.
+- In quarantine mode, a run whose failures are all tolerated succeeds and is not re-run.
+
 ## Show a flaky tests badge
 
 Every update of the history also writes `badges/<key>.json` on the history branch, counting the known and probably flaky tests of that key. shields.io turns it into a badge:

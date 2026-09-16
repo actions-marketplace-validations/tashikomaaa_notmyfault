@@ -127,6 +127,8 @@ When the report tells where a failed test lives, notmyfault annotates it with it
 
 GitHub shows up to 10 annotations of each kind per step, and the most actionable verdicts come first.
 
+When every failed test is known or probably flaky, a notice titled `notmyfault: only flaky tests failed` comes first, even with `annotations: false`: a workflow can read it to [re-run the failed jobs automatically](recipes.md#re-run-flaky-failures-automatically).
+
 notmyfault only annotates files that exist in the repository. To find them, it looks, in order, at:
 
 1. the `file` and `line` attributes of the test case, or the `file` attribute of its suite;

@@ -41,6 +41,8 @@ const RANKING_SIZE = 10;
 const TRENDS = 3;
 /** GitHub shows 10 annotations of each level per step. */
 const MAX_ANNOTATIONS_PER_LEVEL = 10;
+/** Title of the notice telling a companion workflow that re-running the failed jobs is worth it. */
+export const RERUN_MARKER = "notmyfault: only flaky tests failed";
 const VERDICTS: readonly Verdict[] = ["new", "suspect", "broken", "flaky"];
 
 const BRANCH_README = `# notmyfault history
@@ -169,7 +171,16 @@ async function evaluate(
     io.endGroup();
   }
 
-  if (settings.annotations) annotate(failures, reportContext, context.workspace, io);
+  // Emitted first, so that the limit on notices never drops it.
+  const onlyFlaky = failures.length > 0 && failures.every((failure) => failure.verdict === "flaky");
+  if (onlyFlaky) {
+    io.annotation(
+      "notice",
+      "Every failed test is known or probably flaky: re-running the failed jobs can prove it and unblock this run.",
+      { title: RERUN_MARKER },
+    );
+  }
+  if (settings.annotations) annotate(failures, reportContext, context.workspace, io, onlyFlaky ? 1 : 0);
   if (settings.record) {
     for (const suite of suites) await recordHistory(store, suite.key, suite.results, context, settings, io, now);
   }
@@ -330,9 +341,9 @@ export async function findFiles(patterns: string[], workspace: string): Promise<
 }
 
 /** Annotates each failed test the report locates in the workspace, most actionable verdicts first. */
-function annotate(failures: FailureVerdict[], context: ReportContext, workspace: string, io: ActionIO): void {
+function annotate(failures: FailureVerdict[], context: ReportContext, workspace: string, io: ActionIO, noticesAlready: number): void {
   const isFile = (path: string) => statSync(join(workspace, path), { throwIfNoEntry: false })?.isFile() ?? false;
-  const emitted = { error: 0, notice: 0 };
+  const emitted = { error: 0, notice: noticesAlready };
   for (const failure of failures) {
     const level = (failure.verdict === "new" || failure.verdict === "suspect") && !failure.quarantined ? "error" : "notice";
     if (emitted[level] === MAX_ANNOTATIONS_PER_LEVEL) continue;

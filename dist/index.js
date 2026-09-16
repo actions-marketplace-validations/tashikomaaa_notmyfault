@@ -1562,6 +1562,7 @@ var RETENTION_DAYS = 90;
 var RANKING_SIZE = 10;
 var TRENDS = 3;
 var MAX_ANNOTATIONS_PER_LEVEL = 10;
+var RERUN_MARKER = "notmyfault: only flaky tests failed";
 var VERDICTS = ["new", "suspect", "broken", "flaky"];
 var BRANCH_README = `# notmyfault history
 
@@ -1642,7 +1643,15 @@ async function evaluate(loaded, context, settings, store, io, now) {
     for (const slow of analysis.slower) io.info(`slower   ${slow.test.title} (${duration(slow.duration)}, usually ${duration(slow.usual)})`);
     io.endGroup();
   }
-  if (settings.annotations) annotate(failures, reportContext, context.workspace, io);
+  const onlyFlaky = failures.length > 0 && failures.every((failure) => failure.verdict === "flaky");
+  if (onlyFlaky) {
+    io.annotation(
+      "notice",
+      "Every failed test is known or probably flaky: re-running the failed jobs can prove it and unblock this run.",
+      { title: RERUN_MARKER }
+    );
+  }
+  if (settings.annotations) annotate(failures, reportContext, context.workspace, io, onlyFlaky ? 1 : 0);
   if (settings.record) {
     for (const suite of suites) await recordHistory(store, suite.key, suite.results, context, settings, io, now);
   }
@@ -1777,9 +1786,9 @@ async function findFiles(patterns, workspace) {
   }
   return [...found].sort();
 }
-function annotate(failures, context, workspace, io) {
+function annotate(failures, context, workspace, io, noticesAlready) {
   const isFile = (path) => statSync(join2(workspace, path), { throwIfNoEntry: false })?.isFile() ?? false;
-  const emitted = { error: 0, notice: 0 };
+  const emitted = { error: 0, notice: noticesAlready };
   for (const failure of failures) {
     const level = (failure.verdict === "new" || failure.verdict === "suspect") && !failure.quarantined ? "error" : "notice";
     if (emitted[level] === MAX_ANNOTATIONS_PER_LEVEL) continue;

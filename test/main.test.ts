@@ -441,6 +441,18 @@ describe("run", () => {
     expect(invalid.logs).toContain('::error::Input "quarantine" expects "YYYY-MM-DD test name # reason" per line');
   });
 
+  it("flags runs where only flaky tests failed, for a workflow re-running them", async () => {
+    for (const pays of ["pass", "fail", "pass", "fail", "pass", "fail", "pass"] as const) await simulate({ pays, totals: "pass" });
+    const marker = "::notice title=notmyfault%3A only flaky tests failed::Every failed test is known or probably flaky";
+
+    const flaky = await simulate({ pays: "fail", totals: "pass" }, { event: "pull_request" });
+    expect(flaky.logs).toContain(marker);
+    const mixed = await simulate({ pays: "fail", totals: "fail" }, { event: "pull_request" });
+    expect(mixed.logs).not.toContain("only flaky tests failed");
+    const green = await simulate({ pays: "pass", totals: "pass" }, { event: "pull_request" });
+    expect(green.logs).not.toContain("only flaky tests failed");
+  });
+
   it("keeps working when the history cannot be read", async () => {
     rmSync(join(root, "remote"), { recursive: true, force: true });
     const result = await simulate({ ok: "fail" });
