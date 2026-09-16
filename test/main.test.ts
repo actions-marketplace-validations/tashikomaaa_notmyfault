@@ -453,6 +453,21 @@ describe("run", () => {
     expect(green.logs).not.toContain("only flaky tests failed");
   });
 
+  it("follows a renamed test on the tracked branch only", async () => {
+    for (let run = 0; run < 2; run++) await simulate({ "computes totals": "pass", pays: "pass" });
+
+    // A pull request renaming it gets no history: nothing is guessed there.
+    const pr = await simulate({ "computes the totals": "fail", pays: "pass" }, { event: "pull_request" });
+    expect(api.comments[0]!.body).toContain("**New failure.** No history for this test on `main`.");
+    expect(pr.logs).not.toContain("renamed");
+
+    const merged = await simulate({ "computes the totals": "fail", pays: "pass" });
+    expect(merged.logs).toContain("renamed  unit › checkout › computes totals → unit › checkout › computes the totals");
+    expect(merged.summary).toContain("✏️ **Renamed:** the history of 1 test followed its new name.");
+    expect(storedHistory().tests).toMatchObject({ "unit › checkout › computes the totals": { outcomes: "ppf" } });
+    expect(storedHistory().tests["unit › checkout › computes totals"]).toBeUndefined();
+  });
+
   it("keeps working when the history cannot be read", async () => {
     rmSync(join(root, "remote"), { recursive: true, force: true });
     const result = await simulate({ ok: "fail" });

@@ -3,6 +3,7 @@ import { computeStats, verdictFor, type TestStats } from "./analyze";
 import type { Issue } from "./github";
 import type { History, TestHistory } from "./history";
 import type { TestResult } from "./junit";
+import type { Rename } from "./renames";
 import { code, escapeHtml } from "./report";
 
 export const FLAKY_LABEL = { name: "flaky-test", color: "fcbd34", description: "A test notmyfault found flaky" };
@@ -20,6 +21,8 @@ export interface FlakySuite {
   /** The history of the suite, including this run. */
   history: History;
   results: TestResult[];
+  /** Tests renamed in this run: their issue follows them. */
+  renames?: Rename[];
 }
 
 export interface IssueContext {
@@ -61,6 +64,17 @@ export function planFlakyIssues(
     if (marker && !byMarker.has(marker)) byMarker.set(marker, issue);
   }
 
+  const renamed = new Set<string>();
+  for (const suite of suites) {
+    for (const { from, to } of suite.renames ?? []) {
+      const issue = byMarker.get(flakyMarker(suite.key, from));
+      if (!issue || byMarker.has(flakyMarker(suite.key, to))) continue;
+      byMarker.delete(flakyMarker(suite.key, from));
+      byMarker.set(flakyMarker(suite.key, to), issue);
+      renamed.add(flakyMarker(suite.key, to));
+    }
+  }
+
   const actions: IssueAction[] = [];
   const seen = new Set<string>();
   let created = 0;
@@ -78,15 +92,20 @@ export function planFlakyIssues(
       const stats = computeStats(test, context.now, context.evidenceTtlDays);
       const body = () => renderFlakyIssue(suite.key, id, test, stats, result, context);
 
+      // A renamed test gets its new marker at once, or its issue would be lost on the next run.
+      const moved = renamed.has(marker);
       if (issue?.state === "open") {
         if (!recent) actions.push({ kind: "close", issue: issue.number, comment: quietComment(lastFailure, context) });
-        else if (failedNow) actions.push({ kind: "update", issue: issue.number, body: body(), reopen: false });
+        else if (failedNow || moved) actions.push({ kind: "update", issue: issue.number, body: body(), reopen: false });
+        continue;
+      }
+      if (issue) {
+        const reopen = stats.confirmed && recent && failedNow;
+        if (reopen || moved) actions.push({ kind: "update", issue: issue.number, body: body(), reopen });
         continue;
       }
       if (!stats.confirmed || !recent) continue;
-      if (issue) {
-        if (failedNow) actions.push({ kind: "update", issue: issue.number, body: body(), reopen: true });
-      } else if (created === MAX_CREATED_PER_RUN) {
+      if (created === MAX_CREATED_PER_RUN) {
         postponed++;
       } else {
         created++;

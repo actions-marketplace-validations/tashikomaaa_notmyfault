@@ -10,6 +10,7 @@ import {
   type Verdict,
 } from "./analyze";
 import type { TestResult } from "./junit";
+import type { Rename } from "./renames";
 
 export type Mode = "report" | "quarantine";
 
@@ -40,6 +41,8 @@ export interface SuiteReport {
   slowest?: SlowTest[];
   /** Failure rate over time of the most unreliable tests, for the job summary. */
   trends?: FailureTrend[];
+  /** Tests renamed in this run, whose history followed them. */
+  renames?: Rename[];
 }
 
 const MAX_ROWS = 30;
@@ -79,6 +82,14 @@ export function renderSuitesSummary(suites: SuiteReport[], context: ReportContex
   const lines = renderBody(suites, context);
   for (const suite of suites) {
     const of = suites.length > 1 ? ` of ${suite.name}` : "";
+    if (suite.renames?.length) {
+      lines.push(
+        "",
+        `✏️ **Renamed:** the history of ${plural(suite.renames.length, "test")}${of} followed ${suite.renames.length === 1 ? "its" : "their"} new name. If a rename is wrong, the new test inherited the history of another one: see [Test identity](${PROJECT_URL}/blob/main/docs/how-it-works.md#test-identity).`,
+        "",
+        ...suite.renames.map(({ from, to }) => `- ${code(from)} → ${code(to)}`),
+      );
+    }
     if (suite.slowest?.length) {
       lines.push(
         "",

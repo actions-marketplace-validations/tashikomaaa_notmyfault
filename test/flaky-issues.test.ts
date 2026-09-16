@@ -96,6 +96,16 @@ describe("planFlakyIssues", () => {
     expect(actions).toMatchObject([{ kind: "close", issue: 12 }]);
   });
 
+  it("moves the issue of a renamed test to its new name", () => {
+    const renamed = { ...suite({ "pays by card": FLAKY }), renames: [{ from: "pays", to: "pays by card" }] };
+    const { actions } = planFlakyIssues([renamed], [issue(12, "pays")], CONTEXT);
+    expect(actions).toHaveLength(1);
+    const [update] = actions;
+    if (update?.kind !== "update") throw new Error("expected an update");
+    expect(update).toMatchObject({ issue: 12, reopen: false });
+    expect(update.body.startsWith(flakyMarker("ci-test", "pays by card"))).toBe(true);
+  });
+
   it("says when a flaky test fails too many runs in a row", () => {
     const broken = { outcomes: "pppppfff", evidence: PROOF, lastFailure: "2026-09-16" };
     const { actions } = planFlakyIssues([suite({ pays: broken }, [failing("pays")])], [issue(12, "pays")], CONTEXT);

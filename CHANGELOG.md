@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
+- Runs on tracked branches follow renamed tests when it is unambiguous: one test gone and one added in the same file, with similar names. The history and the flaky test issue follow the new name, and the job summary lists the renames ([#13](https://github.com/tashikomaaa/notmyfault/issues/13)).
 - When every failed test is flaky, notmyfault adds a notice titled `notmyfault: only flaky tests failed`, and the recipes document a companion workflow re-running the failed jobs once when it sees it ([#12](https://github.com/tashikomaaa/notmyfault/issues/12)).
 - Each update of the history writes web pages on the history branch, a page per key listing its unreliable tests with a timeline of their runs, ready to publish with GitHub Pages ([#11](https://github.com/tashikomaaa/notmyfault/issues/11)).
 - Each update of the history writes `badges/<key>.json`, a shields.io endpoint badge counting the flaky tests of that key, to show in a README ([#10](https://github.com/tashikomaaa/notmyfault/issues/10)).

@@ -30,6 +30,8 @@ export interface TestHistory {
   lastFailure?: string;
   /** Durations in milliseconds of the last runs on tracked branches, oldest first. */
   durations?: number[];
+  /** Number of the last run on a tracked branch the test was part of, see {@link History.runs}. */
+  lastRun?: number;
   /** Last day (YYYY-MM-DD) the test was recorded. */
   lastSeen: string;
 }
@@ -54,8 +56,8 @@ export interface RecordOptions {
   retentionDays: number;
 }
 
-const MAX_FAILED_ON = 20;
-const MAX_EVIDENCE = 10;
+export const MAX_FAILED_ON = 20;
+export const MAX_EVIDENCE = 10;
 const MAX_ERRORS = 10;
 export const MAX_DURATIONS = 10;
 const MAX_FINGERPRINTED_LENGTH = 200;
@@ -129,6 +131,7 @@ export function recordRun(history: History, results: TestResult[], options: Reco
     if (options.tracked) {
       const code = result.outcome === "failed" ? FAIL : result.outcome === "flaky" ? RETRY : PASS;
       test.outcomes = (test.outcomes + code).slice(-options.window);
+      test.lastRun = history.runs + 1;
       testChanged = true;
       if (result.duration !== undefined) test.durations = [...(test.durations ?? []), result.duration].slice(-MAX_DURATIONS);
       if (result.outcome !== "passed") {

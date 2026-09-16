@@ -48,6 +48,7 @@ describe("recordRun", () => {
       recordRun(history, [test("t", outcome)], options());
     }
     expect(history.tests.t!.outcomes).toBe("frppp");
+    expect(history.tests.t!.lastRun).toBe(6);
     expect(history.runs).toBe(6);
   });
 

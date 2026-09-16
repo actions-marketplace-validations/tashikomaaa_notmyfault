@@ -131,6 +131,7 @@ function recordRun(history, results, options) {
     if (options.tracked) {
       const code2 = result.outcome === "failed" ? FAIL : result.outcome === "flaky" ? RETRY : PASS;
       test.outcomes = (test.outcomes + code2).slice(-options.window);
+      test.lastRun = history.runs + 1;
       testChanged = true;
       if (result.duration !== void 0) test.durations = [...test.durations ?? [], result.duration].slice(-MAX_DURATIONS);
       if (result.outcome !== "passed") {
@@ -591,6 +592,14 @@ function renderSuitesSummary(suites, context) {
   const lines = renderBody(suites, context);
   for (const suite of suites) {
     const of = suites.length > 1 ? ` of ${suite.name}` : "";
+    if (suite.renames?.length) {
+      lines.push(
+        "",
+        `\u270F\uFE0F **Renamed:** the history of ${plural(suite.renames.length, "test")}${of} followed ${suite.renames.length === 1 ? "its" : "their"} new name. If a rename is wrong, the new test inherited the history of another one: see [Test identity](${PROJECT_URL}/blob/main/docs/how-it-works.md#test-identity).`,
+        "",
+        ...suite.renames.map(({ from, to }) => `- ${code(from)} \u2192 ${code(to)}`)
+      );
+    }
     if (suite.slowest?.length) {
       lines.push(
         "",
@@ -1007,6 +1016,16 @@ function planFlakyIssues(suites, issues, context) {
     const marker = /<!-- notmyfault:flaky:\S+ -->/.exec(issue.body)?.[0];
     if (marker && !byMarker.has(marker)) byMarker.set(marker, issue);
   }
+  const renamed = /* @__PURE__ */ new Set();
+  for (const suite of suites) {
+    for (const { from, to } of suite.renames ?? []) {
+      const issue = byMarker.get(flakyMarker(suite.key, from));
+      if (!issue || byMarker.has(flakyMarker(suite.key, to))) continue;
+      byMarker.delete(flakyMarker(suite.key, from));
+      byMarker.set(flakyMarker(suite.key, to), issue);
+      renamed.add(flakyMarker(suite.key, to));
+    }
+  }
   const actions = [];
   const seen = /* @__PURE__ */ new Set();
   let created = 0;
@@ -1023,15 +1042,19 @@ function planFlakyIssues(suites, issues, context) {
       const failedNow = result?.outcome === "failed" || result?.outcome === "flaky";
       const stats = computeStats(test, context.now, context.evidenceTtlDays);
       const body = () => renderFlakyIssue(suite.key, id, test, stats, result, context);
+      const moved = renamed.has(marker);
       if (issue?.state === "open") {
         if (!recent) actions.push({ kind: "close", issue: issue.number, comment: quietComment(lastFailure2, context) });
-        else if (failedNow) actions.push({ kind: "update", issue: issue.number, body: body(), reopen: false });
+        else if (failedNow || moved) actions.push({ kind: "update", issue: issue.number, body: body(), reopen: false });
+        continue;
+      }
+      if (issue) {
+        const reopen = stats.confirmed && recent && failedNow;
+        if (reopen || moved) actions.push({ kind: "update", issue: issue.number, body: body(), reopen });
         continue;
       }
       if (!stats.confirmed || !recent) continue;
-      if (issue) {
-        if (failedNow) actions.push({ kind: "update", issue: issue.number, body: body(), reopen: true });
-      } else if (created === MAX_CREATED_PER_RUN) {
+      if (created === MAX_CREATED_PER_RUN) {
         postponed++;
       } else {
         created++;
@@ -1147,6 +1170,72 @@ function applyQuarantine(analysis, entries, now) {
     quarantined++;
   }
   return quarantined;
+}
+
+// src/renames.ts
+var MIN_SIMILARITY = 0.6;
+var SEPARATOR = " \u203A ";
+function detectRenames(history, results) {
+  const previousRun = history.runs;
+  if (previousRun === 0) return [];
+  const present = new Set(results.map((result) => result.id));
+  const groups = /* @__PURE__ */ new Map();
+  const group = (id) => {
+    const key = prefix(id);
+    let entry = groups.get(key);
+    if (!entry) groups.set(key, entry = { missing: [], added: [] });
+    return entry;
+  };
+  for (const [id, test] of Object.entries(history.tests)) {
+    if (test.lastRun === previousRun && !present.has(id)) group(id).missing.push(id);
+  }
+  for (const result of results) {
+    const known = history.tests[result.id]?.outcomes;
+    if (result.outcome !== "skipped" && !known) group(result.id).added.push(result.id);
+  }
+  const renames = [];
+  for (const { missing, added } of groups.values()) {
+    if (missing.length !== 1 || added.length !== 1) continue;
+    const [from, to] = [missing[0], added[0]];
+    if (similarity(lastPart(from), lastPart(to)) >= MIN_SIMILARITY) renames.push({ from, to });
+  }
+  return renames.sort((a, b) => a.to.localeCompare(b.to));
+}
+function applyRenames(history, renames) {
+  for (const { from, to } of renames) {
+    const test = history.tests[from];
+    const target = history.tests[to];
+    if (!test || target?.outcomes) continue;
+    if (target) {
+      const failedOn = [.../* @__PURE__ */ new Set([...test.failedOn ?? [], ...target.failedOn ?? []])].slice(-MAX_FAILED_ON);
+      const evidence = [...test.evidence ?? [], ...target.evidence ?? []].sort((a, b) => a.at.localeCompare(b.at)).slice(-MAX_EVIDENCE);
+      if (failedOn.length > 0) test.failedOn = failedOn;
+      if (evidence.length > 0) test.evidence = evidence;
+      if (target.lastSeen > test.lastSeen) test.lastSeen = target.lastSeen;
+    }
+    history.tests[to] = test;
+    delete history.tests[from];
+  }
+}
+function prefix(id) {
+  const index = id.lastIndexOf(SEPARATOR);
+  return index === -1 ? "" : id.slice(0, index);
+}
+function lastPart(id) {
+  const index = id.lastIndexOf(SEPARATOR);
+  return index === -1 ? id : id.slice(index + SEPARATOR.length);
+}
+function similarity(a, b) {
+  if (a === b) return 1;
+  let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const current = [i];
+    for (let j = 1; j <= b.length; j++) {
+      current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    previous = current;
+  }
+  return 1 - previous[b.length] / Math.max(a.length, b.length);
 }
 
 // src/github.ts
@@ -1652,8 +1741,9 @@ async function evaluate(loaded, context, settings, store, io, now) {
     );
   }
   if (settings.annotations) annotate(failures, reportContext, context.workspace, io, onlyFlaky ? 1 : 0);
+  const renames = /* @__PURE__ */ new Map();
   if (settings.record) {
-    for (const suite of suites) await recordHistory(store, suite.key, suite.results, context, settings, io, now);
+    for (const suite of suites) renames.set(suite.key, await recordHistory(store, suite.key, suite.results, context, settings, io, now));
   }
   if (settings.flakyIssues && isTracked(context, settings) && !context.pullRequest?.fromFork) {
     await manageFlakyIssues(suites, context, settings, reportContext.runUrl, io, now);
@@ -1666,7 +1756,8 @@ async function evaluate(loaded, context, settings, store, io, now) {
       historyRuns: suite.history.runs,
       ranking,
       slowest: rankSlowTests(suite.history, RANKING_SIZE),
-      trends: failureTrends(suite.history, ranking.slice(0, TRENDS).map((test) => test.id))
+      trends: failureTrends(suite.history, ranking.slice(0, TRENDS).map((test) => test.id)),
+      renames: renames.get(suite.key) ?? []
     };
   });
   io.appendSummary(renderSuitesSummary(reports, reportContext));
@@ -1814,14 +1905,17 @@ function historyPath(key) {
 async function recordHistory(store, key, results, context, settings, io, now) {
   if (context.pullRequest?.fromFork) {
     io.info("Pull request from a fork: the token is read-only, history is not recorded.");
-    return;
+    return [];
   }
   const tracked = isTracked(context, settings);
+  let renames = [];
   try {
     const pushed = await store.update(
       historyPath(key),
       (current) => {
         const history = parseHistory(current);
+        renames = tracked ? detectRenames(history, results) : [];
+        applyRenames(history, renames);
         const changed = recordRun(history, results, {
           sha: context.sha,
           tracked,
@@ -1847,11 +1941,14 @@ async function recordHistory(store, key, results, context, settings, io, now) {
         }
       }
     );
+    for (const { from, to } of renames) io.info(`renamed  ${from} \u2192 ${to}`);
     io.info(pushed ? `History updated on branch "${settings.branch}".` : "Nothing new to record.");
+    return renames;
   } catch (error) {
     io.warning(
       `Could not record history on branch "${settings.branch}". Does the job have "contents: write" permission? ${errorMessage(error)}`
     );
+    return [];
   }
 }
 function isTracked(context, settings) {
@@ -1862,8 +1959,10 @@ async function manageFlakyIssues(suites, context, settings, runUrl2, io, now) {
   try {
     const after = suites.map((suite) => {
       const history = structuredClone(suite.history);
+      const renames = detectRenames(history, suite.results);
+      applyRenames(history, renames);
       recordRun(history, suite.results, { sha: context.sha, tracked: true, now, window: settings.window, retentionDays: RETENTION_DAYS });
-      return { key: suite.key, history, results: suite.results };
+      return { key: suite.key, history, results: suite.results, renames };
     });
     const { actions, postponed } = planFlakyIssues(after, await client.listIssues(FLAKY_LABEL.name), {
       trackedBranches: settings.trackedBranches,

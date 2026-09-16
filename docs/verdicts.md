@@ -152,7 +152,7 @@ The [demo repository](https://github.com/tashikomaaa/notmyfault-demo) runs notmy
 
 ## The job summary
 
-The job summary contains the same report, plus two rankings of the tests of the tracked branch.
+The job summary contains the same report, lists the [renamed tests](how-it-works.md#renamed-tests) whose history followed them, and ranks the tests of the tracked branch twice.
 
 The **slowest tests**, up to 10, by median duration over their last 10 runs, with their fastest and slowest runs. A wide range often means a test depends on timing.
 
