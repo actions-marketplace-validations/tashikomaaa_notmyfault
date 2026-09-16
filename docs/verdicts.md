@@ -146,6 +146,7 @@ The [demo repository](https://github.com/tashikomaaa/notmyfault-demo) runs notmy
 | [#3 Explain how to run the tests](https://github.com/tashikomaaa/notmyfault-demo/pull/3) | <img alt="" src="assets/verdict-passed.png" width="24" align="absmiddle"> Failures, none of them related to a README change. Quarantine lets the check pass. |
 | [#4 Find products regardless of accents again](https://github.com/tashikomaaa/notmyfault-demo/pull/4) | <img alt="" src="assets/verdict-passed.png" width="24" align="absmiddle"> A fix for the test broken on `main`, listed as fixed. The flaky test failed, then passed on a re-run: all tests passed. |
 | [#6 Load search synonyms on every query](https://github.com/tashikomaaa/notmyfault-demo/pull/6) | <img alt="" src="assets/verdict-passed.png" width="24" align="absmiddle"> Tests still pass, but one is listed as slower: 1.2 s, usually 1 ms. |
+| [#7 Round discounts down to the ten cents](https://github.com/tashikomaaa/notmyfault-demo/pull/7) | <img alt="" src="assets/verdict-new.png" width="24" align="absmiddle"> A new failure, quarantined by hand until 2026-10-15 in the workflow of the pull request: the check passes. |
 
 ## The job summary
 
