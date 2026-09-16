@@ -154,10 +154,12 @@ The job summary contains the same report, plus two rankings of the tests of the 
 
 The **slowest tests**, up to 10, by median duration over their last 10 runs, with their fastest and slowest runs. A wide range often means a test depends on timing.
 
-The **most unreliable tests**, up to 10, known flaky tests first, then by share of failed runs:
+The **most unreliable tests**, up to 10, known flaky tests first, then by share of failed runs. For the first 3 of them with at least 15 remembered runs, a chart shows how their failure rate evolved: each point is the share of failed runs among the 10 runs ending there, so you can see whether a test is getting worse, or whether a fix worked.
 
 | Column | Meaning |
 |---|---|
 | Failed runs | Failed runs out of the runs remembered for this test |
 | Passed on retry | Runs that passed only after a retry |
 | Proven flaky | `yes` for known flaky tests, `probably` otherwise |
+
+GitHub draws the charts from Mermaid blocks. Where Mermaid is not rendered, the summary shows their source, which still lists the rates.

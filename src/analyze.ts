@@ -52,6 +52,14 @@ export interface SlowerTest {
   usual: number;
 }
 
+export interface FailureTrend {
+  id: string;
+  /** Share of failed runs, in percent, among the TREND_WINDOW runs ending at each run, oldest first. */
+  rates: number[];
+  /** Number, among the remembered runs, of the first run each rate ends at. */
+  firstRun: number;
+}
+
 export interface SlowTest {
   id: string;
   /** Median, fastest and slowest durations on tracked branches, in milliseconds. */
@@ -214,6 +222,26 @@ export function brokenStreak(failureRate: number): number {
   let streak = MIN_BROKEN_STREAK;
   while (streak < MAX_BROKEN_STREAK && failureRate ** streak >= UNLIKELY_STREAK_CHANCE) streak++;
   return streak;
+}
+
+/** Runs each point of a trend covers. */
+export const TREND_WINDOW = 10;
+/** Runs a test needs before its trend says anything. */
+const TREND_MIN_RUNS = 15;
+
+/** How the failure rate of the given tests evolved over their remembered runs, for the job summary. */
+export function failureTrends(history: History, ids: string[]): FailureTrend[] {
+  const trends: FailureTrend[] = [];
+  for (const id of ids) {
+    const outcomes = history.tests[id]?.outcomes ?? "";
+    if (outcomes.length < TREND_MIN_RUNS) continue;
+    const rates: number[] = [];
+    for (let end = TREND_WINDOW; end <= outcomes.length; end++) {
+      rates.push(Math.round((count(outcomes.slice(end - TREND_WINDOW, end), FAIL) / TREND_WINDOW) * 100));
+    }
+    trends.push({ id, rates, firstRun: TREND_WINDOW });
+  }
+  return trends;
 }
 
 /** Slowest tests on tracked branches, by median duration, for the job summary. */

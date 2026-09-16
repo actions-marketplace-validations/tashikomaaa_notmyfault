@@ -271,6 +271,27 @@ describe("renderSummary", () => {
     expect(slowest).not.toContain("Slowest tests");
   });
 
+  it("charts the failure rate of the most unreliable tests in the summary", () => {
+    const { analysis } = scenario();
+    const long = `e2e › ${"very ".repeat(20)}long "quoted" name`;
+    const summary = renderSuitesSummary(
+      [{ name: "ci-test", analysis, historyRuns: 40, trends: [{ id: long, firstRun: 10, rates: [10, 20, 30] }] }],
+      context(),
+    );
+    expect(summary).toContain("<details><summary>Failure rate of the most unreliable tests on `main`</summary>");
+    expect(summary).toContain(
+      [
+        "```mermaid",
+        "xychart-beta",
+        `  title "…${long.replace(/"/g, "'").slice(-59)}"`,
+        '  x-axis "Runs on main, oldest first" 10 --> 12',
+        '  y-axis "Failed, of the last 10 runs (%)" 0 --> 100',
+        "  line [10, 20, 30]",
+        "```",
+      ].join("\n"),
+    );
+  });
+
   it("lists the slowest tests in the summary", () => {
     const { analysis } = scenario();
     const summary = renderSuitesSummary(

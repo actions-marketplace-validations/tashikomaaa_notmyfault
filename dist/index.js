@@ -299,6 +299,21 @@ function brokenStreak(failureRate) {
   while (streak < MAX_BROKEN_STREAK && failureRate ** streak >= UNLIKELY_STREAK_CHANCE) streak++;
   return streak;
 }
+var TREND_WINDOW = 10;
+var TREND_MIN_RUNS = 15;
+function failureTrends(history, ids) {
+  const trends = [];
+  for (const id of ids) {
+    const outcomes = history.tests[id]?.outcomes ?? "";
+    if (outcomes.length < TREND_MIN_RUNS) continue;
+    const rates = [];
+    for (let end = TREND_WINDOW; end <= outcomes.length; end++) {
+      rates.push(Math.round(count(outcomes.slice(end - TREND_WINDOW, end), FAIL) / TREND_WINDOW * 100));
+    }
+    trends.push({ id, rates, firstRun: TREND_WINDOW });
+  }
+  return trends;
+}
 function rankSlowTests(history, limit) {
   const ranked = [];
   for (const [id, test] of Object.entries(history.tests)) {
@@ -541,6 +556,7 @@ var MAX_ROWS = 30;
 var MAX_MESSAGES = 10;
 var MAX_FIXED = 10;
 var MAX_SLOWER = 10;
+var MAX_CHART_TITLE = 60;
 var PROJECT_URL = "https://github.com/tashikomaaa/notmyfault";
 var BADGES_URL = "https://raw.githubusercontent.com/tashikomaaa/notmyfault/main/docs/assets";
 var EMOJI = { new: "\u{1F534}", suspect: "\u{1F7E0}", broken: "\u26AB", flaky: "\u{1F7E1}" };
@@ -571,21 +587,45 @@ function renderSuitesSummary(suites, context) {
         "</details>"
       );
     }
-    if (!suite.ranking?.length) continue;
-    lines.push(
-      "",
-      `<details><summary>Most unreliable tests${of} on ${branches(context)}</summary>`,
-      "",
-      "| Test | Failed runs | Passed on retry | Proven flaky |",
-      "|---|--:|--:|:-:|",
-      ...suite.ranking.map(
-        (t) => `| ${code(t.id)} | ${t.failures} / ${t.runs} | ${t.retries} | ${t.confirmed ? "yes" : "probably"} |`
-      ),
-      "",
-      "</details>"
-    );
+    if (suite.ranking?.length) {
+      lines.push(
+        "",
+        `<details><summary>Most unreliable tests${of} on ${branches(context)}</summary>`,
+        "",
+        "| Test | Failed runs | Passed on retry | Proven flaky |",
+        "|---|--:|--:|:-:|",
+        ...suite.ranking.map(
+          (t) => `| ${code(t.id)} | ${t.failures} / ${t.runs} | ${t.retries} | ${t.confirmed ? "yes" : "probably"} |`
+        ),
+        "",
+        "</details>"
+      );
+    }
+    if (suite.trends?.length) lines.push("", ...renderTrends(suite.trends, of, context));
   }
   return lines.join("\n");
+}
+function chartTitle(id) {
+  const title = id.replace(/["\\]/g, "'");
+  return title.length > MAX_CHART_TITLE ? `\u2026${title.slice(-(MAX_CHART_TITLE - 1))}` : title;
+}
+function renderTrends(trends, of, context) {
+  const lines = [`<details><summary>Failure rate of the most unreliable tests${of} on ${branches(context)}</summary>`, ""];
+  for (const trend of trends) {
+    const last = trend.firstRun + trend.rates.length - 1;
+    lines.push(
+      "```mermaid",
+      "xychart-beta",
+      `  title "${chartTitle(trend.id)}"`,
+      `  x-axis "Runs on ${context.trackedBranches.join(", ")}, oldest first" ${trend.firstRun} --> ${last}`,
+      `  y-axis "Failed, of the last ${TREND_WINDOW} runs (%)" 0 --> 100`,
+      `  line [${trend.rates.join(", ")}]`,
+      "```",
+      ""
+    );
+  }
+  lines.push("</details>");
+  return lines;
 }
 function renderBody(suites, context) {
   const all = combine(suites.map((suite) => suite.analysis));
@@ -1360,6 +1400,7 @@ function sameFile(reference, file, workspace) {
 var EVIDENCE_TTL_DAYS = 30;
 var RETENTION_DAYS = 90;
 var RANKING_SIZE = 10;
+var TRENDS = 3;
 var MAX_ANNOTATIONS_PER_LEVEL = 10;
 var VERDICTS = ["new", "suspect", "broken", "flaky"];
 var BRANCH_README = `# notmyfault history
@@ -1444,13 +1485,17 @@ async function evaluate(loaded, context, settings, store, io, now) {
   if (settings.flakyIssues && isTracked(context, settings) && !context.pullRequest?.fromFork) {
     await manageFlakyIssues(suites, context, settings, reportContext.runUrl, io, now);
   }
-  const reports = suites.map((suite) => ({
-    name: suite.key,
-    analysis: suite.analysis,
-    historyRuns: suite.history.runs,
-    ranking: rankFlakyTests(suite.history, now, EVIDENCE_TTL_DAYS, RANKING_SIZE),
-    slowest: rankSlowTests(suite.history, RANKING_SIZE)
-  }));
+  const reports = suites.map((suite) => {
+    const ranking = rankFlakyTests(suite.history, now, EVIDENCE_TTL_DAYS, RANKING_SIZE);
+    return {
+      name: suite.key,
+      analysis: suite.analysis,
+      historyRuns: suite.history.runs,
+      ranking,
+      slowest: rankSlowTests(suite.history, RANKING_SIZE),
+      trends: failureTrends(suite.history, ranking.slice(0, TRENDS).map((test) => test.id))
+    };
+  });
   io.appendSummary(renderSuitesSummary(reports, reportContext));
   if (settings.comment && context.pullRequest) {
     const noteworthy = sum((a) => a.failures.length + a.retried.length + a.fixed.length) > 0;

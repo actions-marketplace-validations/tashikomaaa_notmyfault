@@ -4,6 +4,7 @@ import {
   blockingFailures,
   brokenStreak,
   rankSlowTests,
+  failureTrends,
   isolatedFailures,
   rankFlakyTests,
   trailingFailures,
@@ -93,6 +94,15 @@ describe("slower tests", () => {
     expect(rankSlowTests(history, 10)).toEqual([
       { id: "b", median: 2000, fastest: 1000, slowest: 3000, runs: 2 },
       { id: "a", median: 200, fastest: 100, slowest: 300, runs: 3 },
+    ]);
+  });
+});
+
+describe("failure trends", () => {
+  it("give the share of failed runs among the last 10, run after run", () => {
+    const history = historyWith({ flaky: { outcomes: "fpppppppppfffppppppp" }, young: { outcomes: "pfpfpfpf" } });
+    expect(failureTrends(history, ["flaky", "young", "missing"])).toEqual([
+      { id: "flaky", firstRun: 10, rates: [10, 10, 20, 30, 30, 30, 30, 30, 30, 30, 30] },
     ]);
   });
 });

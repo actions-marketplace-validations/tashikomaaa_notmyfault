@@ -7,6 +7,7 @@ import {
   blockingFailures,
   rankFlakyTests,
   rankSlowTests,
+  failureTrends,
   type Analysis,
   type FailureVerdict,
   type Verdict,
@@ -34,6 +35,8 @@ import {
 const EVIDENCE_TTL_DAYS = 30;
 const RETENTION_DAYS = 90;
 const RANKING_SIZE = 10;
+/** Unreliable tests charted in the job summary. */
+const TRENDS = 3;
 /** GitHub shows 10 annotations of each level per step. */
 const MAX_ANNOTATIONS_PER_LEVEL = 10;
 const VERDICTS: readonly Verdict[] = ["new", "suspect", "broken", "flaky"];
@@ -168,13 +171,17 @@ async function evaluate(
     await manageFlakyIssues(suites, context, settings, reportContext.runUrl, io, now);
   }
 
-  const reports: SuiteReport[] = suites.map((suite) => ({
-    name: suite.key,
-    analysis: suite.analysis,
-    historyRuns: suite.history.runs,
-    ranking: rankFlakyTests(suite.history, now, EVIDENCE_TTL_DAYS, RANKING_SIZE),
-    slowest: rankSlowTests(suite.history, RANKING_SIZE),
-  }));
+  const reports: SuiteReport[] = suites.map((suite) => {
+    const ranking = rankFlakyTests(suite.history, now, EVIDENCE_TTL_DAYS, RANKING_SIZE);
+    return {
+      name: suite.key,
+      analysis: suite.analysis,
+      historyRuns: suite.history.runs,
+      ranking,
+      slowest: rankSlowTests(suite.history, RANKING_SIZE),
+      trends: failureTrends(suite.history, ranking.slice(0, TRENDS).map((test) => test.id)),
+    };
+  });
   io.appendSummary(renderSuitesSummary(reports, reportContext));
   if (settings.comment && context.pullRequest) {
     const noteworthy = sum((a) => a.failures.length + a.retried.length + a.fixed.length) > 0;

@@ -1,4 +1,14 @@
-import type { Analysis, FailureVerdict, FixedTest, RankedTest, SlowerTest, SlowTest, Verdict } from "./analyze";
+import {
+  TREND_WINDOW,
+  type Analysis,
+  type FailureTrend,
+  type FailureVerdict,
+  type FixedTest,
+  type RankedTest,
+  type SlowerTest,
+  type SlowTest,
+  type Verdict,
+} from "./analyze";
 import type { TestResult } from "./junit";
 
 export type Mode = "report" | "quarantine";
@@ -28,12 +38,15 @@ export interface SuiteReport {
   ranking?: RankedTest[];
   /** Slowest tests, for the job summary. */
   slowest?: SlowTest[];
+  /** Failure rate over time of the most unreliable tests, for the job summary. */
+  trends?: FailureTrend[];
 }
 
 const MAX_ROWS = 30;
 const MAX_MESSAGES = 10;
 const MAX_FIXED = 10;
 const MAX_SLOWER = 10;
+const MAX_CHART_TITLE = 60;
 const PROJECT_URL = "https://github.com/tashikomaaa/notmyfault";
 // Comments already posted keep pointing at these images: never rename or remove them.
 const BADGES_URL = "https://raw.githubusercontent.com/tashikomaaa/notmyfault/main/docs/assets";
@@ -80,21 +93,49 @@ export function renderSuitesSummary(suites: SuiteReport[], context: ReportContex
         "</details>",
       );
     }
-    if (!suite.ranking?.length) continue;
-    lines.push(
-      "",
-      `<details><summary>Most unreliable tests${of} on ${branches(context)}</summary>`,
-      "",
-      "| Test | Failed runs | Passed on retry | Proven flaky |",
-      "|---|--:|--:|:-:|",
-      ...suite.ranking.map(
-        (t) => `| ${code(t.id)} | ${t.failures} / ${t.runs} | ${t.retries} | ${t.confirmed ? "yes" : "probably"} |`,
-      ),
-      "",
-      "</details>",
-    );
+    if (suite.ranking?.length) {
+      lines.push(
+        "",
+        `<details><summary>Most unreliable tests${of} on ${branches(context)}</summary>`,
+        "",
+        "| Test | Failed runs | Passed on retry | Proven flaky |",
+        "|---|--:|--:|:-:|",
+        ...suite.ranking.map(
+          (t) => `| ${code(t.id)} | ${t.failures} / ${t.runs} | ${t.retries} | ${t.confirmed ? "yes" : "probably"} |`,
+        ),
+        "",
+        "</details>",
+      );
+    }
+    if (suite.trends?.length) lines.push("", ...renderTrends(suite.trends, of, context));
   }
   return lines.join("\n");
+}
+
+/** Charts cut long titles on the right: keep the end of the name, which tells tests apart. */
+function chartTitle(id: string): string {
+  const title = id.replace(/["\\]/g, "'");
+  return title.length > MAX_CHART_TITLE ? `…${title.slice(-(MAX_CHART_TITLE - 1))}` : title;
+}
+
+/** One Mermaid chart per test: xychart-beta has no legend, so several lines in one chart could not be told apart. */
+function renderTrends(trends: FailureTrend[], of: string, context: ReportContext): string[] {
+  const lines = [`<details><summary>Failure rate of the most unreliable tests${of} on ${branches(context)}</summary>`, ""];
+  for (const trend of trends) {
+    const last = trend.firstRun + trend.rates.length - 1;
+    lines.push(
+      "```mermaid",
+      "xychart-beta",
+      `  title "${chartTitle(trend.id)}"`,
+      `  x-axis "Runs on ${context.trackedBranches.join(", ")}, oldest first" ${trend.firstRun} --> ${last}`,
+      `  y-axis "Failed, of the last ${TREND_WINDOW} runs (%)" 0 --> 100`,
+      `  line [${trend.rates.join(", ")}]`,
+      "```",
+      "",
+    );
+  }
+  lines.push("</details>");
+  return lines;
 }
 
 function renderBody(suites: SuiteReport[], context: ReportContext): string[] {
