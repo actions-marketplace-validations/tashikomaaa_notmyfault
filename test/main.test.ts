@@ -191,8 +191,8 @@ describe("run", () => {
     const comment = api.comments[0]!.body;
     expect(comment.startsWith("<!-- notmyfault:ci-test -->")).toBe(true);
     expect(comment).toContain("1 looks related to this change");
-    expect(comment).toMatch(/checkout › totals<\/code> \| \*\*New failure\.\*\* Passed the last 8 runs on `main`/);
-    expect(comment).toMatch(/checkout › pays<\/code> \| \*\*Probably flaky\.\*\* Failed 3 of the last 8 runs/);
+    expect(comment).toMatch(/checkout › totals<\/code> \| <img [^>]+> \*\*New failure\.\*\* Passed the last 8 runs on `main`/);
+    expect(comment).toMatch(/checkout › pays<\/code> \| <img [^>]+> \*\*Probably flaky\.\*\* Failed 3 of the last 8 runs/);
     expect(pr.summary).toContain("Most unreliable tests on `main`");
     expect(pr.logs).toContain("::error::1 failing test(s) are not tolerated in quarantine mode: checkout › totals");
     // The token only ever appears in the masking command.
@@ -202,7 +202,7 @@ describe("run", () => {
     const rerun = await simulate({ pays: "pass", totals: "pass" }, { event: "pull_request", sha: "a".repeat(40), attempt: 2 });
     expect(rerun.code).toBe(0);
     expect(api.comments).toHaveLength(1);
-    expect(api.comments[0]!.body).toContain("### ✅ All 2 tests passed");
+    expect(api.comments[0]!.body).toMatch(/^### <img [^>]+> All 2 tests passed$/m);
     expect(storedHistory().tests["unit › checkout › totals"]!.evidence).toHaveLength(1);
 
     // Next time "totals" fails anywhere, it is recognized as flaky.

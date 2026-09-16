@@ -70,7 +70,7 @@ npm run check   # typecheck, build dist/ and run all tests
 
 `docs/` is the source of truth. The [wiki](https://github.com/tashikomaaa/notmyfault/wiki) is regenerated from it by the `Wiki` workflow on every push to `main`: edits made directly in the wiki are overwritten.
 
-Images go in `docs/assets/` and are referenced with relative paths, in Markdown or in HTML `src` attributes: the wiki conversion points them at the repository. The originals they are cut from are in [brand/](brand/README.md).
+Images go in `docs/assets/` and are referenced with relative paths, in Markdown or in HTML `src` attributes: the wiki conversion points them at the repository. The originals they are cut from are in [brand/](brand/README.md). The `verdict-*.png` badges are also linked from every pull request comment notmyfault posts: never rename or remove them.
 
 To preview the wiki conversion locally:
 

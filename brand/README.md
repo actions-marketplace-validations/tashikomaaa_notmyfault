@@ -36,15 +36,15 @@ This directory holds the original artwork. The images used by the README, the do
   <img alt="Five round badges: new failure, suspect, already failing, flaky and all passed." src="verdict-badges.jpg">
 </p>
 
-Each verdict has a badge whose color matches the emoji of the pull request comment.
+The pull request comment and the job summary show these badges, with an emoji as fallback where images do not load. The report links to the files on the `main` branch, so comments already posted depend on them: **never rename or remove them**.
 
 | Badge | Verdict | Color | File |
 |:---:|---|---|---|
-| <img alt="" src="../docs/assets/verdict-new.png" width="48"> | 🔴 New failure | `#DC4444` | [verdict-new.png](../docs/assets/verdict-new.png) |
-| <img alt="" src="../docs/assets/verdict-suspect.png" width="48"> | 🟠 Suspect | `#F26514` | [verdict-suspect.png](../docs/assets/verdict-suspect.png) |
-| <img alt="" src="../docs/assets/verdict-broken.png" width="48"> | ⚫ Already failing | `#2D3137` | [verdict-broken.png](../docs/assets/verdict-broken.png) |
-| <img alt="" src="../docs/assets/verdict-flaky.png" width="48"> | 🟡 Known flaky / Probably flaky | `#FCBD34` | [verdict-flaky.png](../docs/assets/verdict-flaky.png) |
-| <img alt="" src="../docs/assets/verdict-passed.png" width="48"> | ✅ All tests passed | `#19A08E` | [verdict-passed.png](../docs/assets/verdict-passed.png) |
+| <img alt="" src="../docs/assets/verdict-new.png" width="48"> | New failure | `#DC4444` | [verdict-new.png](../docs/assets/verdict-new.png) |
+| <img alt="" src="../docs/assets/verdict-suspect.png" width="48"> | Suspect | `#F26514` | [verdict-suspect.png](../docs/assets/verdict-suspect.png) |
+| <img alt="" src="../docs/assets/verdict-broken.png" width="48"> | Already failing | `#2D3137` | [verdict-broken.png](../docs/assets/verdict-broken.png) |
+| <img alt="" src="../docs/assets/verdict-flaky.png" width="48"> | Known flaky / Probably flaky | `#FCBD34` | [verdict-flaky.png](../docs/assets/verdict-flaky.png) |
+| <img alt="" src="../docs/assets/verdict-passed.png" width="48"> | All tests passed, or no failure looks related to the change | `#19A08E` | [verdict-passed.png](../docs/assets/verdict-passed.png) |
 
 ## Stickers
 

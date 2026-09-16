@@ -17,10 +17,10 @@ notmyfault is a GitHub Action that remembers how every test behaves on your defa
 - [Reading the report](verdicts.md): what each verdict means and what to do about it.
 
 <p align="center">
-  <a href="verdicts.md#-new-failure"><img alt="New failure" src="assets/verdict-new.png" width="88"></a>
-  <a href="verdicts.md#-suspect"><img alt="Suspect" src="assets/verdict-suspect.png" width="88"></a>
-  <a href="verdicts.md#-already-failing"><img alt="Already failing" src="assets/verdict-broken.png" width="88"></a>
-  <a href="verdicts.md#-known-flaky--probably-flaky"><img alt="Known flaky or probably flaky" src="assets/verdict-flaky.png" width="88"></a>
+  <a href="verdicts.md#new-failure"><img alt="New failure" src="assets/verdict-new.png" width="88"></a>
+  <a href="verdicts.md#suspect"><img alt="Suspect" src="assets/verdict-suspect.png" width="88"></a>
+  <a href="verdicts.md#already-failing"><img alt="Already failing" src="assets/verdict-broken.png" width="88"></a>
+  <a href="verdicts.md#known-flaky--probably-flaky"><img alt="Known flaky or probably flaky" src="assets/verdict-flaky.png" width="88"></a>
   <a href="verdicts.md#the-headline"><img alt="All tests passed" src="assets/verdict-passed.png" width="88"></a>
 </p>
 

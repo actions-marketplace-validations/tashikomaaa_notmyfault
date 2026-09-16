@@ -762,7 +762,11 @@ function joinDistinct(parts) {
 var MAX_ROWS = 30;
 var MAX_MESSAGES = 10;
 var PROJECT_URL = "https://github.com/tashikomaaa/notmyfault";
-var ICONS = { new: "\u{1F534}", suspect: "\u{1F7E0}", broken: "\u26AB", flaky: "\u{1F7E1}" };
+var BADGES_URL = "https://raw.githubusercontent.com/tashikomaaa/notmyfault/main/docs/assets";
+var EMOJI = { new: "\u{1F534}", suspect: "\u{1F7E0}", broken: "\u26AB", flaky: "\u{1F7E1}" };
+function badge(image, emoji, size) {
+  return `<img src="${BADGES_URL}/verdict-${image}.png" alt="${emoji}" width="${size}" height="${size}" align="absmiddle">`;
+}
 function commentMarker(key) {
   return `<!-- notmyfault:${key} -->`;
 }
@@ -790,12 +794,13 @@ function renderSummary(analysis, ranking, context) {
 function renderBody(analysis, context) {
   const lines = [`### ${headline(analysis)}`, ""];
   if (analysis.failures.length > 0) {
-    lines.push("| | Test | Why |", "|:-:|---|---|");
+    lines.push("| Test | Why |", "|---|---|");
     for (const failure of analysis.failures.slice(0, MAX_ROWS)) {
-      lines.push(`| ${ICONS[failure.verdict]} | ${code(failure.test.title)} | ${explain(failure, context)} |`);
+      const icon = badge(failure.verdict, EMOJI[failure.verdict], 24);
+      lines.push(`| ${code(failure.test.title)} | ${icon} ${explain(failure, context)} |`);
     }
     if (analysis.failures.length > MAX_ROWS) {
-      lines.push(`| | _\u2026and ${analysis.failures.length - MAX_ROWS} more_ | |`);
+      lines.push(`| _\u2026and ${analysis.failures.length - MAX_ROWS} more_ | |`);
     }
     lines.push("");
     lines.push(...renderMessages(analysis.failures));
@@ -821,11 +826,11 @@ function headline(analysis) {
   if (failed === 0) {
     const retried = analysis.retried.length;
     const suffix = retried > 0 ? ` (${retried} only after a retry)` : "";
-    return `\u2705 All ${plural(analysis.total - analysis.skipped, "test")} passed${suffix}`;
+    return `${badge("passed", "\u2705", 32)} All ${plural(analysis.total - analysis.skipped, "test")} passed${suffix}`;
   }
   const yours = analysis.failures.filter((f) => f.verdict === "new" || f.verdict === "suspect").length;
-  if (yours === 0) return `\u{1F7E2} ${plural(failed, "test")} failed, none of them look like your fault`;
-  return `\u{1F534} ${plural(failed, "test")} failed, ${yours} ${yours === 1 ? "looks" : "look"} related to this change`;
+  if (yours === 0) return `${badge("passed", "\u{1F7E2}", 32)} ${plural(failed, "test")} failed, none of them look like your fault`;
+  return `${badge("new", "\u{1F534}", 32)} ${plural(failed, "test")} failed, ${yours} ${yours === 1 ? "looks" : "look"} related to this change`;
 }
 function explain(failure, context) {
   const where = branches(context);

@@ -18,8 +18,15 @@ export interface ReportContext {
 const MAX_ROWS = 30;
 const MAX_MESSAGES = 10;
 const PROJECT_URL = "https://github.com/tashikomaaa/notmyfault";
+// Comments already posted keep pointing at these images: never rename or remove them.
+const BADGES_URL = "https://raw.githubusercontent.com/tashikomaaa/notmyfault/main/docs/assets";
 
-const ICONS: Record<Verdict, string> = { new: "🔴", suspect: "🟠", broken: "⚫", flaky: "🟡" };
+const EMOJI: Record<Verdict, string> = { new: "🔴", suspect: "🟠", broken: "⚫", flaky: "🟡" };
+
+/** A verdict badge, with its emoji as fallback where images do not load. */
+function badge(image: Verdict | "passed", emoji: string, size: number): string {
+  return `<img src="${BADGES_URL}/verdict-${image}.png" alt="${emoji}" width="${size}" height="${size}" align="absmiddle">`;
+}
 
 export function commentMarker(key: string): string {
   return `<!-- notmyfault:${key} -->`;
@@ -52,12 +59,14 @@ function renderBody(analysis: Analysis, context: ReportContext): string[] {
   const lines = [`### ${headline(analysis)}`, ""];
 
   if (analysis.failures.length > 0) {
-    lines.push("| | Test | Why |", "|:-:|---|---|");
+    lines.push("| Test | Why |", "|---|---|");
     for (const failure of analysis.failures.slice(0, MAX_ROWS)) {
-      lines.push(`| ${ICONS[failure.verdict]} | ${code(failure.test.title)} | ${explain(failure, context)} |`);
+      // In a column of its own, GitHub shrinks the badge to a dot: it sits next to the explanation instead.
+      const icon = badge(failure.verdict, EMOJI[failure.verdict], 24);
+      lines.push(`| ${code(failure.test.title)} | ${icon} ${explain(failure, context)} |`);
     }
     if (analysis.failures.length > MAX_ROWS) {
-      lines.push(`| | _…and ${analysis.failures.length - MAX_ROWS} more_ | |`);
+      lines.push(`| _…and ${analysis.failures.length - MAX_ROWS} more_ | |`);
     }
     lines.push("");
     lines.push(...renderMessages(analysis.failures));
@@ -89,11 +98,11 @@ function headline(analysis: Analysis): string {
   if (failed === 0) {
     const retried = analysis.retried.length;
     const suffix = retried > 0 ? ` (${retried} only after a retry)` : "";
-    return `✅ All ${plural(analysis.total - analysis.skipped, "test")} passed${suffix}`;
+    return `${badge("passed", "✅", 32)} All ${plural(analysis.total - analysis.skipped, "test")} passed${suffix}`;
   }
   const yours = analysis.failures.filter((f) => f.verdict === "new" || f.verdict === "suspect").length;
-  if (yours === 0) return `🟢 ${plural(failed, "test")} failed, none of them look like your fault`;
-  return `🔴 ${plural(failed, "test")} failed, ${yours} ${yours === 1 ? "looks" : "look"} related to this change`;
+  if (yours === 0) return `${badge("passed", "🟢", 32)} ${plural(failed, "test")} failed, none of them look like your fault`;
+  return `${badge("new", "🔴", 32)} ${plural(failed, "test")} failed, ${yours} ${yours === 1 ? "looks" : "look"} related to this change`;
 }
 
 function explain(failure: FailureVerdict, context: ReportContext): string {

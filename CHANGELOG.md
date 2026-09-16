@@ -9,6 +9,10 @@ All notable changes to this project are documented here. The format follows [Kee
 - Demo repository with a real pull request, and a screenshot of its comment in the README.
 - A mascot, a banner, verdict badges and illustrations throughout the README, the documentation, the wiki and the issue forms.
 
+### Changed
+
+- The pull request comment and the job summary show verdict badges instead of emoji. The emoji remain as fallback where images do not load.
+
 ### Fixed
 
 - Images in the documentation are displayed in the wiki.

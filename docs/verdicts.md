@@ -6,15 +6,15 @@ notmyfault reports in two places: a comment on the pull request and the job summ
 
 | Headline | Meaning |
 |---|---|
-| ✅ All *N* tests passed | Nothing failed. When some tests needed a retry, the headline says how many. |
-| 🟢 *N* tests failed, none of them look like your fault | Every failure is known flaky or already failing on the tracked branch. |
-| 🔴 *N* tests failed, *M* look related to this change | *M* failures are new or suspect. |
+| <img alt="" src="assets/verdict-passed.png" width="24" align="absmiddle"> All *N* tests passed | Nothing failed. When some tests needed a retry, the headline says how many. |
+| <img alt="" src="assets/verdict-passed.png" width="24" align="absmiddle"> *N* tests failed, none of them look like your fault | Every failure is known flaky or already failing on the tracked branch. |
+| <img alt="" src="assets/verdict-new.png" width="24" align="absmiddle"> *N* tests failed, *M* look related to this change | *M* failures are new or suspect. |
 
 ## The verdicts
 
-Each failed test gets one verdict. The table lists the most actionable ones first.
+Each failed test gets one verdict, shown by its badge. Where images do not load, an emoji stands in: 🔴 new failure, 🟠 suspect, ⚫ already failing, 🟡 flaky. The verdicts are listed from the most actionable one.
 
-### 🔴 New failure
+### New failure
 
 <img align="right" alt="New failure" src="assets/verdict-new.png" width="104">
 
@@ -24,7 +24,7 @@ Nothing in the history explains this failure. Either the test passes consistentl
 
 **What to do:** assume your change caused it and reproduce it locally.
 
-### 🟠 Suspect
+### Suspect
 
 <img align="right" alt="Suspect" src="assets/verdict-suspect.png" width="104">
 
@@ -34,7 +34,7 @@ The test failed once or twice on the tracked branch, each time between two succe
 
 **What to do:** read the failure message. If it looks unrelated to your change, use **Re-run failed jobs**. If the test then passes on the same commit, it becomes **known flaky**.
 
-### ⚫ Already failing
+### Already failing
 
 <img align="right" alt="Already failing" src="assets/verdict-broken.png" width="104">
 
@@ -44,7 +44,7 @@ The most recent runs on the tracked branch failed too, so the problem predates y
 
 **What to do:** nothing in your pull request. Once the tracked branch is fixed, update your branch.
 
-### 🟡 Known flaky / Probably flaky
+### Known flaky / Probably flaky
 
 <img align="right" alt="Flaky" src="assets/verdict-flaky.png" width="104">
 
