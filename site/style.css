@@ -531,6 +531,13 @@ pre code {
   color: var(--ink-muted);
 }
 
+.verdict-fixed {
+  grid-column: 1 / -1;
+  align-items: center;
+  padding-top: 3rem;
+  border-top: 2px dashed var(--line);
+}
+
 /* How it works */
 
 .how {
