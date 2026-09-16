@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { TestResult } from "./junit";
 
 export const HISTORY_VERSION = 1;
@@ -23,6 +24,8 @@ export interface TestHistory {
   failedOn?: string[];
   /** Proof that the test is flaky, newest last. */
   evidence?: FlakyEvidence[];
+  /** Fingerprints of the failure messages seen on tracked branches, newest last. */
+  errors?: string[];
   /** Last day (YYYY-MM-DD) the test was recorded. */
   lastSeen: string;
 }
@@ -49,10 +52,28 @@ export interface RecordOptions {
 
 const MAX_FAILED_ON = 20;
 const MAX_EVIDENCE = 10;
+const MAX_ERRORS = 10;
+const MAX_FINGERPRINTED_LENGTH = 200;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function emptyHistory(): History {
   return { version: HISTORY_VERSION, updatedAt: new Date(0).toISOString(), runs: 0, tests: {} };
+}
+
+/**
+ * Identifies a failure message regardless of what changes from run to run:
+ * case, spacing, numbers (durations, counts, ports, line numbers) and
+ * hexadecimal ids. Only this short hash is stored, never the message.
+ */
+export function errorFingerprint(message: string): string {
+  const normalized = message
+    .toLowerCase()
+    .replace(/\b(?=[0-9a-f-]*\d)[0-9a-f]{7,}(?:-[0-9a-f]{4,})*\b/g, "#")
+    .replace(/\d+/g, "#")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_FINGERPRINTED_LENGTH);
+  return createHash("sha256").update(normalized).digest("hex").slice(0, 12);
 }
 
 /** Parses stored history, starting fresh when it is missing, corrupt or from another format version. */
@@ -104,6 +125,8 @@ export function recordRun(history: History, results: TestResult[], options: Reco
       const code = result.outcome === "failed" ? FAIL : result.outcome === "flaky" ? RETRY : PASS;
       test.outcomes = (test.outcomes + code).slice(-options.window);
       testChanged = true;
+      // Only errors seen on tracked branches are known: a pull request must not excuse its own.
+      if (result.outcome !== "passed" && result.message) addError(test, errorFingerprint(result.message));
     }
 
     if (result.outcome === "failed") {
@@ -134,6 +157,10 @@ function addEvidence(test: TestHistory, evidence: FlakyEvidence): boolean {
   if (existing.some((e) => e.sha === evidence.sha && e.kind === evidence.kind)) return false;
   test.evidence = [...existing, evidence].slice(-MAX_EVIDENCE);
   return true;
+}
+
+function addError(test: TestHistory, fingerprint: string): void {
+  test.errors = [...(test.errors ?? []).filter((e) => e !== fingerprint), fingerprint].slice(-MAX_ERRORS);
 }
 
 function prune(history: History, options: RecordOptions): boolean {

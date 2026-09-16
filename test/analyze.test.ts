@@ -7,7 +7,7 @@ import {
   trailingFailures,
   type Verdict,
 } from "../src/analyze";
-import { emptyHistory, type History, type TestHistory } from "../src/history";
+import { emptyHistory, errorFingerprint, type History, type TestHistory } from "../src/history";
 import type { TestResult } from "../src/junit";
 
 const NOW = new Date("2026-09-16T12:00:00Z");
@@ -66,6 +66,31 @@ describe("verdicts", () => {
     expect(verdictOf({ outcomes: "prpfff" })).toBe("broken");
     // A short streak on a known flaky test is still flakiness.
     expect(verdictOf({ outcomes: "prppff" })).toBe("flaky");
+  });
+});
+
+describe("errors never seen on the tracked branch", () => {
+  const known = [errorFingerprint("Bank did not answer within 100ms")];
+  const judge = (test: Partial<TestHistory>, message?: string) =>
+    analyze([{ id: "t", title: "t", outcome: "failed", ...(message ? { message } : {}) }], historyWith({ t: test }), NOW, 30)
+      .failures[0]!;
+
+  it("keep excusing a test failing with a known error", () => {
+    const failure = judge({ outcomes: "ppprpp", errors: known }, "Bank did not answer within 180ms");
+    expect(failure.verdict).toBe("flaky");
+    expect(failure.usually).toBeUndefined();
+  });
+
+  it("turn a flaky, suspect or already failing test into a new failure", () => {
+    const message = "expected 3758 to be 3422";
+    expect(judge({ outcomes: "ppprpp", errors: known }, message)).toMatchObject({ verdict: "new", usually: "flaky" });
+    expect(judge({ outcomes: "pppfpp", errors: known }, message)).toMatchObject({ verdict: "new", usually: "suspect" });
+    expect(judge({ outcomes: "ppppff", errors: known }, message)).toMatchObject({ verdict: "new", usually: "broken" });
+  });
+
+  it("cannot be told without recorded errors or a message", () => {
+    expect(judge({ outcomes: "ppprpp" }, "expected 3758 to be 3422").verdict).toBe("flaky");
+    expect(judge({ outcomes: "ppprpp", errors: known }).verdict).toBe("flaky");
   });
 });
 

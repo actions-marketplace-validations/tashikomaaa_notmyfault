@@ -68,7 +68,8 @@ The branch always holds **a single commit without parent**, authored by `github-
    "outcomes": "pppfpppppprpppfppp",
    "failedOn": ["3f2a1b9c0d4e", "a41c07e9b2f3"],
    "evidence": [{ "at": "2026-09-12T08:31:02.000Z", "sha": "a41c07e9b2f3", "kind": "rerun" }],
-   "lastSeen": "2026-09-16"
+   "lastSeen": "2026-09-16",
+   "errors": ["7c1e0a9b54d2"]
   }
  }
 }
@@ -81,8 +82,9 @@ The branch always holds **a single commit without parent**, authored by `github-
 | `failedOn` | The last 20 commits the test failed on, on any branch, as 12-character SHA prefixes |
 | `evidence` | Up to 10 proofs of flakiness: `retry` (passed after a retry in the same run) or `rerun` (passed on a commit it had failed on) |
 | `lastSeen` | Last day the test was recorded |
+| `errors` | Fingerprints of the last 10 distinct failure messages seen on tracked branches, see [Errors](#errors) |
 
-The file contains test names, outcomes, short commit SHAs and dates. It contains no failure message, log or source code.
+The file contains test names, outcomes, short commit SHAs, dates and fingerprints of failure messages. It contains no failure message, log or source code.
 
 ### What each run records
 
@@ -92,6 +94,7 @@ The file contains test names, outcomes, short commit SHAs and dates. It contains
 | Adds the commit to `failedOn` for failed tests | yes | yes |
 | Records `retry` evidence for tests that passed after a retry | yes | yes |
 | Records `rerun` evidence for tests that pass on a commit listed in `failedOn` | yes | yes |
+| Adds the fingerprint of each failure message to `errors` | yes | no |
 | Creates an entry for a test that only passed | yes | no |
 
 Runs that teach nothing new do not write anything. Pull requests from forks never write, because their token is read-only.
@@ -130,6 +133,20 @@ Why these numbers:
 - **30 days of proof.** A fixed flaky test should stop being excused on its own.
 
 The run being analyzed is recorded **after** classification, so a failure never explains itself.
+
+### Errors
+
+Rules 1 to 5 excuse a failure because of how the test behaved on the tracked branch, and that behavior only explains the errors seen there. When the test has errors recorded and fails with an error whose fingerprint is not among them, the verdict is **new failure**, and the comment says which verdict the history alone would have given.
+
+The fingerprint of an error is the first 12 characters of the SHA-256 hash of the first line of its message, after:
+
+- lowercasing it and collapsing whitespace;
+- replacing every hexadecimal id of 7 characters or more, UUIDs included, and every number with `#`;
+- keeping the first 200 characters.
+
+`Bank did not answer within 100ms` and `bank did not answer within 2500ms` share a fingerprint, `expected 3758 to be 3422` does not.
+
+Only runs on tracked branches record fingerprints: an error seen in pull requests only stays unknown, so a pull request never excuses its own error. Tests without any error recorded, and failures without a message, are classified by the rules alone. Some runners write the same message for every failure, like `Failed` for Go: errors of those tests cannot be told apart.
 
 ## Writing safely
 

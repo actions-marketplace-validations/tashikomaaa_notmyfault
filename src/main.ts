@@ -89,7 +89,10 @@ async function evaluate(
   io.group(
     `notmyfault: ${analysis.failures.length} failed, ${analysis.retried.length} retried, ${analysis.fixed.length} fixed, ${analysis.total} total`,
   );
-  for (const failure of analysis.failures) io.info(`${failure.verdict.padEnd(8)} ${failure.test.title}`);
+  for (const failure of analysis.failures) {
+    const reason = failure.usually ? ` (${failure.usually} on ${settings.trackedBranches.join(", ")}, but with a new error)` : "";
+    io.info(`${failure.verdict.padEnd(8)} ${failure.test.title}${reason}`);
+  }
   for (const test of analysis.retried) io.info(`retried  ${test.title}`);
   for (const fixed of analysis.fixed) io.info(`fixed    ${fixed.test.title}`);
   io.endGroup();

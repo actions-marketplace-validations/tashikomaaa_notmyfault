@@ -22,6 +22,12 @@ Each failed test gets one verdict, shown by its badge. Where images do not load,
 
 Nothing in the history explains this failure. Either the test passes consistently on the tracked branch, or notmyfault has no history for it yet, in which case the comment says *No history for this test on `main`*.
 
+A test the history would excuse is a new failure too when it fails with an error never seen on the tracked branch:
+
+> **New failure.** Known flaky on `main`, but this error was never seen there.
+
+Flakiness or a breakage on the tracked branch only explains the errors it produced. A known flaky test failing with a timeout is flaky; the same test failing with `expected 3758 to be 3422` may well be broken by your change.
+
 **What to do:** assume your change caused it and reproduce it locally.
 
 ### Suspect
@@ -67,6 +73,8 @@ The verdict is the first rule that matches:
 4. The test failed in isolation **3 or more** times: **probably flaky**.
 5. The test failed in isolation once or twice: **suspect**.
 6. Otherwise: **new failure**.
+
+When rules 1 to 5 match but the test fails with an error never seen on the tracked branch, the verdict is **new failure** instead. [How it works](how-it-works.md#errors) explains how errors are compared.
 
 "In isolation" means one failed run with successful runs on both sides. [How it works](how-it-works.md#classification) explains where each number comes from.
 

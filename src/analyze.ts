@@ -1,4 +1,4 @@
-import { FAIL, RETRY, type FlakyEvidence, type History, type TestHistory } from "./history";
+import { errorFingerprint, FAIL, RETRY, type FlakyEvidence, type History, type TestHistory } from "./history";
 import type { TestResult } from "./junit";
 
 /**
@@ -30,6 +30,8 @@ export interface TestStats {
 export interface FailureVerdict extends TestStats {
   test: TestResult;
   verdict: Verdict;
+  /** The verdict the history gives, when the failure is new only because its error was never seen on the tracked branch. */
+  usually?: Exclude<Verdict, "new">;
 }
 
 export interface FixedTest extends TestStats {
@@ -81,8 +83,15 @@ export function analyze(results: TestResult[], history: History, now: Date, evid
         checkFixed(test);
         break;
       case "failed": {
-        const stats = computeStats(history.tests[test.id], now, evidenceTtlDays);
-        analysis.failures.push({ test, verdict: verdictFor(stats), ...stats });
+        const tested = history.tests[test.id];
+        const stats = computeStats(tested, now, evidenceTtlDays);
+        const failure: FailureVerdict = { test, verdict: verdictFor(stats), ...stats };
+        // Flakiness or a breakage on the tracked branch only explains the errors seen there.
+        if (failure.verdict !== "new" && hasNewError(tested, test)) {
+          failure.usually = failure.verdict;
+          failure.verdict = "new";
+        }
+        analysis.failures.push(failure);
         break;
       }
     }
@@ -124,6 +133,12 @@ function verdictFor(stats: TestStats): Verdict {
   if (stats.isolatedFailures >= LIKELY_FLAKY_ISOLATED_FAILURES) return "flaky";
   if (stats.isolatedFailures >= 1) return "suspect";
   return "new";
+}
+
+/** Whether the test failed with an error never seen on the tracked branch. Without any error recorded, nothing can be told. */
+function hasNewError(history: TestHistory | undefined, test: TestResult): boolean {
+  const known = history?.errors ?? [];
+  return known.length > 0 && test.message !== undefined && !known.includes(errorFingerprint(test.message));
 }
 
 /** Failures that are not covered by the tolerated verdicts. */

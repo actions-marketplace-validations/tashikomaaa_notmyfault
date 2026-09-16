@@ -76,14 +76,15 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true });
 });
 
-type Outcomes = Record<string, "pass" | "fail">;
+/** "fail" fails with a message of its own, "fail: message" with the given one. */
+type Outcomes = Record<string, "pass" | "fail" | `fail: ${string}`>;
 
 function writeReport(outcomes: Outcomes): void {
   const cases = Object.entries(outcomes)
     .map(([name, outcome]) =>
       outcome === "pass"
         ? `<testcase classname="checkout" name="${name}"/>`
-        : `<testcase classname="checkout" name="${name}"><failure message="${name} broke"/></testcase>`,
+        : `<testcase classname="checkout" name="${name}"><failure message="${outcome === "fail" ? `${name} broke` : outcome.slice(6)}"/></testcase>`,
     )
     .join("");
   writeFileSync(join(root, "workspace", "reports", "junit.xml"), `<testsuites><testsuite name="unit">${cases}</testsuite></testsuites>`);
@@ -208,6 +209,24 @@ describe("run", () => {
     // Next time "totals" fails anywhere, it is recognized as flaky.
     const later = await simulate({ pays: "pass", totals: "fail" }, { event: "pull_request", sha: "b".repeat(40) });
     expect(later.outputs).toMatchObject({ "new-failures": "0", "flaky-failures": "1" });
+  });
+
+  it("does not excuse a flaky test failing with an error never seen on main", async () => {
+    const main = ["pass", "fail: timeout after 100ms", "pass", "fail: timeout after 250ms", "pass", "pass", "fail: timeout after 90ms", "pass"] as const;
+    for (const pays of main) await simulate({ pays });
+
+    const known = await simulate({ pays: "fail: timeout after 120ms" }, { event: "pull_request", sha: "a".repeat(40), inputs: { mode: "quarantine" } });
+    expect(known.code).toBe(0);
+    expect(known.outputs).toMatchObject({ "flaky-failures": "1", "new-failures": "0" });
+
+    const other = await simulate({ pays: "fail: expected 3758 to be 3422" }, { event: "pull_request", sha: "b".repeat(40), inputs: { mode: "quarantine" } });
+    expect(other.code).toBe(1);
+    expect(other.outputs).toMatchObject({ "flaky-failures": "0", "new-failures": "1", blocking: "1" });
+    expect(other.logs).toContain("new      checkout › pays (flaky on main, but with a new error)");
+    expect(api.comments[0]!.body).toContain("**New failure.** Probably flaky on `main`, but this error was never seen there.");
+    // The error of a pull request is never learned: it stays new.
+    expect(storedHistory().tests["unit › checkout › pays"]).toMatchObject({ outcomes: "pfpfppfp" });
+    expect((storedHistory().tests["unit › checkout › pays"] as { errors?: string[] }).errors).toHaveLength(1);
   });
 
   it("comments on a pull request that fixes a test failing on main", async () => {

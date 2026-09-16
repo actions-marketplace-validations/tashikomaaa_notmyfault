@@ -59,6 +59,8 @@ Delete the `notmyfault-history` branch. See [Reset the history](recipes.md#reset
 
 notmyfault only excuses a test with evidence: a retry, a successful re-run of the same commit, or three isolated failures on the tracked branch. Use **Re-run failed jobs**: if the test passes, the proof is recorded and the next failure is recognized.
 
+If the comment says *Known flaky on `main`, but this error was never seen there*, the test failed differently than it does on the tracked branch, which is worth a look. See [Errors](how-it-works.md#errors).
+
 ### Does it slow down CI?
 
 It parses the reports, fetches and pushes one small commit and calls the API once or twice. That usually takes a couple of seconds.

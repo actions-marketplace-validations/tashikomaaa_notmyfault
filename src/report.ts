@@ -112,6 +112,7 @@ function explain(failure: FailureVerdict, context: ReportContext): string {
   const where = branches(context);
   switch (failure.verdict) {
     case "new":
+      if (failure.usually) return `**New failure.** ${usualBehavior(failure, where)}, but this error was never seen there.`;
       return failure.trailingPasses > 0
         ? `**New failure.** Passed the last ${plural(failure.trailingPasses, "run")} on ${where}.`
         : `**New failure.** No history for this test on ${where}.`;
@@ -136,6 +137,17 @@ function explain(failure: FailureVerdict, context: ReportContext): string {
       const detail = parts.length > 0 ? ` ${capitalize(parts.join("; "))}.` : "";
       return failure.confirmed ? `**Known flaky.**${detail}` : `**Probably flaky.**${detail}`;
     }
+  }
+}
+
+function usualBehavior(failure: FailureVerdict, where: string): string {
+  switch (failure.usually) {
+    case "flaky":
+      return `${failure.confirmed ? "Known" : "Probably"} flaky on ${where}`;
+    case "broken":
+      return `Already failing on ${where}`;
+    default:
+      return `Failed in isolation ${times(failure.isolatedFailures)} on ${where}`;
   }
 }
 

@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { analyze, rankFlakyTests, type Verdict } from "../src/analyze";
-import { emptyHistory } from "../src/history";
+import { emptyHistory, errorFingerprint } from "../src/history";
 import type { TestResult } from "../src/junit";
 import { commentMarker, renderComment, renderSummary, type ReportContext } from "../src/report";
 
@@ -94,6 +94,25 @@ describe("renderComment", () => {
     history.tests.t = { outcomes: "pfpfpfp", lastSeen: "2026-09-16" };
     const analysis = analyze([{ id: "t", title: "t", outcome: "failed" }], history, NOW, 30);
     expect(renderComment(analysis, context())).toMatch(badge("passed", "🟢", "1 test failed, none of them look like your fault"));
+  });
+
+  it("explains failures that are new because of their error", () => {
+    const history = emptyHistory();
+    const errors = [errorFingerprint("timeout")];
+    history.tests = {
+      flaky: { outcomes: "pfppfpppfp", lastSeen: "2026-09-16", errors },
+      broken: { outcomes: "ppff", lastSeen: "2026-09-16", errors },
+    };
+    const analysis = analyze(
+      ["flaky", "broken"].map((id) => ({ id, title: id, outcome: "failed" as const, message: "expected 1 to be 2" })),
+      history,
+      NOW,
+      30,
+    );
+    const body = renderComment(analysis, context());
+    expect(body).toMatch(badge("new", "🔴", "2 tests failed, 2 look related to this change"));
+    expect(body).toMatch(badge("new", "🔴", "**New failure.** Probably flaky on `main`, but this error was never seen there."));
+    expect(body).toMatch(badge("new", "🔴", "**New failure.** Already failing on `main`, but this error was never seen there."));
   });
 
   it("tells proven flakiness apart from a probable one", () => {

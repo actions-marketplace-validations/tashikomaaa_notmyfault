@@ -68,15 +68,22 @@ var ActionIO = class {
 };
 
 // src/history.ts
+import { createHash } from "node:crypto";
 var HISTORY_VERSION = 1;
 var PASS = "p";
 var FAIL = "f";
 var RETRY = "r";
 var MAX_FAILED_ON = 20;
 var MAX_EVIDENCE = 10;
+var MAX_ERRORS = 10;
+var MAX_FINGERPRINTED_LENGTH = 200;
 var DAY_MS = 24 * 60 * 60 * 1e3;
 function emptyHistory() {
   return { version: HISTORY_VERSION, updatedAt: (/* @__PURE__ */ new Date(0)).toISOString(), runs: 0, tests: {} };
+}
+function errorFingerprint(message) {
+  const normalized = message.toLowerCase().replace(/\b(?=[0-9a-f-]*\d)[0-9a-f]{7,}(?:-[0-9a-f]{4,})*\b/g, "#").replace(/\d+/g, "#").replace(/\s+/g, " ").trim().slice(0, MAX_FINGERPRINTED_LENGTH);
+  return createHash("sha256").update(normalized).digest("hex").slice(0, 12);
 }
 function parseHistory(json) {
   if (!json) return emptyHistory();
@@ -117,6 +124,7 @@ function recordRun(history, results, options) {
       const code2 = result.outcome === "failed" ? FAIL : result.outcome === "flaky" ? RETRY : PASS;
       test.outcomes = (test.outcomes + code2).slice(-options.window);
       testChanged = true;
+      if (result.outcome !== "passed" && result.message) addError(test, errorFingerprint(result.message));
     }
     if (result.outcome === "failed") {
       if (!test.failedOn?.includes(sha)) {
@@ -143,6 +151,9 @@ function addEvidence(test, evidence) {
   if (existing.some((e) => e.sha === evidence.sha && e.kind === evidence.kind)) return false;
   test.evidence = [...existing, evidence].slice(-MAX_EVIDENCE);
   return true;
+}
+function addError(test, fingerprint) {
+  test.errors = [...(test.errors ?? []).filter((e) => e !== fingerprint), fingerprint].slice(-MAX_ERRORS);
 }
 function prune(history, options) {
   const cutoff = options.now.getTime() - options.retentionDays * DAY_MS;
@@ -189,8 +200,14 @@ function analyze(results, history, now, evidenceTtlDays) {
         checkFixed(test);
         break;
       case "failed": {
-        const stats = computeStats(history.tests[test.id], now, evidenceTtlDays);
-        analysis.failures.push({ test, verdict: verdictFor(stats), ...stats });
+        const tested = history.tests[test.id];
+        const stats = computeStats(tested, now, evidenceTtlDays);
+        const failure = { test, verdict: verdictFor(stats), ...stats };
+        if (failure.verdict !== "new" && hasNewError(tested, test)) {
+          failure.usually = failure.verdict;
+          failure.verdict = "new";
+        }
+        analysis.failures.push(failure);
         break;
       }
     }
@@ -227,6 +244,10 @@ function verdictFor(stats) {
   if (stats.isolatedFailures >= LIKELY_FLAKY_ISOLATED_FAILURES) return "flaky";
   if (stats.isolatedFailures >= 1) return "suspect";
   return "new";
+}
+function hasNewError(history, test) {
+  const known = history?.errors ?? [];
+  return known.length > 0 && test.message !== void 0 && !known.includes(errorFingerprint(test.message));
 }
 function blockingFailures(analysis, tolerated) {
   return analysis.failures.filter((failure) => !tolerated.has(failure.verdict));
@@ -847,6 +868,7 @@ function explain(failure, context) {
   const where = branches(context);
   switch (failure.verdict) {
     case "new":
+      if (failure.usually) return `**New failure.** ${usualBehavior(failure, where)}, but this error was never seen there.`;
       return failure.trailingPasses > 0 ? `**New failure.** Passed the last ${plural(failure.trailingPasses, "run")} on ${where}.` : `**New failure.** No history for this test on ${where}.`;
     case "suspect":
       return `**Suspect.** Failed in isolation ${times(failure.isolatedFailures)} in the last ${plural(failure.runs, "run")} on ${where}.`;
@@ -865,6 +887,16 @@ function explain(failure, context) {
       const detail = parts.length > 0 ? ` ${capitalize(parts.join("; "))}.` : "";
       return failure.confirmed ? `**Known flaky.**${detail}` : `**Probably flaky.**${detail}`;
     }
+  }
+}
+function usualBehavior(failure, where) {
+  switch (failure.usually) {
+    case "flaky":
+      return `${failure.confirmed ? "Known" : "Probably"} flaky on ${where}`;
+    case "broken":
+      return `Already failing on ${where}`;
+    default:
+      return `Failed in isolation ${times(failure.isolatedFailures)} on ${where}`;
   }
 }
 function renderMessages(failures) {
@@ -990,7 +1022,10 @@ async function evaluate(results, context, settings, store, io, now) {
   io.group(
     `notmyfault: ${analysis.failures.length} failed, ${analysis.retried.length} retried, ${analysis.fixed.length} fixed, ${analysis.total} total`
   );
-  for (const failure of analysis.failures) io.info(`${failure.verdict.padEnd(8)} ${failure.test.title}`);
+  for (const failure of analysis.failures) {
+    const reason = failure.usually ? ` (${failure.usually} on ${settings.trackedBranches.join(", ")}, but with a new error)` : "";
+    io.info(`${failure.verdict.padEnd(8)} ${failure.test.title}${reason}`);
+  }
   for (const test of analysis.retried) io.info(`retried  ${test.title}`);
   for (const fixed of analysis.fixed) io.info(`fixed    ${fixed.test.title}`);
   io.endGroup();

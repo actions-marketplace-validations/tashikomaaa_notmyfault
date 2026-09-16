@@ -72,7 +72,7 @@ Runs on `main` build the history, pull requests are compared with it. The [getti
 
 | | Verdict | Meaning |
 |:---:|---|---|
-| <img alt="" src="docs/assets/verdict-new.png" width="56"> | **New failure** | Nothing in the history explains it. Probably caused by the change. |
+| <img alt="" src="docs/assets/verdict-new.png" width="56"> | **New failure** | Nothing in the history explains it, or it failed with an error never seen on `main`. Probably caused by the change. |
 | <img alt="" src="docs/assets/verdict-suspect.png" width="56"> | **Suspect** | Failed in isolation once or twice on `main`. Re-run to find out. |
 | <img alt="" src="docs/assets/verdict-broken.png" width="56"> | **Already failing** | The latest runs on `main` failed too. Not your fault. |
 | <img alt="" src="docs/assets/verdict-flaky.png" width="56"> | **Flaky** | *Known flaky* when a retry or a re-run of the same commit proved it, *probably flaky* when it keeps failing in isolation. Not your fault. |
