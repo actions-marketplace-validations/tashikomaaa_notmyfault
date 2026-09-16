@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="4" failures="2" errors="0" time="1.500000">
+	<testsuite tests="4" failures="2" time="1.200000" name="github.com/acme/app/queue" timestamp="2026-09-16T10:00:00Z">
+		<properties>
+			<property name="go.version" value="go1.25.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/acme/app/queue" name="TestPublish" time="0.300000">
+			<failure message="Failed" type="">=== RUN   TestPublish&#xA;    queue_test.go:31: timeout waiting for ack&#xA;--- FAIL: TestPublish (0.30s)&#xA;</failure>
+		</testcase>
+		<testcase classname="github.com/acme/app/queue" name="TestPublish" time="0.120000"></testcase>
+		<testcase classname="github.com/acme/app/queue" name="TestConsume" time="0.050000"></testcase>
+		<testcase classname="github.com/acme/app/queue" name="TestConsume" time="0.050000">
+			<failure message="Failed" type="">=== RUN   TestConsume&#xA;    queue_test.go:50: got 2 messages, want 1&#xA;</failure>
+		</testcase>
+	</testsuite>
+</testsuites>

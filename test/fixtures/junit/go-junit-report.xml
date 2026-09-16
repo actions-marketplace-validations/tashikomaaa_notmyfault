@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="3" failures="1">
+	<testsuite name="github.com/acme/app/cache" tests="3" failures="1" errors="0" id="0" hostname="runner" time="0.012" timestamp="2026-09-16T10:00:00Z">
+		<properties>
+			<property name="go.version" value="go1.25.1 linux/amd64"></property>
+		</properties>
+		<testcase name="TestGet" classname="github.com/acme/app/cache" time="0.000"></testcase>
+		<testcase name="TestExpire" classname="github.com/acme/app/cache" time="0.010">
+			<failure message="Failed" type=""><![CDATA[    cache_test.go:42: expected miss, got hit]]></failure>
+		</testcase>
+		<testcase name="TestExpire/short_ttl" classname="github.com/acme/app/cache" time="0.001"></testcase>
+	</testsuite>
+</testsuites>

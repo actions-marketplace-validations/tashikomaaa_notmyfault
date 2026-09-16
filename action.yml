@@ -1,0 +1,60 @@
+name: notmyfault
+description: Tells whether a failing test is your fault, a known flaky test or already broken on main. No server, no dependencies.
+author: Aldwin Moutarlier
+branding:
+  icon: shield
+  color: green
+
+inputs:
+  junit:
+    description: Glob(s) matching your JUnit XML reports, one per line or comma-separated. Relative to the workspace.
+    required: true
+  mode:
+    description: >
+      `report` only reports and never fails the step. `quarantine` fails the step when a failure is not
+      tolerated: combine it with `continue-on-error: true` on your test step so known flaky tests stop blocking merges.
+    default: report
+  tolerate:
+    description: Verdicts that do not fail the step in quarantine mode, comma-separated. Any of new, suspect, broken, flaky.
+    default: flaky
+  token:
+    description: Token used to store the history and comment on pull requests.
+    default: ${{ github.token }}
+  history-branch:
+    description: Branch where the test history is stored. It holds a single commit and never grows.
+    default: notmyfault-history
+  track-branches:
+    description: Branches whose runs build the reference history, comma-separated. Defaults to the repository default branch.
+    required: false
+  key:
+    description: Name of this test suite in the history, to keep several suites apart. Defaults to "<workflow>-<job>".
+    required: false
+  comment:
+    description: Post (and keep updated) a comment on pull requests.
+    default: "true"
+  record:
+    description: Record this run in the history.
+    default: "true"
+  window:
+    description: Number of recent runs kept per test on tracked branches.
+    default: "50"
+
+outputs:
+  total:
+    description: Number of tests found in the reports.
+  failed:
+    description: Number of failed tests.
+  new-failures:
+    description: Failures that look caused by the change (verdict new or suspect).
+  flaky-failures:
+    description: Failures of known flaky tests.
+  broken-failures:
+    description: Failures of tests already failing on a tracked branch.
+  retried:
+    description: Tests that passed only after a retry.
+  blocking:
+    description: Failures not covered by `tolerate`.
+
+runs:
+  using: node24
+  main: dist/index.js

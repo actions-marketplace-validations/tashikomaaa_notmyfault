@@ -1,0 +1,31 @@
+{
+  "name": "notmyfault",
+  "version": "0.1.0",
+  "description": "GitHub Action that tells you whether a failing test is your fault or a known flaky test. No server, no runtime dependencies.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "author": "Aldwin Moutarlier",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node24 --format=esm --outfile=dist/index.js --legal-comments=none",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run build && npm test"
+  },
+  "keywords": [
+    "github-actions",
+    "flaky-tests",
+    "junit",
+    "ci",
+    "testing"
+  ],
+  "devDependencies": {
+    "@types/node": "^24.13.5",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  }
+}

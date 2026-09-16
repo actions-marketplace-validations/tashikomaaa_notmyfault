@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report-3.0.2.xsd" version="3.0.2" name="com.acme.OrderServiceTest" time="2.5" tests="3" errors="0" skipped="0" failures="1">
+  <properties>
+    <property name="java.version" value="21.0.4"/>
+  </properties>
+  <testcase name="placesOrder" classname="com.acme.OrderServiceTest" time="0.4">
+    <flakyFailure message="expected: &lt;PAID&gt; but was: &lt;PENDING&gt;" type="org.opentest4j.AssertionFailedError">
+      <stackTrace><![CDATA[org.opentest4j.AssertionFailedError: expected: <PAID> but was: <PENDING>
+	at com.acme.OrderServiceTest.placesOrder(OrderServiceTest.java:42)]]></stackTrace>
+    </flakyFailure>
+  </testcase>
+  <testcase name="cancelsOrder" classname="com.acme.OrderServiceTest" time="0.2"/>
+  <testcase name="refundsOrder" classname="com.acme.OrderServiceTest" time="1.1">
+    <failure message="Refund service unavailable" type="java.lang.IllegalStateException"><![CDATA[java.lang.IllegalStateException: Refund service unavailable
+	at com.acme.OrderServiceTest.refundsOrder(OrderServiceTest.java:77)]]></failure>
+    <rerunFailure message="Refund service unavailable" type="java.lang.IllegalStateException">
+      <stackTrace><![CDATA[java.lang.IllegalStateException: Refund service unavailable]]></stackTrace>
+    </rerunFailure>
+  </testcase>
+</testsuite>
