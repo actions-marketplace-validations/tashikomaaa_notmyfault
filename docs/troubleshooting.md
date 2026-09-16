@@ -10,7 +10,7 @@ Messages are listed as they appear in the logs. **Errors** fail the step, **warn
 
 Check, in order:
 
-1. **Did anything fail?** notmyfault only creates a comment when a test failed or passed after a retry. The job summary always has the report.
+1. **Did anything fail?** notmyfault only creates a comment when a test failed, passed after a retry, or passed while failing on the tracked branch. The job summary always has the report.
 2. **Is the step running?** Without `if: ${{ !cancelled() }}`, the step is skipped when the test step fails.
 3. **Is the event `pull_request`?** Runs triggered by `push`, `merge_group` or `schedule` have no pull request to comment on.
 4. **Is there a warning** starting with `Could not comment on the pull request`? See below.
@@ -90,7 +90,7 @@ A matched file could not be read. The other reports are still used.
 | Message | Meaning |
 |---|---|
 | `Read N tests from M report(s).` | Reports were parsed. |
-| `new`, `suspect`, `broken`, `flaky`, `retried` followed by a test name | The verdict of each failure, and the tests that passed after a retry, in a collapsible group. |
+| `new`, `suspect`, `broken`, `flaky`, `retried`, `fixed` followed by a test name | The verdict of each failure, the tests that passed after a retry and the tests the run fixes, in a collapsible group. |
 | `History updated on branch "…".` | The run was recorded. |
 | `Nothing new to record.` | The run taught nothing new, so nothing was written. |
 | `Pull request from a fork: the token is read-only, history is not recorded.` | Expected for pull requests from forks. |

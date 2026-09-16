@@ -32,6 +32,10 @@ export interface FailureVerdict extends TestStats {
   verdict: Verdict;
 }
 
+export interface FixedTest extends TestStats {
+  test: TestResult;
+}
+
 export interface Analysis {
   total: number;
   passed: number;
@@ -40,6 +44,8 @@ export interface Analysis {
   failures: FailureVerdict[];
   /** Tests that passed only after a retry in this run. */
   retried: TestResult[];
+  /** Tests that pass in this run while they are failing on the tracked branch. */
+  fixed: FixedTest[];
 }
 
 export interface RankedTest extends TestStats {
@@ -52,11 +58,19 @@ const LIKELY_FLAKY_ISOLATED_FAILURES = 3;
 const VERDICT_ORDER: Record<Verdict, number> = { new: 0, suspect: 1, broken: 2, flaky: 3 };
 
 export function analyze(results: TestResult[], history: History, now: Date, evidenceTtlDays: number): Analysis {
-  const analysis: Analysis = { total: results.length, passed: 0, skipped: 0, failures: [], retried: [] };
+  const analysis: Analysis = { total: results.length, passed: 0, skipped: 0, failures: [], retried: [], fixed: [] };
+  const checkFixed = (test: TestResult) => {
+    const tested = history.tests[test.id];
+    if (!tested?.outcomes.endsWith(FAIL)) return;
+    const stats = computeStats(tested, now, evidenceTtlDays);
+    // Had it failed, it would have been already failing: passing now is a fix, not luck.
+    if (verdictFor(stats) === "broken") analysis.fixed.push({ test, ...stats });
+  };
   for (const test of results) {
     switch (test.outcome) {
       case "passed":
         analysis.passed++;
+        checkFixed(test);
         break;
       case "skipped":
         analysis.skipped++;
@@ -64,6 +78,7 @@ export function analyze(results: TestResult[], history: History, now: Date, evid
       case "flaky":
         analysis.passed++;
         analysis.retried.push(test);
+        checkFixed(test);
         break;
       case "failed": {
         const stats = computeStats(history.tests[test.id], now, evidenceTtlDays);
@@ -76,6 +91,7 @@ export function analyze(results: TestResult[], history: History, now: Date, evid
     (a, b) => VERDICT_ORDER[a.verdict] - VERDICT_ORDER[b.verdict] || a.test.title.localeCompare(b.test.title),
   );
   analysis.retried.sort((a, b) => a.title.localeCompare(b.title));
+  analysis.fixed.sort((a, b) => a.test.title.localeCompare(b.test.title));
   return analysis;
 }
 

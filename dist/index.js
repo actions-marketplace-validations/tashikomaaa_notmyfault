@@ -167,11 +167,18 @@ var DAY_MS2 = 24 * 60 * 60 * 1e3;
 var LIKELY_FLAKY_ISOLATED_FAILURES = 3;
 var VERDICT_ORDER = { new: 0, suspect: 1, broken: 2, flaky: 3 };
 function analyze(results, history, now, evidenceTtlDays) {
-  const analysis = { total: results.length, passed: 0, skipped: 0, failures: [], retried: [] };
+  const analysis = { total: results.length, passed: 0, skipped: 0, failures: [], retried: [], fixed: [] };
+  const checkFixed = (test) => {
+    const tested = history.tests[test.id];
+    if (!tested?.outcomes.endsWith(FAIL)) return;
+    const stats = computeStats(tested, now, evidenceTtlDays);
+    if (verdictFor(stats) === "broken") analysis.fixed.push({ test, ...stats });
+  };
   for (const test of results) {
     switch (test.outcome) {
       case "passed":
         analysis.passed++;
+        checkFixed(test);
         break;
       case "skipped":
         analysis.skipped++;
@@ -179,6 +186,7 @@ function analyze(results, history, now, evidenceTtlDays) {
       case "flaky":
         analysis.passed++;
         analysis.retried.push(test);
+        checkFixed(test);
         break;
       case "failed": {
         const stats = computeStats(history.tests[test.id], now, evidenceTtlDays);
@@ -191,6 +199,7 @@ function analyze(results, history, now, evidenceTtlDays) {
     (a, b) => VERDICT_ORDER[a.verdict] - VERDICT_ORDER[b.verdict] || a.test.title.localeCompare(b.test.title)
   );
   analysis.retried.sort((a, b) => a.title.localeCompare(b.title));
+  analysis.fixed.sort((a, b) => a.test.title.localeCompare(b.test.title));
   return analysis;
 }
 function computeStats(history, now, evidenceTtlDays) {
@@ -761,6 +770,7 @@ function joinDistinct(parts) {
 // src/report.ts
 var MAX_ROWS = 30;
 var MAX_MESSAGES = 10;
+var MAX_FIXED = 10;
 var PROJECT_URL = "https://github.com/tashikomaaa/notmyfault";
 var BADGES_URL = "https://raw.githubusercontent.com/tashikomaaa/notmyfault/main/docs/assets";
 var EMOJI = { new: "\u{1F534}", suspect: "\u{1F7E0}", broken: "\u26AB", flaky: "\u{1F7E1}" };
@@ -805,6 +815,7 @@ function renderBody(analysis, context) {
     lines.push("");
     lines.push(...renderMessages(analysis.failures));
   }
+  if (analysis.fixed.length > 0) lines.push(...renderFixed(analysis.fixed, context));
   if (context.mode === "quarantine" && analysis.failures.length > 0) {
     const tolerated = [...context.tolerated].map((v) => `\`${v}\``).join(", ") || "nothing";
     lines.push(
@@ -866,6 +877,18 @@ function renderMessages(failures) {
     "</details>",
     ""
   ];
+}
+function renderFixed(fixed, context) {
+  const lines = [
+    `\u{1F6E0}\uFE0F **Fixed:** ${plural(fixed.length, "test")} failing on ${branches(context)} ${fixed.length === 1 ? "passes" : "pass"} in this run.`,
+    "",
+    ...fixed.slice(0, MAX_FIXED).map(
+      (f) => `- ${code(f.test.title)}, ${f.trailingFailures === 1 ? "failed the latest run" : `failed the last ${f.trailingFailures} runs`} there`
+    )
+  ];
+  if (fixed.length > MAX_FIXED) lines.push(`- _\u2026and ${fixed.length - MAX_FIXED} more_`);
+  lines.push("");
+  return lines;
 }
 function footer(retried, context) {
   const parts = [];
@@ -964,14 +987,18 @@ async function evaluate(results, context, settings, store, io, now) {
   };
   const url = runUrl(context);
   if (url) reportContext.runUrl = url;
-  io.group(`notmyfault: ${analysis.failures.length} failed, ${analysis.retried.length} retried, ${analysis.total} total`);
+  io.group(
+    `notmyfault: ${analysis.failures.length} failed, ${analysis.retried.length} retried, ${analysis.fixed.length} fixed, ${analysis.total} total`
+  );
   for (const failure of analysis.failures) io.info(`${failure.verdict.padEnd(8)} ${failure.test.title}`);
   for (const test of analysis.retried) io.info(`retried  ${test.title}`);
+  for (const fixed of analysis.fixed) io.info(`fixed    ${fixed.test.title}`);
   io.endGroup();
   if (settings.record) await recordHistory(store, historyPath, results, context, settings, io, now);
   io.appendSummary(renderSummary(analysis, rankFlakyTests(history, now, EVIDENCE_TTL_DAYS, RANKING_SIZE), reportContext));
   if (settings.comment && context.pullRequest) {
-    await comment(context, settings, renderComment(analysis, reportContext), analysis.failures.length + analysis.retried.length > 0, io);
+    const noteworthy = analysis.failures.length + analysis.retried.length + analysis.fixed.length > 0;
+    await comment(context, settings, renderComment(analysis, reportContext), noteworthy, io);
   }
   const count2 = (verdicts) => analysis.failures.filter((f) => verdicts.includes(f.verdict)).length;
   io.setOutput("total", analysis.total);
@@ -980,6 +1007,7 @@ async function evaluate(results, context, settings, store, io, now) {
   io.setOutput("flaky-failures", count2(["flaky"]));
   io.setOutput("broken-failures", count2(["broken"]));
   io.setOutput("retried", analysis.retried.length);
+  io.setOutput("fixed", analysis.fixed.length);
   io.setOutput("blocking", blocking.length);
   if (settings.mode === "quarantine" && blocking.length > 0) {
     const names = blocking.slice(0, 5).map((f) => f.test.title).join(", ");

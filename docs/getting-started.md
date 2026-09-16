@@ -72,7 +72,7 @@ git show FETCH_HEAD:history/ci-test.json
 
 ## 4. Open a pull request
 
-When a test fails, or passes only after a retry, notmyfault comments on the pull request. It updates the same comment on every push, including to say that everything passes again. When nothing ever fails, it stays silent. The job summary always contains the full report.
+When a test fails, passes only after a retry, or passes while it is failing on `main`, notmyfault comments on the pull request. It updates the same comment on every push, including to say that everything passes again. When nothing ever fails, it stays silent. The job summary always contains the full report.
 
 ## What to expect in the first days
 

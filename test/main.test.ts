@@ -210,6 +210,18 @@ describe("run", () => {
     expect(later.outputs).toMatchObject({ "new-failures": "0", "flaky-failures": "1" });
   });
 
+  it("comments on a pull request that fixes a test failing on main", async () => {
+    for (const search of ["pass", "fail", "fail"] as const) await simulate({ search, cart: "pass" });
+
+    const pr = await simulate({ search: "pass", cart: "pass" }, { event: "pull_request" });
+    expect(pr.code).toBe(0);
+    expect(pr.outputs).toMatchObject({ failed: "0", fixed: "1" });
+    expect(pr.logs).toContain("fixed    checkout › search");
+    expect(api.comments).toHaveLength(1);
+    expect(api.comments[0]!.body).toMatch(/^### <img [^>]+> All 2 tests passed$/m);
+    expect(api.comments[0]!.body).toContain("- <code>checkout › search</code>, failed the last 2 runs there");
+  });
+
   it("stays quiet on green pull requests without a previous comment", async () => {
     const result = await simulate({ ok: "pass" }, { event: "pull_request" });
     expect(result.code).toBe(0);

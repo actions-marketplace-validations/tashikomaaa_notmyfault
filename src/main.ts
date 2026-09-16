@@ -86,16 +86,20 @@ async function evaluate(
   const url = runUrl(context);
   if (url) reportContext.runUrl = url;
 
-  io.group(`notmyfault: ${analysis.failures.length} failed, ${analysis.retried.length} retried, ${analysis.total} total`);
+  io.group(
+    `notmyfault: ${analysis.failures.length} failed, ${analysis.retried.length} retried, ${analysis.fixed.length} fixed, ${analysis.total} total`,
+  );
   for (const failure of analysis.failures) io.info(`${failure.verdict.padEnd(8)} ${failure.test.title}`);
   for (const test of analysis.retried) io.info(`retried  ${test.title}`);
+  for (const fixed of analysis.fixed) io.info(`fixed    ${fixed.test.title}`);
   io.endGroup();
 
   if (settings.record) await recordHistory(store, historyPath, results, context, settings, io, now);
 
   io.appendSummary(renderSummary(analysis, rankFlakyTests(history, now, EVIDENCE_TTL_DAYS, RANKING_SIZE), reportContext));
   if (settings.comment && context.pullRequest) {
-    await comment(context, settings, renderComment(analysis, reportContext), analysis.failures.length + analysis.retried.length > 0, io);
+    const noteworthy = analysis.failures.length + analysis.retried.length + analysis.fixed.length > 0;
+    await comment(context, settings, renderComment(analysis, reportContext), noteworthy, io);
   }
 
   const count = (verdicts: Verdict[]) => analysis.failures.filter((f) => verdicts.includes(f.verdict)).length;
@@ -105,6 +109,7 @@ async function evaluate(
   io.setOutput("flaky-failures", count(["flaky"]));
   io.setOutput("broken-failures", count(["broken"]));
   io.setOutput("retried", analysis.retried.length);
+  io.setOutput("fixed", analysis.fixed.length);
   io.setOutput("blocking", blocking.length);
 
   if (settings.mode === "quarantine" && blocking.length > 0) {

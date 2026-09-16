@@ -133,6 +133,25 @@ describe("renderComment", () => {
     }
   });
 
+  it("lists the tests the run fixes", () => {
+    const history = emptyHistory();
+    history.tests = { search: { outcomes: "ppffffffff", lastSeen: "2026-09-16" }, cart: { outcomes: "ppf", lastSeen: "2026-09-16" } };
+    const analysis = analyze(
+      [
+        { id: "search", title: "search › accents", outcome: "passed" },
+        { id: "cart", title: "cart › totals", outcome: "passed" },
+      ],
+      history,
+      NOW,
+      30,
+    );
+    const body = renderComment(analysis, context());
+    expect(body).toMatch(badge("passed", "✅", "All 2 tests passed"));
+    expect(body).toContain("🛠️ **Fixed:** 2 tests failing on `main` pass in this run.");
+    expect(body).toContain("- <code>cart › totals</code>, failed the latest run there");
+    expect(body).toContain("- <code>search › accents</code>, failed the last 8 runs there");
+  });
+
   it("explains the quarantine decision", () => {
     const { analysis } = scenario();
     expect(renderComment(analysis, context({ mode: "quarantine", blocking: 2 }))).toContain(

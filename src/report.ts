@@ -1,4 +1,4 @@
-import type { Analysis, FailureVerdict, RankedTest, Verdict } from "./analyze";
+import type { Analysis, FailureVerdict, FixedTest, RankedTest, Verdict } from "./analyze";
 import type { TestResult } from "./junit";
 
 export type Mode = "report" | "quarantine";
@@ -17,6 +17,7 @@ export interface ReportContext {
 
 const MAX_ROWS = 30;
 const MAX_MESSAGES = 10;
+const MAX_FIXED = 10;
 const PROJECT_URL = "https://github.com/tashikomaaa/notmyfault";
 // Comments already posted keep pointing at these images: never rename or remove them.
 const BADGES_URL = "https://raw.githubusercontent.com/tashikomaaa/notmyfault/main/docs/assets";
@@ -71,6 +72,8 @@ function renderBody(analysis: Analysis, context: ReportContext): string[] {
     lines.push("");
     lines.push(...renderMessages(analysis.failures));
   }
+
+  if (analysis.fixed.length > 0) lines.push(...renderFixed(analysis.fixed, context));
 
   if (context.mode === "quarantine" && analysis.failures.length > 0) {
     const tolerated = [...context.tolerated].map((v) => `\`${v}\``).join(", ") || "nothing";
@@ -146,6 +149,22 @@ function renderMessages(failures: FailureVerdict[]): string[] {
     "</details>",
     "",
   ];
+}
+
+function renderFixed(fixed: FixedTest[], context: ReportContext): string[] {
+  const lines = [
+    `🛠️ **Fixed:** ${plural(fixed.length, "test")} failing on ${branches(context)} ${fixed.length === 1 ? "passes" : "pass"} in this run.`,
+    "",
+    ...fixed
+      .slice(0, MAX_FIXED)
+      .map(
+        (f) =>
+          `- ${code(f.test.title)}, ${f.trailingFailures === 1 ? "failed the latest run" : `failed the last ${f.trailingFailures} runs`} there`,
+      ),
+  ];
+  if (fixed.length > MAX_FIXED) lines.push(`- _…and ${fixed.length - MAX_FIXED} more_`);
+  lines.push("");
+  return lines;
 }
 
 function footer(retried: TestResult[], context: ReportContext): string {

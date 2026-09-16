@@ -78,6 +78,18 @@ The comment includes the first line of the failure message of up to 10 failed te
 
 A test that failed and then passed within the same run did not fail the build, but it is still worth knowing about. Such tests are listed at the bottom of the comment, and each occurrence is recorded as proof of flakiness.
 
+## Tests fixed by the change
+
+A test that passes while it is failing on the tracked branch is listed as **fixed**, with the number of runs it had been failing there:
+
+> 🛠️ **Fixed:** 1 test failing on `main` passes in this run.
+>
+> - `search › finds products regardless of accents`, failed the last 8 runs there
+
+The rule is the one of *already failing*: 3 or more failed runs in a row on the tracked branch, or 1 or 2 for a test without proof of flakiness. A known flaky test passing after a failure or two is not a fix, just flakiness.
+
+A fix is worth knowing about, so notmyfault comments on a pull request that fixes a test even when nothing failed.
+
 ## Live examples
 
 The [demo repository](https://github.com/tashikomaaa/notmyfault-demo) runs notmyfault in quarantine mode, tolerating `flaky` and `broken`, on open pull requests:

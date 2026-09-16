@@ -52,6 +52,8 @@ outputs:
     description: Failures of tests already failing on a tracked branch.
   retried:
     description: Tests that passed only after a retry.
+  fixed:
+    description: Tests failing on a tracked branch that pass in this run.
   blocking:
     description: Failures not covered by `tolerate`.
 

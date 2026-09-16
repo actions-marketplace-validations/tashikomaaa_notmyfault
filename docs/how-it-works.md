@@ -147,7 +147,7 @@ The token reaches git through environment variables, never on the command line, 
 
 ## Pull request comments
 
-Each comment starts with a hidden marker, `<!-- notmyfault:<key> -->`. notmyfault looks for its marker among the pull request comments and updates that comment instead of adding a new one. It creates a comment only when a test failed or passed after a retry. One key means one comment.
+Each comment starts with a hidden marker, `<!-- notmyfault:<key> -->`. notmyfault looks for its marker among the pull request comments and updates that comment instead of adding a new one. It creates a comment only when a test failed, passed after a retry, or passed while it would have been classified already failing had it failed. One key means one comment.
 
 ## Limits
 

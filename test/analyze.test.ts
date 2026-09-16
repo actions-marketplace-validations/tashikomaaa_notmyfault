@@ -94,6 +94,42 @@ describe("analyze", () => {
     expect(analysis.retried.map((t) => t.id)).toEqual(["retried"]);
   });
 
+  it("reports passing tests that are failing on the tracked branch as fixed", () => {
+    const history = historyWith({
+      broken: { outcomes: "ppfff" },
+      "just-broken": { outcomes: "pppf" },
+      "retried-fix": { outcomes: "pff" },
+      "flaky-again": { outcomes: "prppf" },
+      "long-flaky-streak": { outcomes: "prpfff" },
+      stable: { outcomes: "pppp" },
+      "old-breakage": { outcomes: "pffp" },
+    });
+    const passing = (id: string): TestResult => ({ id, title: id, outcome: "passed" });
+    const analysis = analyze(
+      [
+        passing("broken"),
+        passing("just-broken"),
+        { id: "retried-fix", title: "retried-fix", outcome: "flaky" },
+        passing("flaky-again"),
+        passing("long-flaky-streak"),
+        passing("stable"),
+        passing("old-breakage"),
+        passing("unknown"),
+        failing("broken-elsewhere"),
+      ],
+      historyWith({ ...history.tests, "broken-elsewhere": { outcomes: "pff" } }),
+      NOW,
+      30,
+    );
+    // A known flaky test passing after a short streak is luck, not a fix.
+    expect(analysis.fixed.map((f) => [f.test.id, f.trailingFailures])).toEqual([
+      ["broken", 3],
+      ["just-broken", 1],
+      ["long-flaky-streak", 3],
+      ["retried-fix", 2],
+    ]);
+  });
+
   it("filters tolerated verdicts", () => {
     const history = historyWith({ flaky: { outcomes: "pfpfpfp" } });
     const analysis = analyze([failing("flaky"), failing("new")], history, NOW, 30);
