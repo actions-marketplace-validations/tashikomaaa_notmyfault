@@ -78,6 +78,17 @@ The comment includes the first line of the failure message of up to 10 failed te
 
 A test that failed and then passed within the same run did not fail the build, but it is still worth knowing about. Such tests are listed at the bottom of the comment, and each occurrence is recorded as proof of flakiness.
 
+## Live examples
+
+The [demo repository](https://github.com/tashikomaaa/notmyfault-demo) runs notmyfault in quarantine mode, tolerating `flaky` and `broken`, on open pull requests:
+
+| Pull request | What the comment shows |
+|---|---|
+| [#1 Support fixed-amount discount codes](https://github.com/tashikomaaa/notmyfault-demo/pull/1) | <img alt="" src="assets/verdict-new.png" width="24" align="absmiddle"> A new failure caused by the change, next to a test already failing on `main` and a known flaky test. Quarantine blocks the merge. |
+| [#2 Charge the reduced VAT rate on coffee beans, again](https://github.com/tashikomaaa/notmyfault-demo/pull/2) | <img alt="" src="assets/verdict-suspect.png" width="24" align="absmiddle"> A suspect failure: the test failed once on `main`, when the same change landed and was reverted. Quarantine blocks the merge. |
+| [#3 Explain how to run the tests](https://github.com/tashikomaaa/notmyfault-demo/pull/3) | <img alt="" src="assets/verdict-passed.png" width="24" align="absmiddle"> Failures, none of them related to a README change. Quarantine lets the check pass. |
+| [#4 Find products regardless of accents again](https://github.com/tashikomaaa/notmyfault-demo/pull/4) | <img alt="" src="assets/verdict-passed.png" width="24" align="absmiddle"> A fix for the test broken on `main`. The flaky test failed, then passed on a re-run: all tests passed. |
+
 ## The job summary
 
 The job summary contains the same report, plus a ranking of the **most unreliable tests** on the tracked branch. The ranking holds up to 10 tests, known flaky tests first, then by share of failed runs:

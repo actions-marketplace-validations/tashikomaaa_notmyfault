@@ -23,7 +23,7 @@ notmyfault is a GitHub Action that remembers how every test behaves on your defa
     </picture>
   </a>
   <br>
-  <sub>A real comment, on <a href="https://github.com/tashikomaaa/notmyfault-demo/pull/1">this pull request</a> of the <a href="https://github.com/tashikomaaa/notmyfault-demo">demo repository</a>.</sub>
+  <sub>A real comment, on <a href="https://github.com/tashikomaaa/notmyfault-demo/pull/1">this pull request</a> of the <a href="https://github.com/tashikomaaa/notmyfault-demo">demo repository</a>.<br>More of them: <a href="https://github.com/tashikomaaa/notmyfault-demo/pull/2">a suspect failure</a>, <a href="https://github.com/tashikomaaa/notmyfault-demo/pull/3">nothing is your fault</a>, <a href="https://github.com/tashikomaaa/notmyfault-demo/pull/4">green again after a fix and a re-run</a>.</sub>
 </p>
 
 ## Why notmyfault
