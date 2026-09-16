@@ -113,22 +113,24 @@ Only failed tests get a verdict. notmyfault first computes, from the history rea
 
 - **trailing failures**: failed runs at the end of `outcomes`;
 - **isolated failures**: `f` letters with a successful run on both sides;
-- **proof**: evidence from the last 30 days, or an `r` in `outcomes`.
+- **proof**: evidence from the last 30 days, or an `r` in `outcomes`;
+- **failure rate**: the share of `f` letters in `outcomes` before the trailing failures;
+- **unlikely streak**: the shortest streak of failures, from 3 to 10, that a test with that failure rate has less than a 1% chance to produce by bad luck.
 
 Then the first matching rule decides:
 
 | # | Condition | Verdict |
 |---|---|---|
-| 1 | 3 or more trailing failures | <img alt="" src="assets/verdict-broken.png" width="28"> already failing |
+| 1 | proof, and at least an unlikely streak of trailing failures | <img alt="" src="assets/verdict-broken.png" width="28"> already failing |
 | 2 | proof | <img alt="" src="assets/verdict-flaky.png" width="28"> known flaky |
-| 3 | 1 or 2 trailing failures | <img alt="" src="assets/verdict-broken.png" width="28"> already failing |
+| 3 | 1 or more trailing failures | <img alt="" src="assets/verdict-broken.png" width="28"> already failing |
 | 4 | 3 or more isolated failures | <img alt="" src="assets/verdict-flaky.png" width="28"> probably flaky |
 | 5 | 1 or 2 isolated failures | <img alt="" src="assets/verdict-suspect.png" width="28"> suspect |
 | 6 | anything else | <img alt="" src="assets/verdict-new.png" width="28"> new |
 
 Why these numbers:
 
-- **Rule 1 before rule 2.** A flaky test failing three times in a row is far more likely broken than unlucky, and excusing it would hide a real problem.
+- **Rule 1 before rule 2.** A flaky test failing again and again is broken, and excusing it would hide a real problem. But flaky tests do fail several runs in a row now and then: a test failing 40% of the time has a 6% chance to fail any 3 runs in a row. The unlikely streak is 3 failures for a test failing up to 20% of the time, 4 at 30%, 6 at 40%, 7 at 50% and 10, the most, from 60%. The rate is measured before the streak, so the streak does not make itself look normal.
 - **3 isolated failures for "probably flaky".** A commit that breaks a test followed by a commit that fixes it produces an isolated failure too. Requiring three keeps occasional breakages from excusing a test.
 - **30 days of proof.** A fixed flaky test should stop being excused on its own.
 

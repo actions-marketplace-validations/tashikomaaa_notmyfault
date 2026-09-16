@@ -99,7 +99,7 @@ A matched file could not be read. The other reports are still used.
 ## Verdicts look wrong
 
 - **Everything is a new failure.** The history is empty or unreadable. Check the warnings above, and that the workflow runs on `push` to a branch listed in `track-branches`.
-- **A test is reported as flaky, but it fails for real.** It had proof of flakiness in the last 30 days, or failed in isolation 3 times. If it fails 3 times in a row on the tracked branch, it becomes *already failing*. You can also [reset the history](recipes.md#reset-the-history).
+- **A test is reported as flaky, but it fails for real.** It had proof of flakiness in the last 30 days, or failed in isolation 3 times. Once it fails too many runs in a row on the tracked branch to be bad luck, from 3 to 10 depending on how often it failed before, it becomes *already failing*. You can also [reset the history](recipes.md#reset-the-history).
 - **A flaky test is reported as a new failure on every run.** Its error was never seen on the tracked branch. If its message contains values that change on every run other than numbers and hexadecimal ids, like random names, every failure looks new: please [open an issue](https://github.com/tashikomaaa/notmyfault/issues) with a few of its messages. See [Errors](how-it-works.md#errors).
 - **Two different tests share one history.** They have the same identity. See [Test identity](how-it-works.md#test-identity).
 - **Tests of different environments mix.** Use a key per environment, see [Recipes](recipes.md#the-same-tests-in-several-environments).

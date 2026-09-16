@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   analyze,
   blockingFailures,
+  brokenStreak,
   isolatedFailures,
   rankFlakyTests,
   trailingFailures,
@@ -66,6 +67,30 @@ describe("verdicts", () => {
     expect(verdictOf({ outcomes: "prpfff" })).toBe("broken");
     // A short streak on a known flaky test is still flakiness.
     expect(verdictOf({ outcomes: "prppff" })).toBe("flaky");
+  });
+});
+
+describe("failure streaks of flaky tests", () => {
+  it("need to be too long to be bad luck", () => {
+    // Failed 4 of its 10 runs before the streak, and passed after a retry once.
+    const history = "pfpfppfpfr";
+    expect(verdictOf({ outcomes: `${history}fffff` })).toBe("flaky");
+    expect(verdictOf({ outcomes: `${history}ffffff` })).toBe("broken");
+  });
+
+  it("need 3 failures for a flaky test that rarely fails on the tracked branch", () => {
+    const evidence = [{ at: "2026-09-10T00:00:00Z", sha: "abc", kind: "rerun" as const }];
+    expect(verdictOf({ outcomes: "ppppppff", evidence })).toBe("flaky");
+    expect(verdictOf({ outcomes: "pppppfff", evidence })).toBe("broken");
+  });
+
+  it("never need more than 10 failures", () => {
+    expect(verdictOf({ outcomes: `ffffpfffpr${"f".repeat(9)}` })).toBe("flaky");
+    expect(verdictOf({ outcomes: `ffffpfffpr${"f".repeat(10)}` })).toBe("broken");
+  });
+
+  it("have a length that grows with the failure rate", () => {
+    expect([0, 0.2, 0.3, 0.4, 0.5, 0.6, 0.9].map(brokenStreak)).toEqual([3, 3, 4, 6, 7, 10, 10]);
   });
 });
 

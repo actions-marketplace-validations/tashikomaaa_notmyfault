@@ -18,6 +18,10 @@ export interface TestStats {
   retries: number;
   /** Consecutive failures at the end of the tracked history. */
   trailingFailures: number;
+  /** Share of failed runs on tracked branches before those trailing failures. */
+  failureRate: number;
+  /** Failures in a row after which a test proven flaky counts as broken: a streak too unlikely to be bad luck. */
+  brokenStreak: number;
   /** Consecutive successes (including retries) at the end of the tracked history. */
   trailingPasses: number;
   /** Single failures surrounded by successes on tracked branches. */
@@ -57,6 +61,10 @@ export interface RankedTest extends TestStats {
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** Isolated failures needed to call a test flaky without direct evidence. */
 const LIKELY_FLAKY_ISOLATED_FAILURES = 3;
+/** A flaky test is broken once its failure streak had less than this chance to happen by bad luck. */
+const UNLIKELY_STREAK_CHANCE = 0.01;
+const MIN_BROKEN_STREAK = 3;
+const MAX_BROKEN_STREAK = 10;
 const VERDICT_ORDER: Record<Verdict, number> = { new: 0, suspect: 1, broken: 2, flaky: 3 };
 
 export function analyze(results: TestResult[], history: History, now: Date, evidenceTtlDays: number): Analysis {
@@ -109,11 +117,16 @@ export function computeStats(history: TestHistory | undefined, now: Date, eviden
   const cutoff = now.getTime() - evidenceTtlDays * DAY_MS;
   const evidence = (history?.evidence ?? []).filter((e) => Date.parse(e.at) >= cutoff);
   const retries = count(outcomes, RETRY);
+  const trailing = trailingFailures(outcomes);
+  const before = outcomes.slice(0, outcomes.length - trailing);
+  const failureRate = before.length === 0 ? 0 : count(before, FAIL) / before.length;
   const stats: TestStats = {
     runs: outcomes.length,
     failures: count(outcomes, FAIL),
     retries,
-    trailingFailures: trailingFailures(outcomes),
+    trailingFailures: trailing,
+    failureRate,
+    brokenStreak: brokenStreak(failureRate),
     trailingPasses: outcomes.length - outcomes.lastIndexOf(FAIL) - 1,
     isolatedFailures: isolatedFailures(outcomes),
     confirmed: evidence.length > 0 || retries > 0,
@@ -124,9 +137,8 @@ export function computeStats(history: TestHistory | undefined, now: Date, eviden
 }
 
 function verdictFor(stats: TestStats): Verdict {
-  // A long failure streak means the test is really broken, even if it used to be flaky.
-  if (stats.trailingFailures >= 3) return "broken";
-  if (stats.confirmed) return "flaky";
+  // A flaky test fails in a row now and then: only a streak too long to be bad luck means it is broken.
+  if (stats.confirmed) return stats.trailingFailures >= stats.brokenStreak ? "broken" : "flaky";
   if (stats.trailingFailures >= 1) return "broken";
   // A commit that breaks a test and the next one that fixes it look like an
   // isolated failure too, so a couple of them is not enough to excuse a test.
@@ -155,6 +167,16 @@ export function rankFlakyTests(history: History, now: Date, evidenceTtlDays: num
   }
   const score = (t: RankedTest) => (t.failures + t.retries) / Math.max(t.runs, 1) + (t.confirmed ? 1 : 0);
   return ranked.sort((a, b) => score(b) - score(a) || a.id.localeCompare(b.id)).slice(0, limit);
+}
+
+/**
+ * Shortest streak of failures, between 3 and 10, that a test failing at
+ * `failureRate` has less than a 1% chance to produce by bad luck.
+ */
+export function brokenStreak(failureRate: number): number {
+  let streak = MIN_BROKEN_STREAK;
+  while (streak < MAX_BROKEN_STREAK && failureRate ** streak >= UNLIKELY_STREAK_CHANCE) streak++;
+  return streak;
 }
 
 /** Single failures surrounded by successes: the typical flaky signature. */

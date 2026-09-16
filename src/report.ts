@@ -121,7 +121,7 @@ function explain(failure: FailureVerdict, context: ReportContext): string {
     case "broken":
       return failure.trailingFailures === 1
         ? `**Already failing on ${where}.** The latest run there failed too.`
-        : `**Already failing on ${where}.** Failed the last ${failure.trailingFailures} runs there.`;
+        : `**Already failing on ${where}.** Failed the last ${failure.trailingFailures} runs there${failure.confirmed ? ", too many in a row to be flakiness" : ""}.`;
     case "flaky": {
       const parts: string[] = [];
       if (failure.failures > 0) parts.push(`failed ${failure.failures} of the last ${plural(failure.runs, "run")} on ${where}`);

@@ -67,7 +67,7 @@ The test is unreliable. The wording tells how sure notmyfault is:
 
 The verdict is the first rule that matches:
 
-1. The last **3 or more** runs on the tracked branch failed: **already failing**, even for a test known to be flaky. A test failing that consistently is broken, not flaky.
+1. There is proof of flakiness, but the test failed **too many runs in a row** on the tracked branch to be bad luck: **already failing**. How many depends on how often it failed before, from 3 to 10, see [How it works](how-it-works.md#classification).
 2. There is proof of flakiness: **known flaky**.
 3. The last run on the tracked branch failed: **already failing**.
 4. The test failed in isolation **3 or more** times: **probably flaky**.
@@ -94,7 +94,7 @@ A test that passes while it is failing on the tracked branch is listed as **fixe
 >
 > - `search › finds products regardless of accents`, failed the last 8 runs there
 
-The rule is the one of *already failing*: 3 or more failed runs in a row on the tracked branch, or 1 or 2 for a test without proof of flakiness. A known flaky test passing after a failure or two is not a fix, just flakiness.
+The rule is the one of *already failing*: 1 or more failed runs in a row on the tracked branch for a test without proof of flakiness, or a streak too long to be bad luck for a flaky one. A known flaky test passing after a few failures is not a fix, just flakiness.
 
 A fix is worth knowing about, so notmyfault comments on a pull request that fixes a test even when nothing failed.
 

@@ -176,6 +176,9 @@ function prune(history, options) {
 // src/analyze.ts
 var DAY_MS2 = 24 * 60 * 60 * 1e3;
 var LIKELY_FLAKY_ISOLATED_FAILURES = 3;
+var UNLIKELY_STREAK_CHANCE = 0.01;
+var MIN_BROKEN_STREAK = 3;
+var MAX_BROKEN_STREAK = 10;
 var VERDICT_ORDER = { new: 0, suspect: 1, broken: 2, flaky: 3 };
 function analyze(results, history, now, evidenceTtlDays) {
   const analysis = { total: results.length, passed: 0, skipped: 0, failures: [], retried: [], fixed: [] };
@@ -224,11 +227,16 @@ function computeStats(history, now, evidenceTtlDays) {
   const cutoff = now.getTime() - evidenceTtlDays * DAY_MS2;
   const evidence = (history?.evidence ?? []).filter((e) => Date.parse(e.at) >= cutoff);
   const retries = count(outcomes, RETRY);
+  const trailing = trailingFailures(outcomes);
+  const before = outcomes.slice(0, outcomes.length - trailing);
+  const failureRate = before.length === 0 ? 0 : count(before, FAIL) / before.length;
   const stats = {
     runs: outcomes.length,
     failures: count(outcomes, FAIL),
     retries,
-    trailingFailures: trailingFailures(outcomes),
+    trailingFailures: trailing,
+    failureRate,
+    brokenStreak: brokenStreak(failureRate),
     trailingPasses: outcomes.length - outcomes.lastIndexOf(FAIL) - 1,
     isolatedFailures: isolatedFailures(outcomes),
     confirmed: evidence.length > 0 || retries > 0
@@ -238,8 +246,7 @@ function computeStats(history, now, evidenceTtlDays) {
   return stats;
 }
 function verdictFor(stats) {
-  if (stats.trailingFailures >= 3) return "broken";
-  if (stats.confirmed) return "flaky";
+  if (stats.confirmed) return stats.trailingFailures >= stats.brokenStreak ? "broken" : "flaky";
   if (stats.trailingFailures >= 1) return "broken";
   if (stats.isolatedFailures >= LIKELY_FLAKY_ISOLATED_FAILURES) return "flaky";
   if (stats.isolatedFailures >= 1) return "suspect";
@@ -260,6 +267,11 @@ function rankFlakyTests(history, now, evidenceTtlDays, limit) {
   }
   const score = (t) => (t.failures + t.retries) / Math.max(t.runs, 1) + (t.confirmed ? 1 : 0);
   return ranked.sort((a, b) => score(b) - score(a) || a.id.localeCompare(b.id)).slice(0, limit);
+}
+function brokenStreak(failureRate) {
+  let streak = MIN_BROKEN_STREAK;
+  while (streak < MAX_BROKEN_STREAK && failureRate ** streak >= UNLIKELY_STREAK_CHANCE) streak++;
+  return streak;
 }
 function isolatedFailures(outcomes) {
   let isolated = 0;
@@ -873,7 +885,7 @@ function explain(failure, context) {
     case "suspect":
       return `**Suspect.** Failed in isolation ${times(failure.isolatedFailures)} in the last ${plural(failure.runs, "run")} on ${where}.`;
     case "broken":
-      return failure.trailingFailures === 1 ? `**Already failing on ${where}.** The latest run there failed too.` : `**Already failing on ${where}.** Failed the last ${failure.trailingFailures} runs there.`;
+      return failure.trailingFailures === 1 ? `**Already failing on ${where}.** The latest run there failed too.` : `**Already failing on ${where}.** Failed the last ${failure.trailingFailures} runs there${failure.confirmed ? ", too many in a row to be flakiness" : ""}.`;
     case "flaky": {
       const parts = [];
       if (failure.failures > 0) parts.push(`failed ${failure.failures} of the last ${plural(failure.runs, "run")} on ${where}`);

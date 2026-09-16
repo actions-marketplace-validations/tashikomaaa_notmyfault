@@ -115,6 +115,23 @@ describe("renderComment", () => {
     expect(body).toMatch(badge("new", "🔴", "**New failure.** Already failing on `main`, but this error was never seen there."));
   });
 
+  it("explains why a flaky test counts as already failing", () => {
+    const history = emptyHistory();
+    history.tests = {
+      flaky: { outcomes: "pfpfppfpfrffffff", lastSeen: "2026-09-16" },
+      broken: { outcomes: "ppppff", lastSeen: "2026-09-16" },
+    };
+    const analysis = analyze(
+      ["flaky", "broken"].map((id) => ({ id, title: id, outcome: "failed" as const })),
+      history,
+      NOW,
+      30,
+    );
+    const body = renderComment(analysis, context());
+    expect(body).toContain("**Already failing on `main`.** Failed the last 6 runs there, too many in a row to be flakiness.");
+    expect(body).toContain("**Already failing on `main`.** Failed the last 2 runs there.");
+  });
+
   it("tells proven flakiness apart from a probable one", () => {
     const history = emptyHistory();
     history.tests = {

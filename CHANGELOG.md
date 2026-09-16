@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Changed
 
+- A test proven flaky counts as already failing only once it fails too many runs in a row on the tracked branch to be bad luck: from 3 failures for a test that rarely fails to 10 for one failing most of the time, instead of always 3 ([#3](https://github.com/tashikomaaa/notmyfault/issues/3)).
 - A flaky, suspect or already failing test that fails with an error never seen on the tracked branch is reported as a new failure. The history remembers fingerprints of the failure messages seen there, never the messages themselves ([#2](https://github.com/tashikomaaa/notmyfault/issues/2)).
 
 ## [1.2.0] - 2026-09-16
