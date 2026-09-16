@@ -1043,14 +1043,15 @@ function planFlakyIssues(suites, issues, context) {
       const stats = computeStats(test, context.now, context.evidenceTtlDays);
       const body = () => renderFlakyIssue(suite.key, id, test, stats, result, context);
       const moved = renamed.has(marker);
+      const retitle = moved ? { title: issueTitle(result?.title ?? id) } : {};
       if (issue?.state === "open") {
         if (!recent) actions.push({ kind: "close", issue: issue.number, comment: quietComment(lastFailure2, context) });
-        else if (failedNow || moved) actions.push({ kind: "update", issue: issue.number, body: body(), reopen: false });
+        else if (failedNow || moved) actions.push({ kind: "update", issue: issue.number, body: body(), reopen: false, ...retitle });
         continue;
       }
       if (issue) {
         const reopen = stats.confirmed && recent && failedNow;
-        if (reopen || moved) actions.push({ kind: "update", issue: issue.number, body: body(), reopen });
+        if (reopen || moved) actions.push({ kind: "update", issue: issue.number, body: body(), reopen, ...retitle });
         continue;
       }
       if (!stats.confirmed || !recent) continue;
@@ -1980,7 +1981,11 @@ async function manageFlakyIssues(suites, context, settings, runUrl2, io, now) {
         await client.createIssue(action.title, action.body, [FLAKY_LABEL.name]);
         done.created++;
       } else if (action.kind === "update") {
-        await client.updateIssue(action.issue, { body: action.body, ...action.reopen ? { state: "open" } : {} });
+        await client.updateIssue(action.issue, {
+          body: action.body,
+          ...action.title ? { title: action.title } : {},
+          ...action.reopen ? { state: "open" } : {}
+        });
         done.updated++;
       } else {
         await client.addComment(action.issue, action.comment);

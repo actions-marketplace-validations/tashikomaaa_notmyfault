@@ -102,7 +102,7 @@ describe("planFlakyIssues", () => {
     expect(actions).toHaveLength(1);
     const [update] = actions;
     if (update?.kind !== "update") throw new Error("expected an update");
-    expect(update).toMatchObject({ issue: 12, reopen: false });
+    expect(update).toMatchObject({ issue: 12, reopen: false, title: "Flaky test: pays by card" });
     expect(update.body.startsWith(flakyMarker("ci-test", "pays by card"))).toBe(true);
   });
 

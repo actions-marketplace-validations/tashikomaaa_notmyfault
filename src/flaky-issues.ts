@@ -35,7 +35,7 @@ export interface IssueContext {
 
 export type IssueAction =
   | { kind: "create"; title: string; body: string }
-  | { kind: "update"; issue: number; body: string; reopen: boolean }
+  | { kind: "update"; issue: number; body: string; reopen: boolean; title?: string }
   | { kind: "close"; issue: number; comment: string };
 
 /** Identifies the issue of a test, hidden at the top of its body. */
@@ -94,14 +94,15 @@ export function planFlakyIssues(
 
       // A renamed test gets its new marker at once, or its issue would be lost on the next run.
       const moved = renamed.has(marker);
+      const retitle = moved ? { title: issueTitle(result?.title ?? id) } : {};
       if (issue?.state === "open") {
         if (!recent) actions.push({ kind: "close", issue: issue.number, comment: quietComment(lastFailure, context) });
-        else if (failedNow || moved) actions.push({ kind: "update", issue: issue.number, body: body(), reopen: false });
+        else if (failedNow || moved) actions.push({ kind: "update", issue: issue.number, body: body(), reopen: false, ...retitle });
         continue;
       }
       if (issue) {
         const reopen = stats.confirmed && recent && failedNow;
-        if (reopen || moved) actions.push({ kind: "update", issue: issue.number, body: body(), reopen });
+        if (reopen || moved) actions.push({ kind: "update", issue: issue.number, body: body(), reopen, ...retitle });
         continue;
       }
       if (!stats.confirmed || !recent) continue;

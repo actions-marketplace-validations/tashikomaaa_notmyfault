@@ -77,7 +77,7 @@ export class GitHubClient {
     return ((await response.json()) as { number: number }).number;
   }
 
-  async updateIssue(issue: number, changes: { body?: string; state?: "open" | "closed" }): Promise<void> {
+  async updateIssue(issue: number, changes: { title?: string; body?: string; state?: "open" | "closed" }): Promise<void> {
     await this.request("PATCH", `/repos/${this.repository}/issues/${issue}`, changes);
   }
 

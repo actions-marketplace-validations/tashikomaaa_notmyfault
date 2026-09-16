@@ -475,7 +475,11 @@ async function manageFlakyIssues(
         await client.createIssue(action.title, action.body, [FLAKY_LABEL.name]);
         done.created++;
       } else if (action.kind === "update") {
-        await client.updateIssue(action.issue, { body: action.body, ...(action.reopen ? { state: "open" as const } : {}) });
+        await client.updateIssue(action.issue, {
+          body: action.body,
+          ...(action.title ? { title: action.title } : {}),
+          ...(action.reopen ? { state: "open" as const } : {}),
+        });
         done.updated++;
       } else {
         await client.addComment(action.issue, action.comment);
