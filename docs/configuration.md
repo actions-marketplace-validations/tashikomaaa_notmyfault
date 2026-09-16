@@ -134,6 +134,7 @@ How many recent runs on tracked branches are remembered for each test. Minimum 5
 | `broken-failures` | Failures of tests already failing on a tracked branch |
 | `retried` | Tests that passed only after a retry |
 | `fixed` | Tests failing on a tracked branch that pass in this run |
+| `slower` | Passing tests that took much longer than usual on a tracked branch |
 | `blocking` | Failures not covered by `tolerate` |
 
 Outputs are numbers written as strings. Give the step an `id` to use them:

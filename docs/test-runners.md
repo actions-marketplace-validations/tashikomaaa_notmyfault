@@ -170,6 +170,10 @@ Retries within a run are the fastest way for notmyfault to prove a test flaky. I
 
 Runners that only report the final outcome of a retried test hide the retry from notmyfault. Flakiness is still detected through re-runs of the same commit and through the history.
 
+## Durations
+
+notmyfault reads the `time` attribute of each test case, in seconds, to spot [slower tests](verdicts.md#slower-tests) and rank the slowest ones. Nearly every runner writes it, and reports without it simply have no durations.
+
 ## Annotations
 
 notmyfault [annotates failed tests](verdicts.md#annotations) when it can find their file in the repository. What it finds depends on the report:

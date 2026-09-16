@@ -16,6 +16,8 @@ export interface TestResult {
   outcome: Outcome;
   /** First line of the first failure message, if any. */
   message?: string;
+  /** Duration in milliseconds, when the report gives it. */
+  duration?: number;
   /** What the report tells about where a failed test lives, to annotate it. */
   hints?: LocationHints;
 }
@@ -128,6 +130,8 @@ function toResult(testcase: XmlElement, suite: Suite): TestResult | undefined {
   };
   const message = firstMessage(failures[0] ?? flakyAttempts[0]);
   if (message) result.message = message;
+  const seconds = Number(testcase.attrs.time);
+  if (testcase.attrs.time?.trim() && Number.isFinite(seconds) && seconds >= 0) result.duration = Math.round(seconds * 1000);
   if (outcome === "failed") result.hints = locationHints(testcase, suite, failures);
   return result;
 }

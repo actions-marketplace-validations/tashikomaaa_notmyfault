@@ -6,6 +6,7 @@ import { emptyHistory, errorFingerprint } from "../src/history";
 import type { TestResult } from "../src/junit";
 import {
   commentMarker,
+  duration,
   renderComment,
   renderSuitesComment,
   renderSuitesSummary,
@@ -195,6 +196,19 @@ describe("renderComment", () => {
     expect(body).toContain("- <code>search › accents</code>, failed the last 8 runs there");
   });
 
+  it("lists passing tests that got much slower", () => {
+    const history = emptyHistory();
+    history.tests = { "api › search": { outcomes: "ppppp", lastSeen: "2026-09-16", durations: [780, 800, 820, 790, 810] } };
+    const analysis = analyze([{ id: "api › search", title: "api › search", outcome: "passed", duration: 2400 }], history, NOW, 30);
+    const body = renderComment(analysis, context());
+    expect(body).toContain("🐢 **Slower:** 1 passing test took much longer than usual on `main`.");
+    expect(body).toContain("- <code>api › search</code>: 2.4 s, usually 800 ms");
+  });
+
+  it("formats durations in the unit that reads best", () => {
+    expect([0, 999, 1000, 2450, 59_949, 60_000, 125_400].map(duration)).toEqual(["0 ms", "999 ms", "1.0 s", "2.5 s", "59.9 s", "1 min 0 s", "2 min 5 s"]);
+  });
+
   it("explains the quarantine decision", () => {
     const { analysis } = scenario();
     expect(renderComment(analysis, context({ mode: "quarantine", blocking: 2 }))).toContain(
@@ -245,5 +259,17 @@ describe("renderSummary", () => {
     expect(summary).not.toContain("<!-- notmyfault");
     expect(summary).toContain("Most unreliable tests on `main`");
     expect(summary).toContain("| <code>api › flaky</code> | 2 / 10 | 0 | yes |");
+    const slowest = renderSummary(analysis, [], context());
+    expect(slowest).not.toContain("Slowest tests");
+  });
+
+  it("lists the slowest tests in the summary", () => {
+    const { analysis } = scenario();
+    const summary = renderSuitesSummary(
+      [{ name: "ci-test", analysis, historyRuns: 40, slowest: [{ id: "e2e › checkout", median: 12_300, fastest: 9800, slowest: 31_000, runs: 10 }] }],
+      context(),
+    );
+    expect(summary).toContain("<details><summary>Slowest tests on `main`</summary>");
+    expect(summary).toContain("| <code>e2e › checkout</code> | 12.3 s | 9.8 s | 31.0 s | 10 |");
   });
 });

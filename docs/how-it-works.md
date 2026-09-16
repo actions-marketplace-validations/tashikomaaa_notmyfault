@@ -70,7 +70,8 @@ The branch always holds **a single commit without parent**, authored by `github-
    "evidence": [{ "at": "2026-09-12T08:31:02.000Z", "sha": "a41c07e9b2f3", "kind": "rerun" }],
    "lastSeen": "2026-09-16",
    "errors": ["7c1e0a9b54d2"],
-   "lastFailure": "2026-09-15"
+   "lastFailure": "2026-09-15",
+   "durations": [812, 790, 845, 3120, 801]
   }
  }
 }
@@ -85,8 +86,9 @@ The branch always holds **a single commit without parent**, authored by `github-
 | `lastSeen` | Last day the test was recorded |
 | `errors` | Fingerprints of the last 10 distinct failure messages seen on tracked branches, see [Errors](#errors) |
 | `lastFailure` | Last day the test failed, or passed only after a retry, on a tracked branch |
+| `durations` | Durations of the last 10 runs on tracked branches, in milliseconds, when reports give them |
 
-The file contains test names, outcomes, short commit SHAs, dates and fingerprints of failure messages. It contains no failure message, log or source code.
+The file contains test names, outcomes, short commit SHAs, dates, durations and fingerprints of failure messages. It contains no failure message, log or source code.
 
 ### What each run records
 
@@ -98,6 +100,7 @@ The file contains test names, outcomes, short commit SHAs, dates and fingerprint
 | Records `rerun` evidence for tests that pass on a commit listed in `failedOn` | yes | yes |
 | Adds the fingerprint of each failure message to `errors` | yes | no |
 | Sets `lastFailure` for tests that failed or passed after a retry | yes | no |
+| Appends the duration of every test to `durations` | yes | no |
 | Creates an entry for a test that only passed | yes | no |
 
 Runs that teach nothing new do not write anything. Pull requests from forks never write, because their token is read-only.

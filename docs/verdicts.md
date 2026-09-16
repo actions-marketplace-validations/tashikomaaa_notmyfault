@@ -100,6 +100,18 @@ The rule is the one of *already failing*: 1 or more failed runs in a row on the 
 
 A fix is worth knowing about, so notmyfault comments on a pull request that fixes a test even when nothing failed.
 
+## Slower tests
+
+A test that passes, but takes much longer than usual, is listed as **slower**:
+
+> 🐢 **Slower:** 1 passing test took much longer than usual on `main`.
+>
+> - `api › search`: 2.4 s, usually 800 ms
+
+"Much longer" means at least twice its median duration over its last runs on the tracked branch, and at least 500 ms more, with at least 5 runs to compare with. Durations come from the `time` attribute of the report. Tests that fail are not listed: their failure explains more than their duration.
+
+A test getting slower is often a test about to time out, or a change that made the code slower. It does not make notmyfault comment on its own, and it never fails the step: the `slower` output counts them if you want to act on it.
+
 ## Annotations
 
 When the report tells where a failed test lives, notmyfault annotates it with its verdict and the first line of its failure message. Annotations appear in the workflow run and, on pull requests, next to the code in the **Files changed** tab when the annotated file is part of the change.
@@ -132,7 +144,11 @@ The [demo repository](https://github.com/tashikomaaa/notmyfault-demo) runs notmy
 
 ## The job summary
 
-The job summary contains the same report, plus a ranking of the **most unreliable tests** on the tracked branch. The ranking holds up to 10 tests, known flaky tests first, then by share of failed runs:
+The job summary contains the same report, plus two rankings of the tests of the tracked branch.
+
+The **slowest tests**, up to 10, by median duration over their last 10 runs, with their fastest and slowest runs. A wide range often means a test depends on timing.
+
+The **most unreliable tests**, up to 10, known flaky tests first, then by share of failed runs:
 
 | Column | Meaning |
 |---|---|

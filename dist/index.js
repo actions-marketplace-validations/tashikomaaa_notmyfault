@@ -83,6 +83,7 @@ var RETRY = "r";
 var MAX_FAILED_ON = 20;
 var MAX_EVIDENCE = 10;
 var MAX_ERRORS = 10;
+var MAX_DURATIONS = 10;
 var MAX_FINGERPRINTED_LENGTH = 200;
 var DAY_MS = 24 * 60 * 60 * 1e3;
 function emptyHistory() {
@@ -131,6 +132,7 @@ function recordRun(history, results, options) {
       const code2 = result.outcome === "failed" ? FAIL : result.outcome === "flaky" ? RETRY : PASS;
       test.outcomes = (test.outcomes + code2).slice(-options.window);
       testChanged = true;
+      if (result.duration !== void 0) test.durations = [...test.durations ?? [], result.duration].slice(-MAX_DURATIONS);
       if (result.outcome !== "passed") {
         test.lastFailure = today;
         if (result.message) addError(test, errorFingerprint(result.message));
@@ -189,20 +191,32 @@ var LIKELY_FLAKY_ISOLATED_FAILURES = 3;
 var UNLIKELY_STREAK_CHANCE = 0.01;
 var MIN_BROKEN_STREAK = 3;
 var MAX_BROKEN_STREAK = 10;
+var SLOWER_RATIO = 2;
+var SLOWER_MIN_DIFFERENCE_MS = 500;
+var SLOWER_MIN_RUNS = 5;
 var VERDICT_ORDER = { new: 0, suspect: 1, broken: 2, flaky: 3 };
 function analyze(results, history, now, evidenceTtlDays) {
-  const analysis = { total: results.length, passed: 0, skipped: 0, failures: [], retried: [], fixed: [] };
+  const analysis = { total: results.length, passed: 0, skipped: 0, failures: [], retried: [], fixed: [], slower: [] };
   const checkFixed = (test) => {
     const tested = history.tests[test.id];
     if (!tested?.outcomes.endsWith(FAIL)) return;
     const stats = computeStats(tested, now, evidenceTtlDays);
     if (verdictFor(stats) === "broken") analysis.fixed.push({ test, ...stats });
   };
+  const checkSlower = (test) => {
+    const durations = history.tests[test.id]?.durations ?? [];
+    if (test.duration === void 0 || durations.length < SLOWER_MIN_RUNS) return;
+    const usual = median(durations);
+    if (test.duration >= usual * SLOWER_RATIO && test.duration - usual >= SLOWER_MIN_DIFFERENCE_MS) {
+      analysis.slower.push({ test, duration: test.duration, usual });
+    }
+  };
   for (const test of results) {
     switch (test.outcome) {
       case "passed":
         analysis.passed++;
         checkFixed(test);
+        checkSlower(test);
         break;
       case "skipped":
         analysis.skipped++;
@@ -211,6 +225,7 @@ function analyze(results, history, now, evidenceTtlDays) {
         analysis.passed++;
         analysis.retried.push(test);
         checkFixed(test);
+        checkSlower(test);
         break;
       case "failed": {
         const tested = history.tests[test.id];
@@ -230,6 +245,7 @@ function analyze(results, history, now, evidenceTtlDays) {
   );
   analysis.retried.sort((a, b) => a.title.localeCompare(b.title));
   analysis.fixed.sort((a, b) => a.test.title.localeCompare(b.test.title));
+  analysis.slower.sort((a, b) => b.duration / b.usual - a.duration / a.usual || a.test.title.localeCompare(b.test.title));
   return analysis;
 }
 function computeStats(history, now, evidenceTtlDays) {
@@ -282,6 +298,20 @@ function brokenStreak(failureRate) {
   let streak = MIN_BROKEN_STREAK;
   while (streak < MAX_BROKEN_STREAK && failureRate ** streak >= UNLIKELY_STREAK_CHANCE) streak++;
   return streak;
+}
+function rankSlowTests(history, limit) {
+  const ranked = [];
+  for (const [id, test] of Object.entries(history.tests)) {
+    const durations = test.durations ?? [];
+    if (durations.length === 0) continue;
+    ranked.push({ id, median: median(durations), fastest: Math.min(...durations), slowest: Math.max(...durations), runs: durations.length });
+  }
+  return ranked.filter((test) => test.median > 0).sort((a, b) => b.median - a.median || a.id.localeCompare(b.id)).slice(0, limit);
+}
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[middle] : Math.round((sorted[middle - 1] + sorted[middle]) / 2);
 }
 function isolatedFailures(outcomes) {
   let isolated = 0;
@@ -510,6 +540,7 @@ import { createHash as createHash2 } from "node:crypto";
 var MAX_ROWS = 30;
 var MAX_MESSAGES = 10;
 var MAX_FIXED = 10;
+var MAX_SLOWER = 10;
 var PROJECT_URL = "https://github.com/tashikomaaa/notmyfault";
 var BADGES_URL = "https://raw.githubusercontent.com/tashikomaaa/notmyfault/main/docs/assets";
 var EMOJI = { new: "\u{1F534}", suspect: "\u{1F7E0}", broken: "\u26AB", flaky: "\u{1F7E1}" };
@@ -525,8 +556,22 @@ function renderSuitesComment(suites, context) {
 function renderSuitesSummary(suites, context) {
   const lines = renderBody(suites, context);
   for (const suite of suites) {
-    if (!suite.ranking?.length) continue;
     const of = suites.length > 1 ? ` of ${suite.name}` : "";
+    if (suite.slowest?.length) {
+      lines.push(
+        "",
+        `<details><summary>Slowest tests${of} on ${branches(context)}</summary>`,
+        "",
+        "| Test | Median | Fastest | Slowest | Runs |",
+        "|---|--:|--:|--:|--:|",
+        ...suite.slowest.map(
+          (t) => `| ${code(t.id)} | ${duration(t.median)} | ${duration(t.fastest)} | ${duration(t.slowest)} | ${t.runs} |`
+        ),
+        "",
+        "</details>"
+      );
+    }
+    if (!suite.ranking?.length) continue;
     lines.push(
       "",
       `<details><summary>Most unreliable tests${of} on ${branches(context)}</summary>`,
@@ -580,7 +625,8 @@ function combine(analyses) {
     skipped: analyses.reduce((sum, a) => sum + a.skipped, 0),
     failures: analyses.flatMap((a) => a.failures),
     retried: analyses.flatMap((a) => a.retried),
-    fixed: analyses.flatMap((a) => a.fixed)
+    fixed: analyses.flatMap((a) => a.fixed),
+    slower: analyses.flatMap((a) => a.slower)
   };
 }
 function renderSuite(analysis, context) {
@@ -598,6 +644,7 @@ function renderSuite(analysis, context) {
     lines.push(...renderMessages(analysis.failures));
   }
   if (analysis.fixed.length > 0) lines.push(...renderFixed(analysis.fixed, context));
+  if (analysis.slower.length > 0) lines.push(...renderSlower(analysis.slower, context));
   return lines;
 }
 function headline(analysis) {
@@ -671,6 +718,22 @@ function renderFixed(fixed, context) {
   if (fixed.length > MAX_FIXED) lines.push(`- _\u2026and ${fixed.length - MAX_FIXED} more_`);
   lines.push("");
   return lines;
+}
+function renderSlower(slower, context) {
+  const lines = [
+    `\u{1F422} **Slower:** ${plural(slower.length, "passing test")} took much longer than usual on ${branches(context)}.`,
+    "",
+    ...slower.slice(0, MAX_SLOWER).map((s) => `- ${code(s.test.title)}: ${duration(s.duration)}, usually ${duration(s.usual)}`)
+  ];
+  if (slower.length > MAX_SLOWER) lines.push(`- _\u2026and ${slower.length - MAX_SLOWER} more_`);
+  lines.push("");
+  return lines;
+}
+function duration(ms) {
+  if (ms < 1e3) return `${ms} ms`;
+  if (ms < 6e4) return `${(ms / 1e3).toFixed(1)} s`;
+  const minutes = Math.floor(ms / 6e4);
+  return `${minutes} min ${Math.round((ms - minutes * 6e4) / 1e3)} s`;
 }
 function footer(retried, context) {
   const parts = [];
@@ -1145,6 +1208,8 @@ function toResult(testcase, suite) {
   };
   const message = firstMessage(failures[0] ?? flakyAttempts[0]);
   if (message) result.message = message;
+  const seconds = Number(testcase.attrs.time);
+  if (testcase.attrs.time?.trim() && Number.isFinite(seconds) && seconds >= 0) result.duration = Math.round(seconds * 1e3);
   if (outcome === "failed") result.hints = locationHints(testcase, suite, failures);
   return result;
 }
@@ -1317,6 +1382,7 @@ async function evaluate(loaded, context, settings, store, io, now) {
     }
     for (const test of analysis.retried) io.info(`retried  ${test.title}`);
     for (const fixed of analysis.fixed) io.info(`fixed    ${fixed.test.title}`);
+    for (const slow of analysis.slower) io.info(`slower   ${slow.test.title} (${duration(slow.duration)}, usually ${duration(slow.usual)})`);
     io.endGroup();
   }
   if (settings.annotations) annotate(failures, reportContext, context.workspace, io);
@@ -1330,7 +1396,8 @@ async function evaluate(loaded, context, settings, store, io, now) {
     name: suite.key,
     analysis: suite.analysis,
     historyRuns: suite.history.runs,
-    ranking: rankFlakyTests(suite.history, now, EVIDENCE_TTL_DAYS, RANKING_SIZE)
+    ranking: rankFlakyTests(suite.history, now, EVIDENCE_TTL_DAYS, RANKING_SIZE),
+    slowest: rankSlowTests(suite.history, RANKING_SIZE)
   }));
   io.appendSummary(renderSuitesSummary(reports, reportContext));
   if (settings.comment && context.pullRequest) {
@@ -1345,6 +1412,7 @@ async function evaluate(loaded, context, settings, store, io, now) {
   io.setOutput("broken-failures", count2(["broken"]));
   io.setOutput("retried", sum((a) => a.retried.length));
   io.setOutput("fixed", sum((a) => a.fixed.length));
+  io.setOutput("slower", sum((a) => a.slower.length));
   io.setOutput("blocking", blocking.length);
   if (settings.mode === "quarantine" && blocking.length > 0) {
     const names = blocking.slice(0, 5).map((f) => f.test.title).join(", ");

@@ -1,4 +1,4 @@
-import type { Analysis, FailureVerdict, FixedTest, RankedTest, Verdict } from "./analyze";
+import type { Analysis, FailureVerdict, FixedTest, RankedTest, SlowerTest, SlowTest, Verdict } from "./analyze";
 import type { TestResult } from "./junit";
 
 export type Mode = "report" | "quarantine";
@@ -24,11 +24,14 @@ export interface SuiteReport {
   historyRuns: number;
   /** Most unreliable tests, for the job summary. */
   ranking?: RankedTest[];
+  /** Slowest tests, for the job summary. */
+  slowest?: SlowTest[];
 }
 
 const MAX_ROWS = 30;
 const MAX_MESSAGES = 10;
 const MAX_FIXED = 10;
+const MAX_SLOWER = 10;
 const PROJECT_URL = "https://github.com/tashikomaaa/notmyfault";
 // Comments already posted keep pointing at these images: never rename or remove them.
 const BADGES_URL = "https://raw.githubusercontent.com/tashikomaaa/notmyfault/main/docs/assets";
@@ -60,8 +63,22 @@ export function renderSuitesComment(suites: SuiteReport[], context: ReportContex
 export function renderSuitesSummary(suites: SuiteReport[], context: ReportContext): string {
   const lines = renderBody(suites, context);
   for (const suite of suites) {
-    if (!suite.ranking?.length) continue;
     const of = suites.length > 1 ? ` of ${suite.name}` : "";
+    if (suite.slowest?.length) {
+      lines.push(
+        "",
+        `<details><summary>Slowest tests${of} on ${branches(context)}</summary>`,
+        "",
+        "| Test | Median | Fastest | Slowest | Runs |",
+        "|---|--:|--:|--:|--:|",
+        ...suite.slowest.map(
+          (t) => `| ${code(t.id)} | ${duration(t.median)} | ${duration(t.fastest)} | ${duration(t.slowest)} | ${t.runs} |`,
+        ),
+        "",
+        "</details>",
+      );
+    }
+    if (!suite.ranking?.length) continue;
     lines.push(
       "",
       `<details><summary>Most unreliable tests${of} on ${branches(context)}</summary>`,
@@ -124,6 +141,7 @@ function combine(analyses: Analysis[]): Analysis {
     failures: analyses.flatMap((a) => a.failures),
     retried: analyses.flatMap((a) => a.retried),
     fixed: analyses.flatMap((a) => a.fixed),
+    slower: analyses.flatMap((a) => a.slower),
   };
 }
 
@@ -144,6 +162,7 @@ function renderSuite(analysis: Analysis, context: ReportContext): string[] {
   }
 
   if (analysis.fixed.length > 0) lines.push(...renderFixed(analysis.fixed, context));
+  if (analysis.slower.length > 0) lines.push(...renderSlower(analysis.slower, context));
   return lines;
 }
 
@@ -233,6 +252,27 @@ function renderFixed(fixed: FixedTest[], context: ReportContext): string[] {
   if (fixed.length > MAX_FIXED) lines.push(`- _…and ${fixed.length - MAX_FIXED} more_`);
   lines.push("");
   return lines;
+}
+
+function renderSlower(slower: SlowerTest[], context: ReportContext): string[] {
+  const lines = [
+    `🐢 **Slower:** ${plural(slower.length, "passing test")} took much longer than usual on ${branches(context)}.`,
+    "",
+    ...slower
+      .slice(0, MAX_SLOWER)
+      .map((s) => `- ${code(s.test.title)}: ${duration(s.duration)}, usually ${duration(s.usual)}`),
+  ];
+  if (slower.length > MAX_SLOWER) lines.push(`- _…and ${slower.length - MAX_SLOWER} more_`);
+  lines.push("");
+  return lines;
+}
+
+/** A duration in milliseconds, in the unit that reads best. */
+export function duration(ms: number): string {
+  if (ms < 1000) return `${ms} ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
+  const minutes = Math.floor(ms / 60_000);
+  return `${minutes} min ${Math.round((ms - minutes * 60_000) / 1000)} s`;
 }
 
 function footer(retried: TestResult[], context: ReportContext): string {

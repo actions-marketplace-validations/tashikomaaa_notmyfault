@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
+- Test durations: passing tests that take much longer than usual on the tracked branch are listed as slower in the report, with a `slower` output, and the job summary ranks the slowest tests ([#7](https://github.com/tashikomaaa/notmyfault/issues/7)).
 - `flaky-issues: true` opens an issue for each flaky test on runs on tracked branches, updates it when the test fails again and closes it after 30 days without a failure. It needs the `issues: write` permission ([#6](https://github.com/tashikomaaa/notmyfault/issues/6)).
 
 ## [1.3.0] - 2026-09-16

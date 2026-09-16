@@ -67,7 +67,7 @@ jobs:
 
 ## What notmyfault stores
 
-The history branch contains, for each test: its name, a string of outcome letters, up to 20 short commit SHAs, up to 10 dated proofs of flakiness, up to 10 fingerprints of failure messages seen on tracked branches, and the last day it was seen. It never stores failure messages, logs, environment variables or source code.
+The history branch contains, for each test: its name, a string of outcome letters, up to 20 short commit SHAs, up to 10 dated proofs of flakiness, up to 10 fingerprints of failure messages seen on tracked branches, the durations of its last 10 runs there, and the last days it failed and was seen. It never stores failure messages, logs, environment variables or source code.
 
 A fingerprint is a 12-character hash of a normalized message, see [Errors](how-it-works.md#errors). It does not contain the message, but a short and common message could be recognized by hashing candidates.
 

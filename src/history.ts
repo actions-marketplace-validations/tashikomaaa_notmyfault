@@ -28,6 +28,8 @@ export interface TestHistory {
   errors?: string[];
   /** Last day (YYYY-MM-DD) the test failed, or passed only after a retry, on a tracked branch. */
   lastFailure?: string;
+  /** Durations in milliseconds of the last runs on tracked branches, oldest first. */
+  durations?: number[];
   /** Last day (YYYY-MM-DD) the test was recorded. */
   lastSeen: string;
 }
@@ -55,6 +57,7 @@ export interface RecordOptions {
 const MAX_FAILED_ON = 20;
 const MAX_EVIDENCE = 10;
 const MAX_ERRORS = 10;
+export const MAX_DURATIONS = 10;
 const MAX_FINGERPRINTED_LENGTH = 200;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -127,6 +130,7 @@ export function recordRun(history: History, results: TestResult[], options: Reco
       const code = result.outcome === "failed" ? FAIL : result.outcome === "flaky" ? RETRY : PASS;
       test.outcomes = (test.outcomes + code).slice(-options.window);
       testChanged = true;
+      if (result.duration !== undefined) test.durations = [...(test.durations ?? []), result.duration].slice(-MAX_DURATIONS);
       if (result.outcome !== "passed") {
         test.lastFailure = today;
         // Only errors seen on tracked branches are known: a pull request must not excuse its own.

@@ -71,6 +71,16 @@ describe("recordRun", () => {
     expect(history.tests.t!.lastFailure).toBe("2026-09-01");
   });
 
+  it("keeps the durations of the last 10 runs on tracked branches", () => {
+    const history = emptyHistory();
+    for (let run = 1; run <= 12; run++) {
+      recordRun(history, [{ id: "t", title: "t", outcome: "passed", duration: run * 100 }], options());
+    }
+    recordRun(history, [{ id: "t", title: "t", outcome: "passed", duration: 9999 }], options({ tracked: false }));
+    recordRun(history, [{ id: "t", title: "t", outcome: "passed" }], options());
+    expect(history.tests.t!.durations).toEqual([300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200]);
+  });
+
   it("keeps the 10 most recent errors", () => {
     const history = emptyHistory();
     for (const letter of "abcdefghijkl") {

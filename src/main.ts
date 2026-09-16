@@ -2,7 +2,15 @@ import { statSync } from "node:fs";
 import { glob, readFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { ActionIO } from "./actions";
-import { analyze, blockingFailures, rankFlakyTests, type Analysis, type FailureVerdict, type Verdict } from "./analyze";
+import {
+  analyze,
+  blockingFailures,
+  rankFlakyTests,
+  rankSlowTests,
+  type Analysis,
+  type FailureVerdict,
+  type Verdict,
+} from "./analyze";
 import { readContext, runUrl, type RunContext } from "./context";
 import { GitStore } from "./git-store";
 import { FLAKY_LABEL, planFlakyIssues } from "./flaky-issues";
@@ -12,6 +20,7 @@ import { combineReports, parseJUnit, type TestResult } from "./junit";
 import { locate } from "./locate";
 import {
   commentMarker,
+  duration,
   plainExplanation,
   renderSuitesComment,
   renderSuitesSummary,
@@ -135,6 +144,7 @@ async function evaluate(
     }
     for (const test of analysis.retried) io.info(`retried  ${test.title}`);
     for (const fixed of analysis.fixed) io.info(`fixed    ${fixed.test.title}`);
+    for (const slow of analysis.slower) io.info(`slower   ${slow.test.title} (${duration(slow.duration)}, usually ${duration(slow.usual)})`);
     io.endGroup();
   }
 
@@ -151,6 +161,7 @@ async function evaluate(
     analysis: suite.analysis,
     historyRuns: suite.history.runs,
     ranking: rankFlakyTests(suite.history, now, EVIDENCE_TTL_DAYS, RANKING_SIZE),
+    slowest: rankSlowTests(suite.history, RANKING_SIZE),
   }));
   io.appendSummary(renderSuitesSummary(reports, reportContext));
   if (settings.comment && context.pullRequest) {
@@ -166,6 +177,7 @@ async function evaluate(
   io.setOutput("broken-failures", count(["broken"]));
   io.setOutput("retried", sum((a) => a.retried.length));
   io.setOutput("fixed", sum((a) => a.fixed.length));
+  io.setOutput("slower", sum((a) => a.slower.length));
   io.setOutput("blocking", blocking.length);
 
   if (settings.mode === "quarantine" && blocking.length > 0) {

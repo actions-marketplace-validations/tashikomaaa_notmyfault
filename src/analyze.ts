@@ -42,6 +42,23 @@ export interface FixedTest extends TestStats {
   test: TestResult;
 }
 
+export interface SlowerTest {
+  test: TestResult;
+  /** Duration in this run, in milliseconds. */
+  duration: number;
+  /** Median duration on tracked branches, in milliseconds. */
+  usual: number;
+}
+
+export interface SlowTest {
+  id: string;
+  /** Median, fastest and slowest durations on tracked branches, in milliseconds. */
+  median: number;
+  fastest: number;
+  slowest: number;
+  runs: number;
+}
+
 export interface Analysis {
   total: number;
   passed: number;
@@ -52,6 +69,8 @@ export interface Analysis {
   retried: TestResult[];
   /** Tests that pass in this run while they are failing on the tracked branch. */
   fixed: FixedTest[];
+  /** Passing tests that took much longer than usual on the tracked branch. */
+  slower: SlowerTest[];
 }
 
 export interface RankedTest extends TestStats {
@@ -65,10 +84,14 @@ const LIKELY_FLAKY_ISOLATED_FAILURES = 3;
 const UNLIKELY_STREAK_CHANCE = 0.01;
 const MIN_BROKEN_STREAK = 3;
 const MAX_BROKEN_STREAK = 10;
+/** A passing test is slower when it takes at least twice its median duration, and 500 ms more, over at least 5 runs. */
+const SLOWER_RATIO = 2;
+const SLOWER_MIN_DIFFERENCE_MS = 500;
+const SLOWER_MIN_RUNS = 5;
 const VERDICT_ORDER: Record<Verdict, number> = { new: 0, suspect: 1, broken: 2, flaky: 3 };
 
 export function analyze(results: TestResult[], history: History, now: Date, evidenceTtlDays: number): Analysis {
-  const analysis: Analysis = { total: results.length, passed: 0, skipped: 0, failures: [], retried: [], fixed: [] };
+  const analysis: Analysis = { total: results.length, passed: 0, skipped: 0, failures: [], retried: [], fixed: [], slower: [] };
   const checkFixed = (test: TestResult) => {
     const tested = history.tests[test.id];
     if (!tested?.outcomes.endsWith(FAIL)) return;
@@ -76,11 +99,20 @@ export function analyze(results: TestResult[], history: History, now: Date, evid
     // Had it failed, it would have been already failing: passing now is a fix, not luck.
     if (verdictFor(stats) === "broken") analysis.fixed.push({ test, ...stats });
   };
+  const checkSlower = (test: TestResult) => {
+    const durations = history.tests[test.id]?.durations ?? [];
+    if (test.duration === undefined || durations.length < SLOWER_MIN_RUNS) return;
+    const usual = median(durations);
+    if (test.duration >= usual * SLOWER_RATIO && test.duration - usual >= SLOWER_MIN_DIFFERENCE_MS) {
+      analysis.slower.push({ test, duration: test.duration, usual });
+    }
+  };
   for (const test of results) {
     switch (test.outcome) {
       case "passed":
         analysis.passed++;
         checkFixed(test);
+        checkSlower(test);
         break;
       case "skipped":
         analysis.skipped++;
@@ -89,6 +121,7 @@ export function analyze(results: TestResult[], history: History, now: Date, evid
         analysis.passed++;
         analysis.retried.push(test);
         checkFixed(test);
+        checkSlower(test);
         break;
       case "failed": {
         const tested = history.tests[test.id];
@@ -109,6 +142,7 @@ export function analyze(results: TestResult[], history: History, now: Date, evid
   );
   analysis.retried.sort((a, b) => a.title.localeCompare(b.title));
   analysis.fixed.sort((a, b) => a.test.title.localeCompare(b.test.title));
+  analysis.slower.sort((a, b) => b.duration / b.usual - a.duration / a.usual || a.test.title.localeCompare(b.test.title));
   return analysis;
 }
 
@@ -178,6 +212,23 @@ export function brokenStreak(failureRate: number): number {
   let streak = MIN_BROKEN_STREAK;
   while (streak < MAX_BROKEN_STREAK && failureRate ** streak >= UNLIKELY_STREAK_CHANCE) streak++;
   return streak;
+}
+
+/** Slowest tests on tracked branches, by median duration, for the job summary. */
+export function rankSlowTests(history: History, limit: number): SlowTest[] {
+  const ranked: SlowTest[] = [];
+  for (const [id, test] of Object.entries(history.tests)) {
+    const durations = test.durations ?? [];
+    if (durations.length === 0) continue;
+    ranked.push({ id, median: median(durations), fastest: Math.min(...durations), slowest: Math.max(...durations), runs: durations.length });
+  }
+  return ranked.filter((test) => test.median > 0).sort((a, b) => b.median - a.median || a.id.localeCompare(b.id)).slice(0, limit);
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[middle]! : Math.round((sorted[middle - 1]! + sorted[middle]!) / 2);
 }
 
 /** Single failures surrounded by successes: the typical flaky signature. */

@@ -96,6 +96,17 @@ describe("parseJUnit", () => {
   });
 });
 
+describe("durations", () => {
+  it("are read from the time attribute, in milliseconds", () => {
+    const results = fixture("vitest.xml");
+    expect(results.map((r) => r.duration)).toEqual([1, 3, 1]);
+    const [none, empty, invalid, long] = parseJUnit(
+      `<testsuite><testcase name="a"/><testcase name="b" time=""/><testcase name="c" time="fast"/><testcase name="d" time="12.3456"/></testsuite>`,
+    );
+    expect([none!.duration, empty!.duration, invalid!.duration, long!.duration]).toEqual([undefined, undefined, undefined, 12346]);
+  });
+});
+
 describe("location hints", () => {
   it("are collected for failed tests only", () => {
     const results = fixture("vitest.xml");

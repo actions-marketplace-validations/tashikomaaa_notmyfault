@@ -63,6 +63,8 @@ outputs:
     description: Tests that passed only after a retry.
   fixed:
     description: Tests failing on a tracked branch that pass in this run.
+  slower:
+    description: Passing tests that took much longer than usual on a tracked branch.
   blocking:
     description: Failures not covered by `tolerate`.
 

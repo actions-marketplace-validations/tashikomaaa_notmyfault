@@ -3,6 +3,7 @@ import {
   analyze,
   blockingFailures,
   brokenStreak,
+  rankSlowTests,
   isolatedFailures,
   rankFlakyTests,
   trailingFailures,
@@ -67,6 +68,32 @@ describe("verdicts", () => {
     expect(verdictOf({ outcomes: "prpfff" })).toBe("broken");
     // A short streak on a known flaky test is still flakiness.
     expect(verdictOf({ outcomes: "prppff" })).toBe("flaky");
+  });
+});
+
+describe("slower tests", () => {
+  const passing = (id: string, duration: number): TestResult => ({ id, title: id, outcome: "passed", duration });
+  const durations = [800, 750, 900, 820, 780];
+
+  it("take at least twice their median duration, and 500 ms more", () => {
+    const history = historyWith({ slow: { durations }, quick: { durations: [100, 120, 90, 110, 100] }, few: { durations: [800, 800] } });
+    const analysis = analyze(
+      [passing("slow", 1700), passing("quick", 400), passing("few", 5000), { ...passing("broken", 9000), outcome: "failed" }],
+      historyWith({ ...history.tests, broken: { durations } }),
+      NOW,
+      30,
+    );
+    // quick is 4x slower but only 300 ms, few has too few runs, broken fails.
+    expect(analysis.slower).toEqual([{ test: passing("slow", 1700), duration: 1700, usual: 800 }]);
+    expect(analyze([passing("slow", 1500)], history, NOW, 30).slower).toEqual([]);
+  });
+
+  it("are ranked by median duration for the summary", () => {
+    const history = historyWith({ a: { durations: [100, 300, 200] }, b: { durations: [1000, 3000] }, c: {}, zero: { durations: [0, 0] } });
+    expect(rankSlowTests(history, 10)).toEqual([
+      { id: "b", median: 2000, fastest: 1000, slowest: 3000, runs: 2 },
+      { id: "a", median: 200, fastest: 100, slowest: 300, runs: 3 },
+    ]);
   });
 });
 
