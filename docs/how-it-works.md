@@ -48,7 +48,7 @@ A run on a tracked branch follows a renamed test when it is unambiguous. Within 
 - exactly one test is new, never run on a tracked branch before;
 - and the last parts of their names are at least 60% similar, measured by edit distance: `computes totals` and `computes the totals` are, `computes totals` and `rejects expired cards` are not.
 
-The history of the old test then moves to the new name, along with what pull requests remembered about it, and its [flaky test issue](#flaky-test-issues), if any, gets the new name in its title and description. The job summary lists each rename.
+The history of the old test then moves to the new name, already for the analysis of that run, along with what pull requests remembered about it, and its [flaky test issue](#flaky-test-issues), if any, gets the new name in its title and description. The job summary lists each rename.
 
 Pull request runs never follow renames: until the rename reaches the tracked branch, the new test has no history. A deleted test must never pass its flakiness on to an unrelated new one, so anything less certain is left alone. If a rename was wrong, [reset the history](recipes.md#reset-the-history).
 

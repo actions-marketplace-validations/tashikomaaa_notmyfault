@@ -464,6 +464,8 @@ describe("run", () => {
     const merged = await simulate({ "computes the totals": "fail", pays: "pass" });
     expect(merged.logs).toContain("renamed  unit › checkout › computes totals → unit › checkout › computes the totals");
     expect(merged.summary).toContain("✏️ **Renamed:** the history of 1 test followed its new name.");
+    // The rename applies in that very run: the failure is compared with the history of the old name.
+    expect(merged.summary).toContain("**New failure.** Passed the last 2 runs on `main`.");
     expect(storedHistory().tests).toMatchObject({ "unit › checkout › computes the totals": { outcomes: "ppf" } });
     expect(storedHistory().tests["unit › checkout › computes totals"]).toBeUndefined();
   });

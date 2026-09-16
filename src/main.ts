@@ -120,6 +120,8 @@ interface LoadedSuite extends SuiteSettings {
 interface Suite extends LoadedSuite {
   history: History;
   analysis: Analysis;
+  /** Tests renamed in this run, already applied to the history. */
+  renames: Rename[];
 }
 
 async function evaluate(
@@ -131,9 +133,13 @@ async function evaluate(
   now: Date,
 ): Promise<number> {
   const suites: Suite[] = [];
+  const tracked = isTracked(context, settings);
   for (const suite of loaded) {
     const history = await loadHistory(store, historyPath(suite.key), settings, io);
-    suites.push({ ...suite, history, analysis: analyze(suite.results, history, now, EVIDENCE_TTL_DAYS) });
+    // On tracked branches, a renamed test keeps its history in this very run, or its failure would look new.
+    const renames = tracked ? detectRenames(history, suite.results) : [];
+    applyRenames(history, renames);
+    suites.push({ ...suite, history, renames, analysis: analyze(suite.results, history, now, EVIDENCE_TTL_DAYS) });
   }
   const named = suites.length > 1;
   for (const entry of settings.quarantine.filter((candidate) => !isActive(candidate, now))) {
@@ -182,10 +188,10 @@ async function evaluate(
     );
   }
   if (settings.annotations) annotate(failures, reportContext, context.workspace, io, onlyFlaky ? 1 : 0);
-  const renames = new Map<string, Rename[]>();
   if (settings.record) {
-    for (const suite of suites) renames.set(suite.key, await recordHistory(store, suite.key, suite.results, context, settings, io, now));
+    for (const suite of suites) await recordHistory(store, suite.key, suite.results, context, settings, io, now);
   }
+  for (const { renames } of suites) for (const { from, to } of renames) io.info(`renamed  ${from} → ${to}`);
   if (settings.flakyIssues && isTracked(context, settings) && !context.pullRequest?.fromFork) {
     await manageFlakyIssues(suites, context, settings, reportContext.runUrl, io, now);
   }
@@ -199,7 +205,7 @@ async function evaluate(
       ranking,
       slowest: rankSlowTests(suite.history, RANKING_SIZE),
       trends: failureTrends(suite.history, ranking.slice(0, TRENDS).map((test) => test.id)),
-      renames: renames.get(suite.key) ?? [],
+      renames: suite.renames,
     };
   });
   io.appendSummary(renderSuitesSummary(reports, reportContext));
@@ -380,13 +386,12 @@ async function recordHistory(
   settings: Settings,
   io: ActionIO,
   now: Date,
-): Promise<Rename[]> {
+): Promise<void> {
   if (context.pullRequest?.fromFork) {
     io.info("Pull request from a fork: the token is read-only, history is not recorded.");
-    return [];
+    return;
   }
   const tracked = isTracked(context, settings);
-  let renames: Rename[] = [];
 
   try {
     const pushed = await store.update(
@@ -394,8 +399,8 @@ async function recordHistory(
       (current) => {
         const history = parseHistory(current);
         // Only runs on tracked branches follow renames: a pull request must not pass a history on to a new test.
-        renames = tracked ? detectRenames(history, results) : [];
-        applyRenames(history, renames);
+        // Detected again on the latest content, in case another writer changed it since it was read.
+        if (tracked) applyRenames(history, detectRenames(history, results));
         const changed = recordRun(history, results, {
           sha: context.sha,
           tracked,
@@ -421,14 +426,11 @@ async function recordHistory(
         },
       },
     );
-    for (const { from, to } of renames) io.info(`renamed  ${from} → ${to}`);
     io.info(pushed ? `History updated on branch "${settings.branch}".` : "Nothing new to record.");
-    return renames;
   } catch (error) {
     io.warning(
       `Could not record history on branch "${settings.branch}". Does the job have "contents: write" permission? ${errorMessage(error)}`,
     );
-    return [];
   }
 }
 
@@ -454,10 +456,8 @@ async function manageFlakyIssues(
   try {
     const after = suites.map((suite) => {
       const history = structuredClone(suite.history);
-      const renames = detectRenames(history, suite.results);
-      applyRenames(history, renames);
       recordRun(history, suite.results, { sha: context.sha, tracked: true, now, window: settings.window, retentionDays: RETENTION_DAYS });
-      return { key: suite.key, history, results: suite.results, renames };
+      return { key: suite.key, history, results: suite.results, renames: suite.renames };
     });
     const { actions, postponed } = planFlakyIssues(after, await client.listIssues(FLAKY_LABEL.name), {
       trackedBranches: settings.trackedBranches,

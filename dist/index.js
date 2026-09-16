@@ -1694,9 +1694,12 @@ async function run2(env = process.env, io = new ActionIO(env), now = /* @__PURE_
 }
 async function evaluate(loaded, context, settings, store, io, now) {
   const suites = [];
+  const tracked = isTracked(context, settings);
   for (const suite of loaded) {
     const history = await loadHistory(store, historyPath(suite.key), settings, io);
-    suites.push({ ...suite, history, analysis: analyze(suite.results, history, now, EVIDENCE_TTL_DAYS) });
+    const renames = tracked ? detectRenames(history, suite.results) : [];
+    applyRenames(history, renames);
+    suites.push({ ...suite, history, renames, analysis: analyze(suite.results, history, now, EVIDENCE_TTL_DAYS) });
   }
   const named = suites.length > 1;
   for (const entry of settings.quarantine.filter((candidate) => !isActive(candidate, now))) {
@@ -1742,10 +1745,10 @@ async function evaluate(loaded, context, settings, store, io, now) {
     );
   }
   if (settings.annotations) annotate(failures, reportContext, context.workspace, io, onlyFlaky ? 1 : 0);
-  const renames = /* @__PURE__ */ new Map();
   if (settings.record) {
-    for (const suite of suites) renames.set(suite.key, await recordHistory(store, suite.key, suite.results, context, settings, io, now));
+    for (const suite of suites) await recordHistory(store, suite.key, suite.results, context, settings, io, now);
   }
+  for (const { renames } of suites) for (const { from, to } of renames) io.info(`renamed  ${from} \u2192 ${to}`);
   if (settings.flakyIssues && isTracked(context, settings) && !context.pullRequest?.fromFork) {
     await manageFlakyIssues(suites, context, settings, reportContext.runUrl, io, now);
   }
@@ -1758,7 +1761,7 @@ async function evaluate(loaded, context, settings, store, io, now) {
       ranking,
       slowest: rankSlowTests(suite.history, RANKING_SIZE),
       trends: failureTrends(suite.history, ranking.slice(0, TRENDS).map((test) => test.id)),
-      renames: renames.get(suite.key) ?? []
+      renames: suite.renames
     };
   });
   io.appendSummary(renderSuitesSummary(reports, reportContext));
@@ -1906,17 +1909,15 @@ function historyPath(key) {
 async function recordHistory(store, key, results, context, settings, io, now) {
   if (context.pullRequest?.fromFork) {
     io.info("Pull request from a fork: the token is read-only, history is not recorded.");
-    return [];
+    return;
   }
   const tracked = isTracked(context, settings);
-  let renames = [];
   try {
     const pushed = await store.update(
       historyPath(key),
       (current) => {
         const history = parseHistory(current);
-        renames = tracked ? detectRenames(history, results) : [];
-        applyRenames(history, renames);
+        if (tracked) applyRenames(history, detectRenames(history, results));
         const changed = recordRun(history, results, {
           sha: context.sha,
           tracked,
@@ -1942,14 +1943,11 @@ async function recordHistory(store, key, results, context, settings, io, now) {
         }
       }
     );
-    for (const { from, to } of renames) io.info(`renamed  ${from} \u2192 ${to}`);
     io.info(pushed ? `History updated on branch "${settings.branch}".` : "Nothing new to record.");
-    return renames;
   } catch (error) {
     io.warning(
       `Could not record history on branch "${settings.branch}". Does the job have "contents: write" permission? ${errorMessage(error)}`
     );
-    return [];
   }
 }
 function isTracked(context, settings) {
@@ -1960,10 +1958,8 @@ async function manageFlakyIssues(suites, context, settings, runUrl2, io, now) {
   try {
     const after = suites.map((suite) => {
       const history = structuredClone(suite.history);
-      const renames = detectRenames(history, suite.results);
-      applyRenames(history, renames);
       recordRun(history, suite.results, { sha: context.sha, tracked: true, now, window: settings.window, retentionDays: RETENTION_DAYS });
-      return { key: suite.key, history, results: suite.results, renames };
+      return { key: suite.key, history, results: suite.results, renames: suite.renames };
     });
     const { actions, postponed } = planFlakyIssues(after, await client.listIssues(FLAKY_LABEL.name), {
       trackedBranches: settings.trackedBranches,
