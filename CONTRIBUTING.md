@@ -46,7 +46,7 @@ npm run check   # typecheck, build dist/ and run all tests
 | `docs/` | Documentation, mirrored to the wiki. Images are in `docs/assets/` |
 | `brand/` | Original artwork: mascot, banner, badges, stickers. See [brand/README.md](brand/README.md) |
 | `scripts/wiki.ts` | Converts `docs/` into wiki pages |
-| `site/` | The website at [notyourfault.aldwin.fr](https://notyourfault.aldwin.fr) |
+| `site/` | The website at [notmyfault.aldwin.fr](https://notmyfault.aldwin.fr) |
 | `scripts/site.ts` | Builds `site/` with the images it shares with `docs/assets/` |
 
 [How it works](docs/how-it-works.md) describes the behavior these files implement.
@@ -84,7 +84,7 @@ node scripts/wiki.ts docs /tmp/notmyfault-wiki tashikomaaa/notmyfault
 
 ## Website
 
-[notyourfault.aldwin.fr](https://notyourfault.aldwin.fr) is a static page in `site/`, with no build tool. It uses the images of `docs/assets/`, copied in when it is built, and self-hosted fonts under the SIL Open Font License. The `Site` workflow deploys it on every push to `main` that changes it.
+[notmyfault.aldwin.fr](https://notmyfault.aldwin.fr) is a static page in `site/`, with no build tool. It uses the images of `docs/assets/`, copied in when it is built, and self-hosted fonts under the SIL Open Font License. The `Site` workflow deploys it on every push to `main` that changes it.
 
 To preview it locally:
 

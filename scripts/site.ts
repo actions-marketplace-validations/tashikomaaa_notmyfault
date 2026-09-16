@@ -1,5 +1,5 @@
 /**
- * Builds the showcase site published at https://notyourfault.aldwin.fr.
+ * Builds the showcase site published at https://notmyfault.aldwin.fr.
  *
  * Usage: node scripts/site.ts <out-dir>
  *

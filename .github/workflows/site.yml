@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: site
-      url: https://notyourfault.aldwin.fr
+      url: https://notmyfault.aldwin.fr
     steps:
       - uses: actions/checkout@v7
 
@@ -35,7 +35,7 @@ jobs:
       - name: Build
         run: node scripts/site.ts _site
 
-      - name: Upload to notyourfault.aldwin.fr
+      - name: Upload to notmyfault.aldwin.fr
         env:
           SSH_KEY: ${{ secrets.SITE_SSH_KEY }}
           # The key of the server, so the upload cannot be sent anywhere else.
