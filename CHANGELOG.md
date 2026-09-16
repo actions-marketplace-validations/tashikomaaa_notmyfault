@@ -4,10 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-16
+
 ### Added
 
-- Website at [notyourfault.aldwin.fr](https://notyourfault.aldwin.fr).
 - Tests that pass while failing on the tracked branch are listed as fixed in the report, with a `fixed` output. A pull request that fixes a test gets a comment even when nothing failed ([#1](https://github.com/tashikomaaa/notmyfault/issues/1)).
+- Website at [notyourfault.aldwin.fr](https://notyourfault.aldwin.fr).
 
 ## [1.1.0] - 2026-09-16
 
@@ -49,7 +51,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - Pull request comment kept up to date, job summary with the most unreliable tests, and step outputs.
 - Quarantine mode, so that known flaky tests stop blocking merges.
 
-[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/tashikomaaa/notmyfault/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/tashikomaaa/notmyfault/releases/tag/v1.0.0
