@@ -1,5 +1,9 @@
 # Troubleshooting
 
+<p align="center">
+  <img alt="The croissant mascot asleep on a pile of failed test reports." src="assets/sticker-asleep.png" width="220">
+</p>
+
 Messages are listed as they appear in the logs. **Errors** fail the step, **warnings** do not.
 
 ## No comment on my pull request

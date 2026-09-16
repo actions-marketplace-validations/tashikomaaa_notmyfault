@@ -6,6 +6,8 @@ body:
   - type: markdown
     attributes:
       value: |
+        <img align="right" alt="The croissant mascot kicking a bug labeled &quot;Test&quot;." src="https://github.com/tashikomaaa/notmyfault/raw/main/docs/assets/sticker-bug.png" width="120">
+
         [Troubleshooting](https://github.com/tashikomaaa/notmyfault/blob/main/docs/troubleshooting.md) explains every error and warning notmyfault logs: the answer may already be there.
   - type: textarea
     id: what

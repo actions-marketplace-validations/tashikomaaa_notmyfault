@@ -1,5 +1,9 @@
 # Quarantine flaky tests
 
+<p align="center">
+  <img alt="The croissant mascot in sunglasses, above the words &quot;Works on main (sometimes)&quot;." src="assets/sticker-works-on-main.png" width="220">
+</p>
+
 A flaky test that fails on an unrelated pull request blocks the merge, costs a re-run and teaches everyone to ignore red builds. In `quarantine` mode, notmyfault decides whether the job fails: known flaky tests no longer block, real failures still do.
 
 ## Setup
@@ -27,9 +31,9 @@ If branch protection requires this job's check, the requirement now means "no fa
 
 | `tolerate` | Effect |
 |---|---|
-| `flaky` (default) | Known and probably flaky tests do not block. Recommended. |
-| `flaky, broken` | Tests already failing on the tracked branch do not block either. Useful when a broken `main` should not freeze every pull request, at the risk of merging more changes on top of a broken test. |
-| `flaky, broken, suspect` | Tests that failed in isolation once or twice do not block. Not recommended: a suspect failure is as likely to be real as not. |
+| `flaky` (default)<br><img alt="" src="assets/verdict-flaky.png" width="28"> | Known and probably flaky tests do not block. Recommended. |
+| `flaky, broken`<br><img alt="" src="assets/verdict-flaky.png" width="28"><img alt="" src="assets/verdict-broken.png" width="28"> | Tests already failing on the tracked branch do not block either. Useful when a broken `main` should not freeze every pull request, at the risk of merging more changes on top of a broken test. |
+| `flaky, broken, suspect`<br><img alt="" src="assets/verdict-flaky.png" width="28"><img alt="" src="assets/verdict-broken.png" width="28"><img alt="" src="assets/verdict-suspect.png" width="28"> | Tests that failed in isolation once or twice do not block. Not recommended: a suspect failure is as likely to be real as not. |
 
 Tolerating `new` defeats the purpose and is never a good idea.
 

@@ -116,12 +116,12 @@ Then the first matching rule decides:
 
 | # | Condition | Verdict |
 |---|---|---|
-| 1 | 3 or more trailing failures | already failing |
-| 2 | proof | known flaky |
-| 3 | 1 or 2 trailing failures | already failing |
-| 4 | 3 or more isolated failures | probably flaky |
-| 5 | 1 or 2 isolated failures | suspect |
-| 6 | anything else | new |
+| 1 | 3 or more trailing failures | <img alt="" src="assets/verdict-broken.png" width="28"> already failing |
+| 2 | proof | <img alt="" src="assets/verdict-flaky.png" width="28"> known flaky |
+| 3 | 1 or 2 trailing failures | <img alt="" src="assets/verdict-broken.png" width="28"> already failing |
+| 4 | 3 or more isolated failures | <img alt="" src="assets/verdict-flaky.png" width="28"> probably flaky |
+| 5 | 1 or 2 isolated failures | <img alt="" src="assets/verdict-suspect.png" width="28"> suspect |
+| 6 | anything else | <img alt="" src="assets/verdict-new.png" width="28"> new |
 
 Why these numbers:
 

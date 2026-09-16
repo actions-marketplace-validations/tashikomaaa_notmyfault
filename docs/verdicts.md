@@ -16,6 +16,8 @@ Each failed test gets one verdict. The table lists the most actionable ones firs
 
 ### 🔴 New failure
 
+<img align="right" alt="New failure" src="assets/verdict-new.png" width="104">
+
 > **New failure.** Passed the last 48 runs on `main`.
 
 Nothing in the history explains this failure. Either the test passes consistently on the tracked branch, or notmyfault has no history for it yet, in which case the comment says *No history for this test on `main`*.
@@ -23,6 +25,8 @@ Nothing in the history explains this failure. Either the test passes consistentl
 **What to do:** assume your change caused it and reproduce it locally.
 
 ### 🟠 Suspect
+
+<img align="right" alt="Suspect" src="assets/verdict-suspect.png" width="104">
 
 > **Suspect.** Failed in isolation once in the last 50 runs on `main`.
 
@@ -32,6 +36,8 @@ The test failed once or twice on the tracked branch, each time between two succe
 
 ### ⚫ Already failing
 
+<img align="right" alt="Already failing" src="assets/verdict-broken.png" width="104">
+
 > **Already failing on `main`.** Failed the last 3 runs there.
 
 The most recent runs on the tracked branch failed too, so the problem predates your pull request.
@@ -39,6 +45,8 @@ The most recent runs on the tracked branch failed too, so the problem predates y
 **What to do:** nothing in your pull request. Once the tracked branch is fixed, update your branch.
 
 ### 🟡 Known flaky / Probably flaky
+
+<img align="right" alt="Flaky" src="assets/verdict-flaky.png" width="104">
 
 > **Known flaky.** Failed 4 of the last 50 runs on `main`; passed when the same commit was re-run on 2026-09-14.
 

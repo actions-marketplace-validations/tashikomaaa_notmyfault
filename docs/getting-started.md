@@ -1,5 +1,9 @@
 # Getting started
 
+<p align="center">
+  <img alt="The croissant mascot hugging a big green check mark." src="assets/sticker-passed.png" width="220">
+</p>
+
 This guide adds notmyfault to an existing workflow. It takes about five minutes.
 
 ## Requirements
@@ -71,6 +75,8 @@ git show FETCH_HEAD:history/ci-test.json
 When a test fails, or passes only after a retry, notmyfault comments on the pull request. It updates the same comment on every push, including to say that everything passes again. When nothing ever fails, it stays silent. The job summary always contains the full report.
 
 ## What to expect in the first days
+
+<img align="right" alt="The croissant mascot pressing a red &quot;Re-run&quot; button." src="assets/sticker-rerun.png" width="200">
 
 notmyfault only knows what it has seen. At first, most failures are reported as **new failures**, because there is nothing to compare them with. Verdicts improve as runs accumulate on `main`:
 

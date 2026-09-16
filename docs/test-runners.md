@@ -1,5 +1,9 @@
 # Test runners
 
+<p align="center">
+  <img alt="The croissant mascot kicking a bug labeled &quot;Test&quot;." src="assets/sticker-bug.png" width="220">
+</p>
+
 notmyfault reads JUnit XML, the de facto standard format for test reports. This page shows how to produce it with common runners.
 
 Runners marked **tested** have sample reports, following their output format, in the notmyfault test suite. The others write standard JUnit XML and should work. If a report from your runner is misread, please [open an issue](https://github.com/tashikomaaa/notmyfault/issues) and attach it: it will become a test case.

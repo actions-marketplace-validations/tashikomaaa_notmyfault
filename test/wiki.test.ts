@@ -26,10 +26,18 @@ describe("rewriteLinks", () => {
     );
   });
 
-  it("points links leaving docs/ at the repository", () => {
-    expect(rewriteLinks("[guide](../CONTRIBUTING.md#releasing) [pic](images/a.png)", PAGES, REPO)).toBe(
+  it("points links leaving docs/ at the repository, and images at their raw file", () => {
+    expect(rewriteLinks("[guide](../CONTRIBUTING.md#releasing) ![pic](images/a.png)", PAGES, REPO)).toBe(
       "[guide](https://github.com/acme/shop/blob/main/CONTRIBUTING.md#releasing) " +
-        "[pic](https://github.com/acme/shop/blob/main/docs/images/a.png)",
+        "![pic](https://github.com/acme/shop/raw/main/docs/images/a.png)",
+    );
+  });
+
+  it("rewrites src, srcset and href attributes of HTML tags", () => {
+    const html = '<a href="faq.md#why"><img alt="" src="assets/a.png" width="90"></a><source srcset="./assets/b.JPG">';
+    expect(rewriteLinks(html, PAGES, REPO)).toBe(
+      '<a href="FAQ#why"><img alt="" src="https://github.com/acme/shop/raw/main/docs/assets/a.png" width="90"></a>' +
+        '<source srcset="https://github.com/acme/shop/raw/main/docs/assets/b.JPG">',
     );
   });
 
@@ -83,9 +91,10 @@ describe("buildWiki", () => {
       for (const line of page.content.split("\n")) {
         if (/^\s*```/.test(line)) fenced = !fenced;
         if (fenced) continue;
-        for (const [, target] of line.matchAll(/\]\(([^)\s]+)/g)) {
-          if (/^https?:|^#/.test(target!)) continue;
-          expect(names, `${page.name} links to ${target}`).toContain(target!.split("#")[0]);
+        for (const [, markdown, html] of line.matchAll(/\]\(([^)\s]+)|\b(?:src|srcset|href)="([^"\s]+)"/g)) {
+          const target = (markdown ?? html)!;
+          if (/^https?:|^#/.test(target)) continue;
+          expect(names, `${page.name} links to ${target}`).toContain(target.split("#")[0]);
         }
       }
     }

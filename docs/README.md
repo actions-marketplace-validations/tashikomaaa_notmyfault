@@ -1,12 +1,28 @@
 # notmyfault documentation
 
+<p align="center">
+  <img alt="notmyfault: it's not your fault. The croissant mascot holds a verdict sheet reading &quot;Not your fault&quot;." src="assets/banner.jpg">
+</p>
+
 notmyfault is a GitHub Action that remembers how every test behaves on your default branch, then tells each pull request whether a failing test is **new**, **known to be flaky** or **already broken**.
+
+<p align="center">
+  <img alt="Three-panel comic. A developer panics in front of a red build. The croissant mascot rushes in with the test's history in a notebook. The croissant points out &quot;flaky&quot; and the developer relaxes with a coffee." src="assets/comic-strip.jpg">
+</p>
 
 ## Start here
 
 - [Live demo](https://github.com/tashikomaaa/notmyfault-demo/pull/1): a real pull request with a new failure, a test already broken on `main` and a flaky test.
 - [Getting started](getting-started.md): add notmyfault to a workflow in five minutes.
 - [Reading the report](verdicts.md): what each verdict means and what to do about it.
+
+<p align="center">
+  <a href="verdicts.md#-new-failure"><img alt="New failure" src="assets/verdict-new.png" width="88"></a>
+  <a href="verdicts.md#-suspect"><img alt="Suspect" src="assets/verdict-suspect.png" width="88"></a>
+  <a href="verdicts.md#-already-failing"><img alt="Already failing" src="assets/verdict-broken.png" width="88"></a>
+  <a href="verdicts.md#-known-flaky--probably-flaky"><img alt="Known flaky or probably flaky" src="assets/verdict-flaky.png" width="88"></a>
+  <a href="verdicts.md#the-headline"><img alt="All tests passed" src="assets/verdict-passed.png" width="88"></a>
+</p>
 
 ## Guides
 

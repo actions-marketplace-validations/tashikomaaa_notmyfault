@@ -1,5 +1,9 @@
 # FAQ
 
+<p align="center">
+  <img alt="The croissant mascot, looking worried." src="assets/mascot.png" width="200">
+</p>
+
 ### Does notmyfault replace retries in my test runner?
 
 No, it complements them. Retries hide flaky failures from the build status; notmyfault makes them visible, remembers them, and tells failures that are real from failures that are not. Retries reported in JUnit XML even help notmyfault prove that a test is flaky.
@@ -66,3 +70,7 @@ Yes. notmyfault is MIT licensed, runs in your own workflows and calls no paid se
 ### Why the name?
 
 Because that is what you want to know when a pull request turns red.
+
+<p align="center">
+  <img alt="The croissant mascot holding a sign reading &quot;Not my fault&quot;." src="assets/sticker-not-my-fault.png" width="240">
+</p>

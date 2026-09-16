@@ -11,6 +11,7 @@ const markdownFiles = [
   "SECURITY.md",
   "CHANGELOG.md",
   "CODE_OF_CONDUCT.md",
+  "brand/README.md",
   ...readdirSync(join(root, "docs"))
     .filter((file) => file.endsWith(".md"))
     .map((file) => `docs/${file}`),
@@ -31,9 +32,12 @@ function prose(markdown: string): string {
     .join("\n");
 }
 
+/** Markdown link targets, and src, srcset and href attributes of HTML tags. */
 function links(markdown: string): string[] {
   const text = prose(markdown).replace(/`[^`\n]*`/g, "");
-  return [...text.matchAll(/\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)].map((match) => match[1]!);
+  return [...text.matchAll(/\]\(([^)\s]+)(?:\s+"[^"]*")?\)|\b(?:src|srcset|href)="([^"\s]+)"/g)].map(
+    (match) => (match[1] ?? match[2])!,
+  );
 }
 
 /** Heading anchors, generated the way GitHub does. */

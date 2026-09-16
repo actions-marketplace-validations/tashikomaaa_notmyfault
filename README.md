@@ -1,6 +1,6 @@
 <div align="center">
 
-# notmyfault
+<img alt="notmyfault: it's not your fault. The croissant mascot holds a verdict sheet reading &quot;Not your fault&quot;." src="docs/assets/banner.jpg">
 
 **A test just failed on your pull request. Is it your fault?**
 
@@ -27,6 +27,10 @@ notmyfault is a GitHub Action that remembers how every test behaves on your defa
 </p>
 
 ## Why notmyfault
+
+<p align="center">
+  <img alt="Three-panel comic. A developer panics in front of a red build. The croissant mascot rushes in with the test's history in a notebook. The croissant points out &quot;flaky&quot; and the developer relaxes with a coffee." src="docs/assets/comic-strip.jpg">
+</p>
 
 - **Stop re-running builds blindly.** Every failure comes with a verdict and the evidence behind it.
 - **Stop flaky tests from blocking merges.** [Quarantine mode](docs/quarantine.md) fails the check only for failures that look real.
@@ -66,12 +70,12 @@ Runs on `main` build the history, pull requests are compared with it. The [getti
 
 ## How it decides
 
-| Verdict | Meaning |
-|---|---|
-| 🔴 **New failure** | Nothing in the history explains it. Probably caused by the change. |
-| 🟠 **Suspect** | Failed in isolation once or twice on `main`. Re-run to find out. |
-| ⚫ **Already failing** | The latest runs on `main` failed too. Not your fault. |
-| 🟡 **Flaky** | *Known flaky* when a retry or a re-run of the same commit proved it, *probably flaky* when it keeps failing in isolation. Not your fault. |
+| | Verdict | Meaning |
+|:---:|---|---|
+| <img alt="" src="docs/assets/verdict-new.png" width="56"> | 🔴 **New failure** | Nothing in the history explains it. Probably caused by the change. |
+| <img alt="" src="docs/assets/verdict-suspect.png" width="56"> | 🟠 **Suspect** | Failed in isolation once or twice on `main`. Re-run to find out. |
+| <img alt="" src="docs/assets/verdict-broken.png" width="56"> | ⚫ **Already failing** | The latest runs on `main` failed too. Not your fault. |
+| <img alt="" src="docs/assets/verdict-flaky.png" width="56"> | 🟡 **Flaky** | *Known flaky* when a retry or a re-run of the same commit proved it, *probably flaky* when it keeps failing in isolation. Not your fault. |
 
 Every rule and threshold is documented in [Reading the report](docs/verdicts.md) and [How it works](docs/how-it-works.md).
 

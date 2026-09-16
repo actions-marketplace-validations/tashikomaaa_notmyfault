@@ -44,6 +44,11 @@ When the same test appears in several matched files, the worst outcome wins: fai
 
 Comma-separated verdicts that do not fail the step in quarantine mode: any of `new`, `suspect`, `broken` and `flaky`. Ignored in report mode. The verdicts are described in [Reading the report](verdicts.md).
 
+| <img alt="" src="assets/verdict-new.png" width="64"> | <img alt="" src="assets/verdict-suspect.png" width="64"> | <img alt="" src="assets/verdict-broken.png" width="64"> | <img alt="" src="assets/verdict-flaky.png" width="64"> |
+|:---:|:---:|:---:|:---:|
+| `new` | `suspect` | `broken` | `flaky` |
+| New failure | Suspect | Already failing | Known or probably flaky |
+
 ### `token`
 
 Used to push the history branch and to comment on pull requests. The default token is enough when the job has the right permissions, see [Permissions and security](security.md). The token is masked in logs and never passed on a command line.

@@ -6,7 +6,8 @@
  * - docs/README.md becomes Home.md, other pages are named after their title,
  *   which the wiki displays, so the title heading itself is removed.
  * - Links to other docs pages are rewritten to wiki page names.
- * - Links leaving docs/ point to the repository on github.com.
+ * - Links leaving docs/ point to the repository on github.com, images to their raw file.
+ * - HTML src, srcset and href attributes are rewritten the same way.
  * - _Sidebar.md follows the order of the links in docs/README.md.
  * - Existing wiki pages are removed first, so renamed docs leave nothing behind.
  */
@@ -24,7 +25,7 @@ export function pageName(file: string, content: string): string {
   return title.replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "");
 }
 
-/** Rewrites Markdown link targets outside fenced code blocks. `pages` maps docs files to wiki page names. */
+/** Rewrites Markdown link targets and HTML attributes outside fenced code blocks. `pages` maps docs files to wiki page names. */
 export function rewriteLinks(markdown: string, pages: ReadonlyMap<string, string>, repo: string): string {
   let fenced = false;
   return markdown
@@ -35,9 +36,13 @@ export function rewriteLinks(markdown: string, pages: ReadonlyMap<string, string
         return line;
       }
       if (fenced) return line;
-      return line.replace(/\]\(([^)\s]+)(\s+"[^"]*")?\)/g, (_match, target: string, title = "") => {
-        return `](${rewriteTarget(target, pages, repo)}${title})`;
-      });
+      return line
+        .replace(/\]\(([^)\s]+)(\s+"[^"]*")?\)/g, (_match, target: string, title = "") => {
+          return `](${rewriteTarget(target, pages, repo)}${title})`;
+        })
+        .replace(/\b(src|srcset|href)="([^"\s]+)"/g, (_match, attribute: string, target: string) => {
+          return `${attribute}="${rewriteTarget(target, pages, repo)}"`;
+        });
     })
     .join("\n");
 }
@@ -50,7 +55,8 @@ function rewriteTarget(target: string, pages: ReadonlyMap<string, string>, repo:
   const page = pages.get(normalized);
   if (page) return `${page}${suffix}`;
   const fromRoot = posix.normalize(posix.join("docs", normalized));
-  return `https://github.com/${repo}/blob/main/${fromRoot}${suffix}`;
+  const view = /\.(png|jpe?g|gif|svg|webp)$/i.test(fromRoot) ? "raw" : "blob";
+  return `https://github.com/${repo}/${view}/main/${fromRoot}${suffix}`;
 }
 
 export function buildWiki(files: Record<string, string>, repo: string): WikiPage[] {

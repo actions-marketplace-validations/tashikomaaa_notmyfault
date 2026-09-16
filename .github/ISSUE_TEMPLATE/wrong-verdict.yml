@@ -6,6 +6,8 @@ body:
   - type: markdown
     attributes:
       value: |
+        <img align="right" alt="The croissant mascot holding a sign reading &quot;Not my fault&quot;." src="https://github.com/tashikomaaa/notmyfault/raw/main/docs/assets/sticker-not-my-fault.png" width="130">
+
         Before opening, please check [Reading the report](https://github.com/tashikomaaa/notmyfault/blob/main/docs/verdicts.md), which lists every rule.
   - type: textarea
     id: verdict

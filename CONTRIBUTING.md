@@ -4,6 +4,8 @@ Thanks for helping! Contributions of every size are welcome. Everyone taking par
 
 ## Ways to help
 
+<img align="right" alt="The croissant mascot kicking a bug labeled &quot;Test&quot;." src="docs/assets/sticker-bug.png" width="160">
+
 - **A report is misread?** [Open an issue](https://github.com/tashikomaaa/notmyfault/issues) with the JUnit XML file, anonymized if needed, and the runner and version that produced it. Real reports become test fixtures, and they are the most valuable contribution there is.
 - **A verdict looks wrong?** Describe the history of the test (you can print it, see the [FAQ](docs/faq.md#how-do-i-look-at-the-raw-data)) and what you expected.
 - **The documentation is unclear?** Documentation fixes are as welcome as code.
@@ -41,7 +43,8 @@ npm run check   # typecheck, build dist/ and run all tests
 | `src/context.ts` | GitHub Actions environment and event payload |
 | `src/actions.ts` | Inputs, outputs, logging and summary, without `@actions/core` |
 | `test/` | Unit tests, JUnit fixtures and end-to-end tests |
-| `docs/` | Documentation, mirrored to the wiki |
+| `docs/` | Documentation, mirrored to the wiki. Images are in `docs/assets/` |
+| `brand/` | Original artwork: mascot, banner, badges, stickers. See [brand/README.md](brand/README.md) |
 | `scripts/wiki.ts` | Converts `docs/` into wiki pages |
 
 [How it works](docs/how-it-works.md) describes the behavior these files implement.
@@ -66,6 +69,8 @@ npm run check   # typecheck, build dist/ and run all tests
 ## Documentation
 
 `docs/` is the source of truth. The [wiki](https://github.com/tashikomaaa/notmyfault/wiki) is regenerated from it by the `Wiki` workflow on every push to `main`: edits made directly in the wiki are overwritten.
+
+Images go in `docs/assets/` and are referenced with relative paths, in Markdown or in HTML `src` attributes: the wiki conversion points them at the repository. The originals they are cut from are in [brand/](brand/README.md).
 
 To preview the wiki conversion locally:
 

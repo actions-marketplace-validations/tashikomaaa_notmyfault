@@ -6,6 +6,8 @@ body:
   - type: markdown
     attributes:
       value: |
+        <img align="right" alt="The croissant mascot, looking worried." src="https://github.com/tashikomaaa/notmyfault/raw/main/docs/assets/mascot.png" width="110">
+
         Thanks! Reports from real test runners are the best way to improve notmyfault: yours will become a test case.
         Anonymize test names or messages if needed, but keep the XML structure intact.
   - type: input
