@@ -32,9 +32,13 @@ export function isActive(entry: QuarantineEntry, now: Date): boolean {
   return now.toISOString().slice(0, 10) <= entry.until;
 }
 
+/**
+ * Whether the entry names the test: its whole title or identity, or their end
+ * after a "›", so that "checkout > pays" matches "test/cart.test.ts › checkout > pays".
+ */
 export function matches(entry: QuarantineEntry, test: TestResult): boolean {
   const escaped = entry.pattern.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const pattern = new RegExp(`^${escaped.join(".*")}$`);
+  const pattern = new RegExp(`(?:^|\\s›\\s)${escaped.join(".*")}$`);
   return pattern.test(test.title) || pattern.test(test.id);
 }
 

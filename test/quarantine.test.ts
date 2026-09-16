@@ -34,8 +34,13 @@ describe("quarantine entries", () => {
     expect(isActive({ pattern: "t", until: "2026-09-15" }, NOW)).toBe(false);
   });
 
-  it("match a test title or identity, with * as a wildcard", () => {
+  it("match a test title or identity, or their end, with * as a wildcard", () => {
     expect(matches({ pattern: "cart › totals", until: "2026-10-01" }, test("cart › totals"))).toBe(true);
+    const vitest = test("test/cart.test.ts › checkout > applies discount codes", "test/cart.test.ts › checkout > applies discount codes");
+    expect(matches({ pattern: "checkout > applies discount codes", until: "2026-10-01" }, vitest)).toBe(true);
+    expect(matches({ pattern: "applies discount codes", until: "2026-10-01" }, vitest)).toBe(false);
+    expect(matches({ pattern: "totals", until: "2026-10-01" }, test("cart › totals"))).toBe(true);
+    expect(matches({ pattern: "otals", until: "2026-10-01" }, test("cart › totals"))).toBe(false);
     expect(matches({ pattern: "unit › cart › totals", until: "2026-10-01" }, test("cart › totals"))).toBe(true);
     expect(matches({ pattern: "cart › *discount*", until: "2026-10-01" }, test("cart › applies discount codes"))).toBe(true);
     expect(matches({ pattern: "cart", until: "2026-10-01" }, test("cart › totals"))).toBe(false);

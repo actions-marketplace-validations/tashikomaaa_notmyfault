@@ -934,7 +934,7 @@ function isActive(entry, now) {
 }
 function matches(entry, test) {
   const escaped = entry.pattern.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const pattern = new RegExp(`^${escaped.join(".*")}$`);
+  const pattern = new RegExp(`(?:^|\\s\u203A\\s)${escaped.join(".*")}$`);
   return pattern.test(test.title) || pattern.test(test.id);
 }
 function applyQuarantine(analysis, entries, now) {

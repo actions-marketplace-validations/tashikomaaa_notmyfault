@@ -81,7 +81,7 @@ quarantine: |
   2026-09-30 cart › *discount*
 ```
 
-- The test is matched by the title shown in the report or by its full identity, and `*` matches anything.
+- The test is matched by the title shown in the report or by its full identity, or by their end after a `›`: `checkout > pays` matches `test/cart.test.ts › checkout > pays`. `*` matches anything.
 - Until the end of that day, in UTC, a failure of the test keeps its verdict but is marked *quarantined by hand* in the report, never blocks in quarantine mode, and is annotated as a notice.
 - After that day, the entry no longer applies and each run warns about it.
 
