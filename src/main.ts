@@ -15,6 +15,7 @@ import {
 import { readContext, runUrl, type RunContext } from "./context";
 import { GitStore } from "./git-store";
 import { badgePath, renderBadge } from "./badge";
+import { renderIndexPage, renderSuitePage, reportPath } from "./html-report";
 import { FLAKY_LABEL, planFlakyIssues } from "./flaky-issues";
 import { applyQuarantine, isActive, parseQuarantine, type QuarantineEntry } from "./quarantine";
 import { GitHubApiError, GitHubClient } from "./github";
@@ -49,6 +50,7 @@ It stores the recent outcome of each test, so failures can be told apart: new, f
 
 - \`history/<key>.json\`: the history of a test suite.
 - \`badges/<key>.json\`: a [shields.io endpoint](https://shields.io/badges/endpoint-badge) counting its flaky tests.
+- \`reports/<key>.html\` and \`index.html\`: pages listing its unreliable tests, to publish with GitHub Pages.
 
 The branch is rewritten as a single commit on every update. Deleting it simply resets the history.
 `;
@@ -387,8 +389,18 @@ async function recordHistory(
       },
       {
         message: `Record ${key} (run ${context.runId || "local"}, attempt ${context.runAttempt})`,
-        extraFiles: { "README.md": BRANCH_README },
-        derivedFiles: (content) => ({ [badgePath(key)]: renderBadge(parseHistory(content), now, EVIDENCE_TTL_DAYS) }),
+        extraFiles: { "README.md": BRANCH_README, ".nojekyll": "" },
+        derivedFiles: (content, existingPaths) => {
+          const history = parseHistory(content);
+          const keys = new Set(existingPaths.flatMap((path) => /^history\/([^/]+)\.json$/.exec(path)?.slice(1) ?? []));
+          keys.add(key);
+          const pages = { trackedBranches: settings.trackedBranches, now, evidenceTtlDays: EVIDENCE_TTL_DAYS };
+          return {
+            [badgePath(key)]: renderBadge(history, now, EVIDENCE_TTL_DAYS),
+            [reportPath(key)]: renderSuitePage(key, history, pages),
+            "index.html": renderIndexPage([...keys].sort(), pages),
+          };
+        },
       },
     );
     io.info(pushed ? `History updated on branch "${settings.branch}".` : "Nothing new to record.");

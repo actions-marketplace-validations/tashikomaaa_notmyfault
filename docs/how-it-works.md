@@ -49,15 +49,20 @@ The history is stored in your repository, on the branch named by `history-branch
 ```
 notmyfault-history
 ├── README.md            explains what the branch is
+├── .nojekyll            lets GitHub Pages serve the pages as they are
+├── index.html           links to the page of each key
 ├── history/
 │   ├── ci-test.json     one file per key
 │   └── ci-e2e.json
-└── badges/
-    ├── ci-test.json     a badge counting the flaky tests of each key
-    └── ci-e2e.json
+├── badges/
+│   ├── ci-test.json     a badge counting the flaky tests of each key
+│   └── ci-e2e.json
+└── reports/
+    ├── ci-test.html     a page listing the unreliable tests of each key
+    └── ci-e2e.html
 ```
 
-Each badge file is a [shields.io endpoint](https://shields.io/badges/endpoint-badge), written in the same commit as its history: the number of known and probably flaky tests, see [Recipes](recipes.md#show-a-flaky-tests-badge).
+Badges and pages are written in the same commit as the history they describe. Each badge is a [shields.io endpoint](https://shields.io/badges/endpoint-badge) counting the known and probably flaky tests, see [Recipes](recipes.md#show-a-flaky-tests-badge). Each page lists the tests that failed or needed a retry in the remembered runs, with their verdict, a timeline of their runs, their last failure, their proof of flakiness and their median duration, see [Recipes](recipes.md#publish-the-history-with-github-pages).
 
 The branch always holds **a single commit without parent**, authored by `github-actions[bot]`. Each update replaces it, so the branch never grows. Deleting the branch resets the history.
 

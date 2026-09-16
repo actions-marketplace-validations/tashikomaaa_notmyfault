@@ -147,6 +147,14 @@ With the default key of a workflow named `CI` and a job named `test`, `<key>` is
 
 It only works for public repositories: shields.io cannot read files of private ones.
 
+## Publish the history with GitHub Pages
+
+The history branch holds web pages, updated with the history: `index.html` links to a page per key, which lists the tests that failed or needed a retry, most unreliable first, with a timeline of their runs. Stable tests are only counted.
+
+To publish them, open the repository **Settings**, then **Pages**, and choose **Deploy from a branch** with `notmyfault-history` and the `/ (root)` folder. The pages are then at `https://<owner>.github.io/<repo>/`, and GitHub republishes them after each update.
+
+Anyone who can see the site sees your test names and outcomes: on a private repository, check who GitHub Pages is visible to before publishing.
+
 ## Build the history faster with scheduled runs
 
 History only grows when tests run on a tracked branch. Scheduled runs happen on the default branch, so they count. Running the suite a few times a day surfaces flaky tests much sooner, especially in quiet repositories:

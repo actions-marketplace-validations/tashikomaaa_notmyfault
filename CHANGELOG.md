@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
+- Each update of the history writes web pages on the history branch, a page per key listing its unreliable tests with a timeline of their runs, ready to publish with GitHub Pages ([#11](https://github.com/tashikomaaa/notmyfault/issues/11)).
 - Each update of the history writes `badges/<key>.json`, a shields.io endpoint badge counting the flaky tests of that key, to show in a README ([#10](https://github.com/tashikomaaa/notmyfault/issues/10)).
 - The job summary charts how the failure rate of the 3 most unreliable tests evolved over the remembered runs ([#9](https://github.com/tashikomaaa/notmyfault/issues/9)).
 - The `quarantine` input tolerates tests by hand until a date, with a reason: their failures are marked in the report and never block, and expired entries raise a warning. The `quarantined` output counts them ([#8](https://github.com/tashikomaaa/notmyfault/issues/8)).

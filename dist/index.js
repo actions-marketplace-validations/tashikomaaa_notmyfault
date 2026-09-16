@@ -294,8 +294,8 @@ function rankFlakyTests(history, now, evidenceTtlDays, limit) {
     const stats = computeStats(test, now, evidenceTtlDays);
     if (stats.confirmed || stats.isolatedFailures >= LIKELY_FLAKY_ISOLATED_FAILURES) ranked.push({ id, ...stats });
   }
-  const score = (t) => (t.failures + t.retries) / Math.max(t.runs, 1) + (t.confirmed ? 1 : 0);
-  return ranked.sort((a, b) => score(b) - score(a) || a.id.localeCompare(b.id)).slice(0, limit);
+  const score2 = (t) => (t.failures + t.retries) / Math.max(t.runs, 1) + (t.confirmed ? 1 : 0);
+  return ranked.sort((a, b) => score2(b) - score2(a) || a.id.localeCompare(b.id)).slice(0, limit);
 }
 function brokenStreak(failureRate) {
   let streak = MIN_BROKEN_STREAK;
@@ -422,7 +422,8 @@ var GitStore = class {
   /**
    * Rewrites `path` with the result of `update` (skipped when it returns
    * undefined). `update` may run several times, always on the latest content.
-   * `derivedFiles` writes more files computed from that result, in the same commit.
+   * `derivedFiles` writes more files computed from that result and the paths
+   * already on the branch, in the same commit.
    * Resolves to whether a commit was pushed.
    */
   async update(path, update, options) {
@@ -431,7 +432,8 @@ var GitStore = class {
       const head = await this.fetchHead();
       const next = update(head ? await this.readFile(head, path) : void 0);
       if (next === void 0) return false;
-      const files = { ...options.extraFiles, ...options.derivedFiles?.(next), [path]: next };
+      const existing = options.derivedFiles && head ? await this.listFiles(head) : [];
+      const files = { ...options.extraFiles, ...options.derivedFiles?.(next, existing), [path]: next };
       const commit = await this.commit(head, files, options.message);
       let conflict;
       try {
@@ -472,6 +474,9 @@ var GitStore = class {
       throw error;
     }
     return (await this.git(["rev-parse", "FETCH_HEAD"])).trim();
+  }
+  async listFiles(commit) {
+    return (await this.git(["ls-tree", "-r", "--name-only", commit])).split("\n").filter(Boolean);
   }
   async readFile(commit, path) {
     const listed = await this.git(["ls-tree", "--name-only", commit, "--", path]);
@@ -563,9 +568,6 @@ function renderBadge(history, now, evidenceTtlDays) {
   return `${JSON.stringify(badge2, null, 1)}
 `;
 }
-
-// src/flaky-issues.ts
-import { createHash as createHash2 } from "node:crypto";
 
 // src/report.ts
 var MAX_ROWS = 30;
@@ -846,7 +848,149 @@ function escapeHtml(value) {
   return value.replace(/[&<>"|[\]()*_`~\\!]/g, (char) => ESCAPED[char] ?? char);
 }
 
+// src/html-report.ts
+var PROJECT_URL2 = "https://github.com/tashikomaaa/notmyfault";
+function reportPath(key) {
+  return `reports/${key}.html`;
+}
+function renderSuitePage(key, history, context) {
+  const rows = Object.entries(history.tests).map(([id, test]) => ({ id, test, stats: computeStats(test, context.now, context.evidenceTtlDays) })).filter(({ test, stats }) => test.outcomes.includes(FAIL) || test.outcomes.includes(RETRY) || stats.confirmed);
+  rows.sort((a, b) => score(b.stats) - score(a.stats) || a.id.localeCompare(b.id));
+  const stable = Object.keys(history.tests).length - rows.length;
+  const where = context.trackedBranches.map((branch) => `<code>${escapeHtml(branch)}</code>`).join(", ");
+  const body = [
+    `<p class="back"><a href="../index.html">All test suites</a></p>`,
+    `<h1>${escapeHtml(key)}</h1>`,
+    `<p class="lede">${history.runs} runs recorded on ${where}, last updated ${formatTime(history.updatedAt)}. ${plural2(rows.length, "unreliable test")} listed, ${plural2(stable, "stable test")} not listed.</p>`
+  ];
+  if (rows.length === 0) {
+    body.push(`<p class="empty">No test failed or needed a retry in the remembered runs.</p>`);
+  } else {
+    body.push(
+      `<div class="scroll"><table>`,
+      `<thead><tr><th>Test</th><th>Verdict</th><th>Remembered runs, oldest first</th><th>Failed</th><th>Retried</th><th>Last failure</th><th>Proof of flakiness</th><th>Median duration</th></tr></thead>`,
+      `<tbody>`,
+      ...rows.map(({ id, test, stats }) => renderRow(id, test, stats)),
+      `</tbody></table></div>`,
+      `<p class="legend"><i class="p"></i> passed <i class="r"></i> passed after a retry <i class="f"></i> failed</p>`
+    );
+  }
+  return page(`notmyfault: ${key}`, body);
+}
+function renderIndexPage(keys, context) {
+  const items = keys.map((key) => `<li><a href="${escapeAttribute(reportPath(key))}">${escapeHtml(key)}</a></li>`);
+  return page("notmyfault: test history", [
+    `<h1>Test history</h1>`,
+    `<p class="lede">The tests notmyfault remembers on ${context.trackedBranches.map((branch) => `<code>${escapeHtml(branch)}</code>`).join(", ")}, one page per test suite.</p>`,
+    `<ul class="suites">`,
+    ...items,
+    `</ul>`
+  ]);
+}
+function renderRow(id, test, stats) {
+  const [label, tone] = verdict(stats);
+  const outcomes = [...test.outcomes];
+  const failed = outcomes.filter((outcome) => outcome === FAIL).length;
+  const retried = outcomes.filter((outcome) => outcome === RETRY).length;
+  const summary = `${outcomes.length - failed - retried} passed, ${retried} passed after a retry, ${failed} failed`;
+  const timeline = outcomes.map((outcome) => `<i class="${outcome === FAIL ? "f" : outcome === RETRY ? "r" : "p"}"></i>`).join("");
+  const proof = stats.latestEvidence ? `${stats.latestEvidence.kind === "rerun" ? "Passed on re-run" : "Passed after a retry"}, ${stats.latestEvidence.at.slice(0, 10)}` : "";
+  const durations = test.durations ?? [];
+  return [
+    `<tr>`,
+    `<td class="test"><code>${escapeHtml(id)}</code></td>`,
+    `<td><span class="verdict ${tone}">${label}</span></td>`,
+    `<td><span class="timeline" role="img" aria-label="${summary}">${timeline}</span></td>`,
+    `<td class="number">${failed}</td>`,
+    `<td class="number">${retried}</td>`,
+    `<td>${lastFailure(test) ?? ""}</td>`,
+    `<td>${proof}</td>`,
+    `<td class="number">${durations.length > 0 ? duration(median2(durations)) : ""}</td>`,
+    `</tr>`
+  ].join("");
+}
+function verdict(stats) {
+  switch (verdictFor(stats)) {
+    case "broken":
+      return ["Already failing", "broken"];
+    case "flaky":
+      return stats.confirmed ? ["Known flaky", "flaky"] : ["Probably flaky", "flaky"];
+    case "suspect":
+      return ["Suspect", "suspect"];
+    default:
+      return ["Passing again", "passed"];
+  }
+}
+function score(stats) {
+  const unreliable = (stats.failures + stats.retries) / Math.max(stats.runs, 1);
+  return unreliable + (stats.confirmed || stats.trailingFailures > 0 ? 1 : 0);
+}
+function lastFailure(test) {
+  const days = [test.lastFailure, ...(test.evidence ?? []).map((evidence) => evidence.at.slice(0, 10))];
+  return days.filter((day) => day !== void 0).sort().at(-1);
+}
+function median2(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[middle] : Math.round((sorted[middle - 1] + sorted[middle]) / 2);
+}
+function formatTime(iso) {
+  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+}
+function plural2(n, word) {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
+function escapeAttribute(value) {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+function page(title, body) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>${escapeHtml(title)}</title>
+<style>
+:root { color-scheme: light dark; --page: #ffffff; --ink: #1f2328; --muted: #59636e; --line: #d1d9e0; --code: rgb(129 139 152 / 0.12);
+  --new: #dc4444; --suspect: #f26514; --broken: #2d3137; --on-broken: #fff; --flaky: #fcbd34; --passed: #19a08e; --link: #0a665c; }
+@media (prefers-color-scheme: dark) { :root { --page: #0d1117; --ink: #f0f6fc; --muted: #9198a1; --line: #3d444d; --code: rgb(101 108 118 / 0.3); --broken: #9198a1; --on-broken: #1f2328; --link: #5ed6c7; } }
+body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.5 system-ui, sans-serif; }
+main { max-width: 90rem; margin: 0 auto; padding: 2rem 1rem 3rem; }
+h1 { margin: 0.5rem 0; font-size: 1.75rem; }
+a { color: var(--link); }
+code { font: 0.85em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 0.1em 0.3em; border-radius: 0.3em; background: var(--code); }
+.lede, .back, .legend, footer { color: var(--muted); }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; margin-top: 1.5rem; }
+th, td { padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; white-space: nowrap; }
+th { font-size: 0.8rem; color: var(--muted); }
+td.test { white-space: normal; min-width: 18rem; }
+.number { text-align: right; font-variant-numeric: tabular-nums; }
+/* Text colors keep every chip at a contrast of 4.5:1 or more. */
+.verdict { display: inline-block; padding: 0.1rem 0.55rem; border-radius: 1rem; color: #1f2328; font-size: 0.8rem; font-weight: 600; }
+.verdict.new { background: #c93c3c; color: #fff; } .verdict.broken { background: var(--broken); color: var(--on-broken); }
+.verdict.suspect { background: var(--suspect); } .verdict.flaky { background: var(--flaky); } .verdict.passed { background: var(--passed); }
+.timeline { display: inline-flex; gap: 1px; }
+i { display: inline-block; width: 5px; height: 16px; border-radius: 1px; }
+i.p { background: var(--passed); opacity: 0.45; } i.r { background: var(--flaky); } i.f { background: var(--new); }
+.legend i { vertical-align: middle; margin-left: 0.75rem; }
+.suites { font-size: 1.1rem; }
+footer { margin-top: 2rem; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+${body.join("\n")}
+<footer>Generated by <a href="${PROJECT_URL2}">notmyfault</a>, rewritten on every update of the history.</footer>
+</main>
+</body>
+</html>
+`;
+}
+
 // src/flaky-issues.ts
+import { createHash as createHash2 } from "node:crypto";
 var FLAKY_LABEL = { name: "flaky-test", color: "fcbd34", description: "A test notmyfault found flaky" };
 var QUIET_DAYS = 30;
 var MAX_CREATED_PER_RUN = 5;
@@ -873,14 +1017,14 @@ function planFlakyIssues(suites, issues, context) {
       const marker = flakyMarker(suite.key, id);
       seen.add(marker);
       const issue = byMarker.get(marker);
-      const lastFailure = lastFailureDay(test);
-      const recent = lastFailure !== void 0 && context.now.getTime() - Date.parse(lastFailure) < QUIET_DAYS * DAY_MS3;
+      const lastFailure2 = lastFailureDay(test);
+      const recent = lastFailure2 !== void 0 && context.now.getTime() - Date.parse(lastFailure2) < QUIET_DAYS * DAY_MS3;
       const result = results.get(id);
       const failedNow = result?.outcome === "failed" || result?.outcome === "flaky";
       const stats = computeStats(test, context.now, context.evidenceTtlDays);
       const body = () => renderFlakyIssue(suite.key, id, test, stats, result, context);
       if (issue?.state === "open") {
-        if (!recent) actions.push({ kind: "close", issue: issue.number, comment: quietComment(lastFailure, context) });
+        if (!recent) actions.push({ kind: "close", issue: issue.number, comment: quietComment(lastFailure2, context) });
         else if (failedNow) actions.push({ kind: "update", issue: issue.number, body: body(), reopen: false });
         continue;
       }
@@ -915,8 +1059,8 @@ function renderFlakyIssue(key, id, test, stats, result, context) {
     "",
     `- **Test:** ${code(result?.title ?? id)}`,
     `- **Suite:** \`${key}\``,
-    `- **Verdict on ${where}:** ${verdict(stats)}`,
-    `- **Runs on ${where}:** failed ${stats.failures} of the last ${plural2(stats.runs, "run")}${retries}`,
+    `- **Verdict on ${where}:** ${verdict2(stats)}`,
+    `- **Runs on ${where}:** failed ${stats.failures} of the last ${plural3(stats.runs, "run")}${retries}`,
     `- **Last failure:** ${lastFailureDay(test) ?? "unknown"}`
   ];
   if (stats.latestEvidence) {
@@ -935,10 +1079,10 @@ function latestFailure(result, context) {
   const message = result.message ? `<pre>${escapeHtml(result.message)}</pre>` : "_The report has no failure message._";
   return [`**${what}**, on commit \`${context.sha.slice(0, 12)}\`${run3}:`, "", message].join("\n");
 }
-function verdict(stats) {
+function verdict2(stats) {
   switch (verdictFor(stats)) {
     case "broken":
-      return `already failing, failed the last ${plural2(stats.trailingFailures, "run")}`;
+      return `already failing, failed the last ${plural3(stats.trailingFailures, "run")}`;
     case "flaky":
       return stats.confirmed ? "known flaky" : "probably flaky";
     case "suspect":
@@ -951,8 +1095,8 @@ function lastFailureDay(test) {
   const days = [test.lastFailure, ...(test.evidence ?? []).map((evidence) => evidence.at.slice(0, 10))];
   return days.filter((day) => day !== void 0).sort().at(-1);
 }
-function quietComment(lastFailure, context) {
-  const since = lastFailure ? ` since ${lastFailure}` : "";
+function quietComment(lastFailure2, context) {
+  const since = lastFailure2 ? ` since ${lastFailure2}` : "";
   return `No failure on ${branches2(context)}${since}, for more than ${QUIET_DAYS} days: closing this issue. notmyfault reopens it if the test fails again.`;
 }
 function issueTitle(title) {
@@ -962,7 +1106,7 @@ function issueTitle(title) {
 function branches2(context) {
   return context.trackedBranches.map((branch) => `\`${branch}\``).join(", ");
 }
-function plural2(n, word) {
+function plural3(n, word) {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 function times2(n) {
@@ -1426,6 +1570,7 @@ It stores the recent outcome of each test, so failures can be told apart: new, f
 
 - \`history/<key>.json\`: the history of a test suite.
 - \`badges/<key>.json\`: a [shields.io endpoint](https://shields.io/badges/endpoint-badge) counting its flaky tests.
+- \`reports/<key>.html\` and \`index.html\`: pages listing its unreliable tests, to publish with GitHub Pages.
 
 The branch is rewritten as a single commit on every update. Deleting it simply resets the history.
 `;
@@ -1679,8 +1824,18 @@ async function recordHistory(store, key, results, context, settings, io, now) {
       },
       {
         message: `Record ${key} (run ${context.runId || "local"}, attempt ${context.runAttempt})`,
-        extraFiles: { "README.md": BRANCH_README },
-        derivedFiles: (content) => ({ [badgePath(key)]: renderBadge(parseHistory(content), now, EVIDENCE_TTL_DAYS) })
+        extraFiles: { "README.md": BRANCH_README, ".nojekyll": "" },
+        derivedFiles: (content, existingPaths) => {
+          const history = parseHistory(content);
+          const keys = new Set(existingPaths.flatMap((path) => /^history\/([^/]+)\.json$/.exec(path)?.slice(1) ?? []));
+          keys.add(key);
+          const pages = { trackedBranches: settings.trackedBranches, now, evidenceTtlDays: EVIDENCE_TTL_DAYS };
+          return {
+            [badgePath(key)]: renderBadge(history, now, EVIDENCE_TTL_DAYS),
+            [reportPath(key)]: renderSuitePage(key, history, pages),
+            "index.html": renderIndexPage([...keys].sort(), pages)
+          };
+        }
       }
     );
     io.info(pushed ? `History updated on branch "${settings.branch}".` : "Nothing new to record.");

@@ -233,6 +233,17 @@ describe("run", () => {
       encoding: "utf8",
     });
     expect(JSON.parse(badge)).toMatchObject({ label: "flaky tests", message: "1" });
+    const branchFiles = execFileSync("git", ["-C", join(root, "remote", "acme", "shop.git"), "ls-tree", "-r", "--name-only", "notmyfault-history"], {
+      encoding: "utf8",
+    });
+    expect(branchFiles.trim().split("\n")).toEqual([
+      ".nojekyll",
+      "README.md",
+      "badges/ci-test.json",
+      "history/ci-test.json",
+      "index.html",
+      "reports/ci-test.html",
+    ]);
     expect(storedHistory()).toMatchObject({
       runs: 8,
       tests: { "unit › checkout › pays": { outcomes: "pfpfppfp" }, "unit › checkout › totals": { outcomes: "pppppppp" } },

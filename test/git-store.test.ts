@@ -52,13 +52,15 @@ describe("GitStore", () => {
     expect(git("ls-tree", "-r", "--name-only", "history").split("\n")).toEqual(["README.md", "history/a.json"]);
   });
 
-  it("writes files derived from the new content in the same commit", async () => {
+  it("writes files derived from the new content and the existing paths in the same commit", async () => {
+    await store().update("history/b.json", () => "b", { message: "b" });
     await store().update("history/a.json", () => "42", {
       message: "derived",
-      derivedFiles: (content) => ({ "badges/a.json": `answer ${content}` }),
+      derivedFiles: (content, paths) => ({ "badges/a.json": `answer ${content}`, "index.txt": paths.join(",") }),
     });
     expect(git("rev-list", "--count", "history")).toBe("1");
     expect(git("show", "history:badges/a.json")).toBe("answer 42");
+    expect(git("show", "history:index.txt")).toBe("history/b.json");
   });
 
   it("keeps files written by other keys", async () => {

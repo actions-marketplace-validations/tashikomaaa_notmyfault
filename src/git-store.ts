@@ -46,7 +46,8 @@ export class GitStore {
   /**
    * Rewrites `path` with the result of `update` (skipped when it returns
    * undefined). `update` may run several times, always on the latest content.
-   * `derivedFiles` writes more files computed from that result, in the same commit.
+   * `derivedFiles` writes more files computed from that result and the paths
+   * already on the branch, in the same commit.
    * Resolves to whether a commit was pushed.
    */
   async update(
@@ -55,7 +56,7 @@ export class GitStore {
     options: {
       message: string;
       extraFiles?: Record<string, string>;
-      derivedFiles?: (content: string) => Record<string, string>;
+      derivedFiles?: (content: string, existingPaths: string[]) => Record<string, string>;
       attempts?: number;
     },
   ): Promise<boolean> {
@@ -65,7 +66,8 @@ export class GitStore {
       const next = update(head ? await this.readFile(head, path) : undefined);
       if (next === undefined) return false;
 
-      const files = { ...options.extraFiles, ...options.derivedFiles?.(next), [path]: next };
+      const existing = options.derivedFiles && head ? await this.listFiles(head) : [];
+      const files = { ...options.extraFiles, ...options.derivedFiles?.(next, existing), [path]: next };
       const commit = await this.commit(head, files, options.message);
       let conflict: Error;
       try {
@@ -110,6 +112,10 @@ export class GitStore {
       throw error;
     }
     return (await this.git(["rev-parse", "FETCH_HEAD"])).trim();
+  }
+
+  private async listFiles(commit: string): Promise<string[]> {
+    return (await this.git(["ls-tree", "-r", "--name-only", commit])).split("\n").filter(Boolean);
   }
 
   private async readFile(commit: string, path: string): Promise<string | undefined> {
