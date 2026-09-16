@@ -69,7 +69,8 @@ The branch always holds **a single commit without parent**, authored by `github-
    "failedOn": ["3f2a1b9c0d4e", "a41c07e9b2f3"],
    "evidence": [{ "at": "2026-09-12T08:31:02.000Z", "sha": "a41c07e9b2f3", "kind": "rerun" }],
    "lastSeen": "2026-09-16",
-   "errors": ["7c1e0a9b54d2"]
+   "errors": ["7c1e0a9b54d2"],
+   "lastFailure": "2026-09-15"
   }
  }
 }
@@ -83,6 +84,7 @@ The branch always holds **a single commit without parent**, authored by `github-
 | `evidence` | Up to 10 proofs of flakiness: `retry` (passed after a retry in the same run) or `rerun` (passed on a commit it had failed on) |
 | `lastSeen` | Last day the test was recorded |
 | `errors` | Fingerprints of the last 10 distinct failure messages seen on tracked branches, see [Errors](#errors) |
+| `lastFailure` | Last day the test failed, or passed only after a retry, on a tracked branch |
 
 The file contains test names, outcomes, short commit SHAs, dates and fingerprints of failure messages. It contains no failure message, log or source code.
 
@@ -95,6 +97,7 @@ The file contains test names, outcomes, short commit SHAs, dates and fingerprint
 | Records `retry` evidence for tests that passed after a retry | yes | yes |
 | Records `rerun` evidence for tests that pass on a commit listed in `failedOn` | yes | yes |
 | Adds the fingerprint of each failure message to `errors` | yes | no |
+| Sets `lastFailure` for tests that failed or passed after a retry | yes | no |
 | Creates an entry for a test that only passed | yes | no |
 
 Runs that teach nothing new do not write anything. Pull requests from forks never write, because their token is read-only.
@@ -167,6 +170,18 @@ The token reaches git through environment variables, never on the command line, 
 ## Pull request comments
 
 Each comment starts with a hidden marker, `<!-- notmyfault:<key> -->`. notmyfault looks for its marker among the pull request comments and updates that comment instead of adding a new one. It creates a comment only when a test failed, passed after a retry, or passed while it would have been classified already failing had it failed. One key means one comment. With [`suites`](configuration.md#suites), the marker holds the names of every suite joined with `+`, and one comment covers them all.
+
+## Flaky test issues
+
+With [`flaky-issues`](configuration.md#flaky-issues), each run on a tracked branch compares the history, including that run, with the issues labeled `flaky-test`. Each issue starts with a hidden marker, `<!-- notmyfault:flaky:<key>:<hash> -->`, the hash identifying the test. Then, for each test:
+
+| The test | Its issue |
+|---|---|
+| Has proof of flakiness and failed in the last 30 days | Opened if missing, at most 5 per run |
+| Failed or passed after a retry in this run | Updated with the latest failure, and reopened if it was closed and the test is still proven flaky |
+| Has not failed for 30 days, or left the history | Closed with a comment |
+
+The last failure is `lastFailure`, or the date of the latest proof of flakiness for histories recorded before `lastFailure` existed. A run only manages the issues of its own keys, so jobs with different keys do not close each other's issues.
 
 ## Limits
 

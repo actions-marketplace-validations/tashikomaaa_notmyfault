@@ -110,6 +110,31 @@ jobs:
 
 For a comment per environment instead, run notmyfault in each matrix job with `key: test-${{ matrix.os }}`. Both setups use the same keys, so switching from one to the other keeps the history.
 
+## Track flaky tests in issues
+
+Quarantine keeps flaky tests from blocking, and [`flaky-issues`](configuration.md#flaky-issues) makes sure someone fixes them: each flaky test gets an issue, updated when it fails and closed once it stops.
+
+```yaml
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      # ...
+      - uses: tashikomaaa/notmyfault@v1
+        if: ${{ !cancelled() }}
+        with:
+          junit: reports/**/*.xml
+          mode: quarantine
+          flaky-issues: true
+```
+
+Filter them with the `flaky-test` label, or assign them in your triage routine.
+
 ## Build the history faster with scheduled runs
 
 History only grows when tests run on a tracked branch. Scheduled runs happen on the default branch, so they count. Running the suite a few times a day surfaces flaky tests much sooner, especially in quiet repositories:

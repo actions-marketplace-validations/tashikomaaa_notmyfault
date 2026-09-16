@@ -26,6 +26,8 @@ export interface TestHistory {
   evidence?: FlakyEvidence[];
   /** Fingerprints of the failure messages seen on tracked branches, newest last. */
   errors?: string[];
+  /** Last day (YYYY-MM-DD) the test failed, or passed only after a retry, on a tracked branch. */
+  lastFailure?: string;
   /** Last day (YYYY-MM-DD) the test was recorded. */
   lastSeen: string;
 }
@@ -125,8 +127,11 @@ export function recordRun(history: History, results: TestResult[], options: Reco
       const code = result.outcome === "failed" ? FAIL : result.outcome === "flaky" ? RETRY : PASS;
       test.outcomes = (test.outcomes + code).slice(-options.window);
       testChanged = true;
-      // Only errors seen on tracked branches are known: a pull request must not excuse its own.
-      if (result.outcome !== "passed" && result.message) addError(test, errorFingerprint(result.message));
+      if (result.outcome !== "passed") {
+        test.lastFailure = today;
+        // Only errors seen on tracked branches are known: a pull request must not excuse its own.
+        if (result.message) addError(test, errorFingerprint(result.message));
+      }
     }
 
     if (result.outcome === "failed") {

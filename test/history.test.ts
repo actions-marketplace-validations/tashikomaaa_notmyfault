@@ -62,6 +62,15 @@ describe("recordRun", () => {
     expect(history.tests.t!.errors).toEqual([errorFingerprint("socket hang up"), errorFingerprint("timeout after 1ms")]);
   });
 
+  it("remembers the last day a test failed or needed a retry on a tracked branch", () => {
+    const history = emptyHistory();
+    recordRun(history, [test("t", "flaky")], options({ now: new Date("2026-09-01T10:00:00Z") }));
+    expect(history.tests.t!.lastFailure).toBe("2026-09-01");
+    recordRun(history, [test("t", "failed")], options({ now: new Date("2026-09-10T10:00:00Z"), tracked: false }));
+    recordRun(history, [test("t", "passed")], options({ now: new Date("2026-09-12T10:00:00Z") }));
+    expect(history.tests.t!.lastFailure).toBe("2026-09-01");
+  });
+
   it("keeps the 10 most recent errors", () => {
     const history = emptyHistory();
     for (const letter of "abcdefghijkl") {

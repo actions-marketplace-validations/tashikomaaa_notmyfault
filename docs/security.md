@@ -6,6 +6,7 @@
 |---|---|---|
 | `contents: write` | Pushing the `notmyfault-history` branch | The history is never recorded: every failure is reported as new, with a warning |
 | `pull-requests: write` | Creating and updating the pull request comment | No comment, with a warning. The job summary still has the report |
+| `issues: write` | Only with [`flaky-issues`](configuration.md#flaky-issues): opening, updating and closing flaky test issues, and creating the `flaky-test` label | No issues, with a warning |
 
 Declare them in the workflow, at the top level or on the job:
 

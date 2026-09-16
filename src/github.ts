@@ -13,6 +13,19 @@ interface IssueComment {
   body?: string;
 }
 
+export interface Issue {
+  number: number;
+  state: "open" | "closed";
+  body: string;
+}
+
+interface IssueItem {
+  number: number;
+  state: "open" | "closed";
+  body?: string | null;
+  pull_request?: unknown;
+}
+
 /** Minimal REST client for the few endpoints the action needs. */
 export class GitHubClient {
   constructor(
@@ -37,8 +50,45 @@ export class GitHubClient {
       return "updated";
     }
     if (!create) return "skipped";
-    await this.request("POST", `/repos/${this.repository}/issues/${issue}/comments`, { body });
+    await this.addComment(issue, body);
     return "created";
+  }
+
+  async addComment(issue: number, body: string): Promise<void> {
+    await this.request("POST", `/repos/${this.repository}/issues/${issue}/comments`, { body });
+  }
+
+  /** Issues, open or closed, carrying `label`. Pull requests are left out. */
+  async listIssues(label: string): Promise<Issue[]> {
+    const issues: Issue[] = [];
+    let path: string | undefined = `/repos/${this.repository}/issues?labels=${encodeURIComponent(label)}&state=all&per_page=100`;
+    while (path) {
+      const response = await this.request("GET", path);
+      for (const item of (await response.json()) as IssueItem[]) {
+        if (!item.pull_request) issues.push({ number: item.number, state: item.state, body: item.body ?? "" });
+      }
+      path = nextPage(response.headers.get("link"), this.apiUrl);
+    }
+    return issues;
+  }
+
+  async createIssue(title: string, body: string, labels: string[]): Promise<number> {
+    const response = await this.request("POST", `/repos/${this.repository}/issues`, { title, body, labels });
+    return ((await response.json()) as { number: number }).number;
+  }
+
+  async updateIssue(issue: number, changes: { body?: string; state?: "open" | "closed" }): Promise<void> {
+    await this.request("PATCH", `/repos/${this.repository}/issues/${issue}`, changes);
+  }
+
+  /** Creates the label unless it exists. */
+  async ensureLabel(name: string, color: string, description: string): Promise<void> {
+    try {
+      await this.request("GET", `/repos/${this.repository}/labels/${encodeURIComponent(name)}`);
+    } catch (error) {
+      if (!(error instanceof GitHubApiError) || error.status !== 404) throw error;
+      await this.request("POST", `/repos/${this.repository}/labels`, { name, color, description });
+    }
   }
 
   private async findComment(issue: number, marker: string): Promise<IssueComment | undefined> {

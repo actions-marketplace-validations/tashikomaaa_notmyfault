@@ -136,7 +136,8 @@ export function computeStats(history: TestHistory | undefined, now: Date, eviden
   return stats;
 }
 
-function verdictFor(stats: TestStats): Verdict {
+/** The verdict a failure would get with these statistics. */
+export function verdictFor(stats: TestStats): Verdict {
   // A flaky test fails in a row now and then: only a streak too long to be bad luck means it is broken.
   if (stats.confirmed) return stats.trailingFailures >= stats.brokenStreak ? "broken" : "flaky";
   if (stats.trailingFailures >= 1) return "broken";

@@ -13,9 +13,23 @@ interface Comment {
   body: string;
 }
 
-/** In-memory stand-in for the issue comments API. */
+interface FakeIssue {
+  number: number;
+  title: string;
+  body: string;
+  state: "open" | "closed";
+  labels: string[];
+  comments: string[];
+}
+
+const PULL_REQUEST = 7;
+
+/** In-memory stand-in for the issues, comments and labels API of acme/shop. */
 class FakeGitHub {
+  /** Comments on the pull request. */
   comments: Comment[] = [];
+  issues: FakeIssue[] = [];
+  labels: string[] = [];
   requests: string[] = [];
   status = 200;
   private server: Server | undefined;
@@ -30,20 +44,55 @@ class FakeGitHub {
           res.writeHead(this.status).end(JSON.stringify({ message: "Resource not accessible by integration" }));
           return;
         }
-        const body = raw ? (JSON.parse(raw) as { body: string }) : undefined;
-        if (req.method === "GET") {
-          res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(this.comments));
-        } else if (req.method === "POST" && body) {
-          const comment = { id: this.comments.length + 1, body: body.body };
-          this.comments.push(comment);
-          res.writeHead(201).end(JSON.stringify(comment));
-        } else if (req.method === "PATCH" && body) {
-          const id = Number(req.url?.split("/").pop());
-          const comment = this.comments.find((c) => c.id === id);
-          if (comment) comment.body = body.body;
-          res.writeHead(200).end(JSON.stringify(comment));
+        const body = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+        const url = new URL(req.url ?? "/", "http://api");
+        const path = url.pathname.replace("/repos/acme/shop", "");
+        const reply = (status: number, value: unknown) =>
+          res.writeHead(status, { "content-type": "application/json" }).end(JSON.stringify(value));
+        const route = (method: string, pattern: RegExp) => (req.method === method ? pattern.exec(path) : null);
+        let match: RegExpExecArray | null;
+
+        if ((match = route("GET", /^\/issues\/(\d+)\/comments$/))) {
+          reply(200, Number(match[1]) === PULL_REQUEST ? this.comments : []);
+        } else if ((match = route("POST", /^\/issues\/(\d+)\/comments$/))) {
+          if (Number(match[1]) === PULL_REQUEST) {
+            const comment = { id: this.comments.length + 1, body: String(body.body) };
+            this.comments.push(comment);
+            reply(201, comment);
+          } else {
+            this.issues.find((issue) => issue.number === Number(match![1]))?.comments.push(String(body.body));
+            reply(201, {});
+          }
+        } else if ((match = route("PATCH", /^\/issues\/comments\/(\d+)$/))) {
+          const comment = this.comments.find((c) => c.id === Number(match![1]));
+          if (comment) comment.body = String(body.body);
+          reply(200, comment);
+        } else if (route("GET", /^\/issues$/)) {
+          const label = url.searchParams.get("labels");
+          reply(200, this.issues.filter((issue) => !label || issue.labels.includes(label)));
+        } else if (route("POST", /^\/issues$/)) {
+          const issue: FakeIssue = {
+            number: 100 + this.issues.length,
+            title: String(body.title),
+            body: String(body.body),
+            state: "open",
+            labels: body.labels as string[],
+            comments: [],
+          };
+          this.issues.push(issue);
+          reply(201, issue);
+        } else if ((match = route("PATCH", /^\/issues\/(\d+)$/))) {
+          const issue = this.issues.find((i) => i.number === Number(match![1]));
+          if (issue) Object.assign(issue, body);
+          reply(200, issue);
+        } else if ((match = route("GET", /^\/labels\/(.+)$/))) {
+          if (this.labels.includes(decodeURIComponent(match[1]!))) reply(200, {});
+          else reply(404, { message: "Not Found" });
+        } else if (route("POST", /^\/labels$/)) {
+          this.labels.push(String(body.name));
+          reply(201, body);
         } else {
-          res.writeHead(404).end("{}");
+          reply(404, { message: "Not Found" });
         }
       });
     });
@@ -111,7 +160,7 @@ async function simulate(outcomes: Outcomes, options: RunOptions = {}) {
       ? {
           repository: { default_branch: "main" },
           pull_request: {
-            number: 7,
+            number: PULL_REQUEST,
             head: { repo: { full_name: options.fork ? "someone/shop" : "acme/shop" } },
             base: { repo: { full_name: "acme/shop" } },
           },
@@ -320,6 +369,42 @@ describe("run", () => {
     const mixed = await simulate({ ok: "pass" }, { inputs: { suites: "unit: reports/*.xml" } });
     expect(mixed.code).toBe(1);
     expect(mixed.logs).toContain('::error::Inputs "junit" and "key" cannot be used with "suites"');
+  });
+
+  it("opens, updates and closes an issue per flaky test when asked", async () => {
+    await simulate({ pays: "fail: Bank did not answer within 100ms" }, { sha: "c".repeat(40) });
+    expect(api.requests.some((request) => request.includes("/issues?labels"))).toBe(false);
+
+    // Passing on the same commit proves the test flaky: it gets an issue.
+    const inputs = { "flaky-issues": "true" };
+    const rerun = await simulate({ pays: "pass" }, { sha: "c".repeat(40), attempt: 2, inputs });
+    expect(rerun.logs).toContain("Flaky test issues: 1 created, 0 updated, 0 closed.");
+    expect(api.labels).toEqual(["flaky-test"]);
+    expect(api.issues).toMatchObject([{ number: 100, title: "Flaky test: checkout › pays", state: "open", labels: ["flaky-test"] }]);
+    expect(api.issues[0]!.body).toContain("- **Proof:** passed when the same commit was re-run on 2026-09-01");
+
+    // A new failure on main updates it, pull requests never touch it.
+    await simulate({ pays: "fail: socket hang up" }, { inputs });
+    expect(api.issues[0]!.body).toContain("<pre>socket hang up</pre>");
+    await simulate({ pays: "fail: from a pull request" }, { event: "pull_request", inputs });
+    expect(api.issues[0]!.body).not.toContain("from a pull request");
+
+    // A month without failure closes it.
+    clock += 31 * 24 * 60 * 60 * 1000;
+    const quiet = await simulate({ pays: "pass" }, { inputs });
+    expect(quiet.logs).toContain("Flaky test issues: 0 created, 0 updated, 1 closed.");
+    expect(api.issues[0]).toMatchObject({ state: "closed" });
+    expect(api.issues[0]!.comments).toEqual([
+      "No failure on `main` since 2026-09-01, for more than 30 days: closing this issue. notmyfault reopens it if the test fails again.",
+    ]);
+  });
+
+  it("warns and carries on when issues cannot be written", async () => {
+    await simulate({ pays: "fail" }, { sha: "d".repeat(40) });
+    api.status = 403;
+    const result = await simulate({ pays: "pass" }, { sha: "d".repeat(40), attempt: 2, inputs: { "flaky-issues": "true" } });
+    expect(result.code).toBe(0);
+    expect(result.logs).toContain('::warning::Could not update flaky test issues. Does the job have "issues: write" permission?');
   });
 
   it("keeps working when the history cannot be read", async () => {

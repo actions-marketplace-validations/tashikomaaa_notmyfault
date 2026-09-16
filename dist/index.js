@@ -131,7 +131,10 @@ function recordRun(history, results, options) {
       const code2 = result.outcome === "failed" ? FAIL : result.outcome === "flaky" ? RETRY : PASS;
       test.outcomes = (test.outcomes + code2).slice(-options.window);
       testChanged = true;
-      if (result.outcome !== "passed" && result.message) addError(test, errorFingerprint(result.message));
+      if (result.outcome !== "passed") {
+        test.lastFailure = today;
+        if (result.message) addError(test, errorFingerprint(result.message));
+      }
     }
     if (result.outcome === "failed") {
       if (!test.failedOn?.includes(sha)) {
@@ -500,6 +503,345 @@ function sleep(ms) {
   return new Promise((resolve2) => setTimeout(resolve2, ms));
 }
 
+// src/flaky-issues.ts
+import { createHash as createHash2 } from "node:crypto";
+
+// src/report.ts
+var MAX_ROWS = 30;
+var MAX_MESSAGES = 10;
+var MAX_FIXED = 10;
+var PROJECT_URL = "https://github.com/tashikomaaa/notmyfault";
+var BADGES_URL = "https://raw.githubusercontent.com/tashikomaaa/notmyfault/main/docs/assets";
+var EMOJI = { new: "\u{1F534}", suspect: "\u{1F7E0}", broken: "\u26AB", flaky: "\u{1F7E1}" };
+function badge(image, emoji, size) {
+  return `<img src="${BADGES_URL}/verdict-${image}.png" alt="${emoji}" width="${size}" height="${size}" align="absmiddle">`;
+}
+function commentMarker(key) {
+  return `<!-- notmyfault:${key} -->`;
+}
+function renderSuitesComment(suites, context) {
+  return [commentMarker(context.key), ...renderBody(suites, context)].join("\n");
+}
+function renderSuitesSummary(suites, context) {
+  const lines = renderBody(suites, context);
+  for (const suite of suites) {
+    if (!suite.ranking?.length) continue;
+    const of = suites.length > 1 ? ` of ${suite.name}` : "";
+    lines.push(
+      "",
+      `<details><summary>Most unreliable tests${of} on ${branches(context)}</summary>`,
+      "",
+      "| Test | Failed runs | Passed on retry | Proven flaky |",
+      "|---|--:|--:|:-:|",
+      ...suite.ranking.map(
+        (t) => `| ${code(t.id)} | ${t.failures} / ${t.runs} | ${t.retries} | ${t.confirmed ? "yes" : "probably"} |`
+      ),
+      "",
+      "</details>"
+    );
+  }
+  return lines.join("\n");
+}
+function renderBody(suites, context) {
+  const all = combine(suites.map((suite) => suite.analysis));
+  const lines = [`### ${headline(all)}`, ""];
+  for (const suite of suites) {
+    if (suites.length > 1) {
+      lines.push(`#### ${escapeHtml(suite.name)}`, "");
+      const { analysis } = suite;
+      if (analysis.failures.length === 0 && analysis.fixed.length === 0) {
+        lines.push(`${badge("passed", "\u2705", 20)} All ${plural(analysis.total - analysis.skipped, "test")} passed.`, "");
+      }
+    }
+    lines.push(...renderSuite(suite.analysis, context));
+  }
+  if (context.mode === "quarantine" && all.failures.length > 0) {
+    const tolerated = [...context.tolerated].map((v) => `\`${v}\``).join(", ") || "nothing";
+    lines.push(
+      context.blocking === 0 ? `\u{1F6E1}\uFE0F **Quarantine:** every failure is tolerated (${tolerated}), so this check passes.` : `\u274C **Quarantine:** ${plural(context.blocking, "failure")} not tolerated (${tolerated}), so this check fails.`,
+      ""
+    );
+  }
+  const withoutHistory = suites.filter((suite) => suite.historyRuns === 0);
+  if (withoutHistory.length > 0) {
+    const which = suites.length > 1 ? ` for ${withoutHistory.map((suite) => escapeHtml(suite.name)).join(", ")}` : "";
+    lines.push(
+      `\u2139\uFE0F No history on ${branches(context)} yet${which}. Verdicts get sharper once a few runs have been recorded there.`,
+      ""
+    );
+  }
+  lines.push(footer(all.retried, context));
+  return lines;
+}
+function combine(analyses) {
+  return {
+    total: analyses.reduce((sum, a) => sum + a.total, 0),
+    passed: analyses.reduce((sum, a) => sum + a.passed, 0),
+    skipped: analyses.reduce((sum, a) => sum + a.skipped, 0),
+    failures: analyses.flatMap((a) => a.failures),
+    retried: analyses.flatMap((a) => a.retried),
+    fixed: analyses.flatMap((a) => a.fixed)
+  };
+}
+function renderSuite(analysis, context) {
+  const lines = [];
+  if (analysis.failures.length > 0) {
+    lines.push("| Test | Why |", "|---|---|");
+    for (const failure of analysis.failures.slice(0, MAX_ROWS)) {
+      const icon = badge(failure.verdict, EMOJI[failure.verdict], 24);
+      lines.push(`| ${code(failure.test.title)} | ${icon} ${explain(failure, context)} |`);
+    }
+    if (analysis.failures.length > MAX_ROWS) {
+      lines.push(`| _\u2026and ${analysis.failures.length - MAX_ROWS} more_ | |`);
+    }
+    lines.push("");
+    lines.push(...renderMessages(analysis.failures));
+  }
+  if (analysis.fixed.length > 0) lines.push(...renderFixed(analysis.fixed, context));
+  return lines;
+}
+function headline(analysis) {
+  const failed = analysis.failures.length;
+  if (failed === 0) {
+    const retried = analysis.retried.length;
+    const suffix = retried > 0 ? ` (${retried} only after a retry)` : "";
+    return `${badge("passed", "\u2705", 32)} All ${plural(analysis.total - analysis.skipped, "test")} passed${suffix}`;
+  }
+  const yours = analysis.failures.filter((f) => f.verdict === "new" || f.verdict === "suspect").length;
+  if (yours === 0) return `${badge("passed", "\u{1F7E2}", 32)} ${plural(failed, "test")} failed, none of them look like your fault`;
+  return `${badge("new", "\u{1F534}", 32)} ${plural(failed, "test")} failed, ${yours} ${yours === 1 ? "looks" : "look"} related to this change`;
+}
+function plainExplanation(failure, context) {
+  return explain(failure, context).replace(/\*\*|`/g, "");
+}
+function explain(failure, context) {
+  const where = branches(context);
+  switch (failure.verdict) {
+    case "new":
+      if (failure.usually) return `**New failure.** ${usualBehavior(failure, where)}, but this error was never seen there.`;
+      return failure.trailingPasses > 0 ? `**New failure.** Passed the last ${plural(failure.trailingPasses, "run")} on ${where}.` : `**New failure.** No history for this test on ${where}.`;
+    case "suspect":
+      return `**Suspect.** Failed in isolation ${times(failure.isolatedFailures)} in the last ${plural(failure.runs, "run")} on ${where}.`;
+    case "broken":
+      return failure.trailingFailures === 1 ? `**Already failing on ${where}.** The latest run there failed too.` : `**Already failing on ${where}.** Failed the last ${failure.trailingFailures} runs there${failure.confirmed ? ", too many in a row to be flakiness" : ""}.`;
+    case "flaky": {
+      const parts = [];
+      if (failure.failures > 0) parts.push(`failed ${failure.failures} of the last ${plural(failure.runs, "run")} on ${where}`);
+      if (failure.retries > 0) parts.push(`passed only after a retry ${plural(failure.retries, "time")}`);
+      if (failure.latestEvidence) {
+        const day = failure.latestEvidence.at.slice(0, 10);
+        parts.push(
+          failure.latestEvidence.kind === "rerun" ? `passed when the same commit was re-run on ${day}` : `passed after a retry on ${day}`
+        );
+      }
+      const detail = parts.length > 0 ? ` ${capitalize(parts.join("; "))}.` : "";
+      return failure.confirmed ? `**Known flaky.**${detail}` : `**Probably flaky.**${detail}`;
+    }
+  }
+}
+function usualBehavior(failure, where) {
+  switch (failure.usually) {
+    case "flaky":
+      return `${failure.confirmed ? "Known" : "Probably"} flaky on ${where}`;
+    case "broken":
+      return `Already failing on ${where}`;
+    default:
+      return `Failed in isolation ${times(failure.isolatedFailures)} on ${where}`;
+  }
+}
+function renderMessages(failures) {
+  const withMessages = failures.filter((f) => f.test.message).slice(0, MAX_MESSAGES);
+  if (withMessages.length === 0) return [];
+  return [
+    "<details><summary>Failure messages</summary>",
+    "",
+    ...withMessages.flatMap((f) => [`${code(f.test.title)}`, `<pre>${escapeHtml(f.test.message ?? "")}</pre>`]),
+    "</details>",
+    ""
+  ];
+}
+function renderFixed(fixed, context) {
+  const lines = [
+    `\u{1F6E0}\uFE0F **Fixed:** ${plural(fixed.length, "test")} failing on ${branches(context)} ${fixed.length === 1 ? "passes" : "pass"} in this run.`,
+    "",
+    ...fixed.slice(0, MAX_FIXED).map(
+      (f) => `- ${code(f.test.title)}, ${f.trailingFailures === 1 ? "failed the latest run" : `failed the last ${f.trailingFailures} runs`} there`
+    )
+  ];
+  if (fixed.length > MAX_FIXED) lines.push(`- _\u2026and ${fixed.length - MAX_FIXED} more_`);
+  lines.push("");
+  return lines;
+}
+function footer(retried, context) {
+  const parts = [];
+  if (retried.length > 0) {
+    const names = retried.slice(0, 5).map((t) => code(t.title)).join(", ");
+    const more = retried.length > 5 ? ` and ${retried.length - 5} more` : "";
+    parts.push(`\u{1F501} Passed only after a retry: ${names}${more}`);
+  }
+  if (context.runUrl) parts.push(`[Workflow run](${context.runUrl})`);
+  parts.push(`Reported by [notmyfault](${PROJECT_URL})`);
+  return `<sub>${parts.join(" \xB7 ")}</sub>`;
+}
+function branches(context) {
+  return context.trackedBranches.map((b) => `\`${b}\``).join(", ");
+}
+function plural(n, word) {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
+function times(n) {
+  return n === 1 ? "once" : n === 2 ? "twice" : `${n} times`;
+}
+function capitalize(value) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+function code(value) {
+  return `<code>${escapeHtml(value)}</code>`;
+}
+var ESCAPED = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "|": "&#124;",
+  "[": "&#91;",
+  "]": "&#93;",
+  "(": "&#40;",
+  ")": "&#41;",
+  "*": "&#42;",
+  _: "&#95;",
+  "`": "&#96;",
+  "~": "&#126;",
+  "\\": "&#92;",
+  "!": "&#33;"
+};
+function escapeHtml(value) {
+  return value.replace(/[&<>"|[\]()*_`~\\!]/g, (char) => ESCAPED[char] ?? char);
+}
+
+// src/flaky-issues.ts
+var FLAKY_LABEL = { name: "flaky-test", color: "fcbd34", description: "A test notmyfault found flaky" };
+var QUIET_DAYS = 30;
+var MAX_CREATED_PER_RUN = 5;
+var DAY_MS3 = 24 * 60 * 60 * 1e3;
+var MAX_TITLE_LENGTH = 200;
+var QUARANTINE_URL = "https://github.com/tashikomaaa/notmyfault/blob/main/docs/quarantine.md";
+function flakyMarker(key, id) {
+  const hash = createHash2("sha256").update(id).digest("hex").slice(0, 12);
+  return `<!-- notmyfault:flaky:${key}:${hash} -->`;
+}
+function planFlakyIssues(suites, issues, context) {
+  const byMarker = /* @__PURE__ */ new Map();
+  for (const issue of issues) {
+    const marker = /<!-- notmyfault:flaky:\S+ -->/.exec(issue.body)?.[0];
+    if (marker && !byMarker.has(marker)) byMarker.set(marker, issue);
+  }
+  const actions = [];
+  const seen = /* @__PURE__ */ new Set();
+  let created = 0;
+  let postponed = 0;
+  for (const suite of suites) {
+    const results = new Map(suite.results.map((result) => [result.id, result]));
+    for (const [id, test] of Object.entries(suite.history.tests)) {
+      const marker = flakyMarker(suite.key, id);
+      seen.add(marker);
+      const issue = byMarker.get(marker);
+      const lastFailure = lastFailureDay(test);
+      const recent = lastFailure !== void 0 && context.now.getTime() - Date.parse(lastFailure) < QUIET_DAYS * DAY_MS3;
+      const result = results.get(id);
+      const failedNow = result?.outcome === "failed" || result?.outcome === "flaky";
+      const stats = computeStats(test, context.now, context.evidenceTtlDays);
+      const body = () => renderFlakyIssue(suite.key, id, test, stats, result, context);
+      if (issue?.state === "open") {
+        if (!recent) actions.push({ kind: "close", issue: issue.number, comment: quietComment(lastFailure, context) });
+        else if (failedNow) actions.push({ kind: "update", issue: issue.number, body: body(), reopen: false });
+        continue;
+      }
+      if (!stats.confirmed || !recent) continue;
+      if (issue) {
+        if (failedNow) actions.push({ kind: "update", issue: issue.number, body: body(), reopen: true });
+      } else if (created === MAX_CREATED_PER_RUN) {
+        postponed++;
+      } else {
+        created++;
+        actions.push({ kind: "create", title: issueTitle(result?.title ?? id), body: body() });
+      }
+    }
+  }
+  for (const [marker, issue] of byMarker) {
+    const key = marker.slice("<!-- notmyfault:flaky:".length).split(":")[0];
+    if (issue.state !== "open" || seen.has(marker) || !suites.some((suite) => suite.key === key)) continue;
+    actions.push({
+      kind: "close",
+      issue: issue.number,
+      comment: `This test is no longer in the history of ${branches2(context)}: it was renamed, removed, or not run for 90 days. Closing this issue.`
+    });
+  }
+  return { actions, postponed };
+}
+function renderFlakyIssue(key, id, test, stats, result, context) {
+  const where = branches2(context);
+  const retries = stats.retries > 0 ? `, and passed only after a retry ${times2(stats.retries)}` : "";
+  const lines = [
+    flakyMarker(key, id),
+    `notmyfault found this test flaky on ${where}. It keeps this issue up to date, and closes it after ${QUIET_DAYS} days without a failure there.`,
+    "",
+    `- **Test:** ${code(result?.title ?? id)}`,
+    `- **Suite:** \`${key}\``,
+    `- **Verdict on ${where}:** ${verdict(stats)}`,
+    `- **Runs on ${where}:** failed ${stats.failures} of the last ${plural2(stats.runs, "run")}${retries}`,
+    `- **Last failure:** ${lastFailureDay(test) ?? "unknown"}`
+  ];
+  if (stats.latestEvidence) {
+    const day = stats.latestEvidence.at.slice(0, 10);
+    lines.push(
+      `- **Proof:** ${stats.latestEvidence.kind === "rerun" ? "passed when the same commit was re-run" : "passed after a retry"} on ${day}`
+    );
+  }
+  if (result?.outcome === "failed" || result?.outcome === "flaky") lines.push("", latestFailure(result, context));
+  lines.push("", `Until it is fixed, [quarantine mode](${QUARANTINE_URL}) keeps it from blocking pull requests.`);
+  return lines.join("\n");
+}
+function latestFailure(result, context) {
+  const run3 = context.runUrl ? `, in [this workflow run](${context.runUrl})` : "";
+  const what = result.outcome === "flaky" ? "Latest retry" : "Latest failure";
+  const message = result.message ? `<pre>${escapeHtml(result.message)}</pre>` : "_The report has no failure message._";
+  return [`**${what}**, on commit \`${context.sha.slice(0, 12)}\`${run3}:`, "", message].join("\n");
+}
+function verdict(stats) {
+  switch (verdictFor(stats)) {
+    case "broken":
+      return `already failing, failed the last ${plural2(stats.trailingFailures, "run")}`;
+    case "flaky":
+      return stats.confirmed ? "known flaky" : "probably flaky";
+    case "suspect":
+      return "suspect";
+    default:
+      return "passing again";
+  }
+}
+function lastFailureDay(test) {
+  const days = [test.lastFailure, ...(test.evidence ?? []).map((evidence) => evidence.at.slice(0, 10))];
+  return days.filter((day) => day !== void 0).sort().at(-1);
+}
+function quietComment(lastFailure, context) {
+  const since = lastFailure ? ` since ${lastFailure}` : "";
+  return `No failure on ${branches2(context)}${since}, for more than ${QUIET_DAYS} days: closing this issue. notmyfault reopens it if the test fails again.`;
+}
+function issueTitle(title) {
+  const short = title.length > MAX_TITLE_LENGTH ? `${title.slice(0, MAX_TITLE_LENGTH - 1)}\u2026` : title;
+  return `Flaky test: ${short}`;
+}
+function branches2(context) {
+  return context.trackedBranches.map((branch) => `\`${branch}\``).join(", ");
+}
+function plural2(n, word) {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
+function times2(n) {
+  return n === 1 ? "once" : n === 2 ? "twice" : `${n} times`;
+}
+
 // src/github.ts
 var GitHubApiError = class extends Error {
   constructor(status, path, body) {
@@ -530,8 +872,40 @@ var GitHubClient = class {
       return "updated";
     }
     if (!create) return "skipped";
-    await this.request("POST", `/repos/${this.repository}/issues/${issue}/comments`, { body });
+    await this.addComment(issue, body);
     return "created";
+  }
+  async addComment(issue, body) {
+    await this.request("POST", `/repos/${this.repository}/issues/${issue}/comments`, { body });
+  }
+  /** Issues, open or closed, carrying `label`. Pull requests are left out. */
+  async listIssues(label) {
+    const issues = [];
+    let path = `/repos/${this.repository}/issues?labels=${encodeURIComponent(label)}&state=all&per_page=100`;
+    while (path) {
+      const response = await this.request("GET", path);
+      for (const item of await response.json()) {
+        if (!item.pull_request) issues.push({ number: item.number, state: item.state, body: item.body ?? "" });
+      }
+      path = nextPage(response.headers.get("link"), this.apiUrl);
+    }
+    return issues;
+  }
+  async createIssue(title, body, labels) {
+    const response = await this.request("POST", `/repos/${this.repository}/issues`, { title, body, labels });
+    return (await response.json()).number;
+  }
+  async updateIssue(issue, changes) {
+    await this.request("PATCH", `/repos/${this.repository}/issues/${issue}`, changes);
+  }
+  /** Creates the label unless it exists. */
+  async ensureLabel(name, color, description) {
+    try {
+      await this.request("GET", `/repos/${this.repository}/labels/${encodeURIComponent(name)}`);
+    } catch (error) {
+      if (!(error instanceof GitHubApiError) || error.status !== 404) throw error;
+      await this.request("POST", `/repos/${this.repository}/labels`, { name, color, description });
+    }
   }
   async findComment(issue, marker) {
     let path = `/repos/${this.repository}/issues/${issue}/comments?per_page=100`;
@@ -873,219 +1247,6 @@ function sameFile(reference, file, workspace) {
   return relative2 !== void 0 && (relative2 === file || file.endsWith(`/${relative2}`));
 }
 
-// src/report.ts
-var MAX_ROWS = 30;
-var MAX_MESSAGES = 10;
-var MAX_FIXED = 10;
-var PROJECT_URL = "https://github.com/tashikomaaa/notmyfault";
-var BADGES_URL = "https://raw.githubusercontent.com/tashikomaaa/notmyfault/main/docs/assets";
-var EMOJI = { new: "\u{1F534}", suspect: "\u{1F7E0}", broken: "\u26AB", flaky: "\u{1F7E1}" };
-function badge(image, emoji, size) {
-  return `<img src="${BADGES_URL}/verdict-${image}.png" alt="${emoji}" width="${size}" height="${size}" align="absmiddle">`;
-}
-function commentMarker(key) {
-  return `<!-- notmyfault:${key} -->`;
-}
-function renderSuitesComment(suites, context) {
-  return [commentMarker(context.key), ...renderBody(suites, context)].join("\n");
-}
-function renderSuitesSummary(suites, context) {
-  const lines = renderBody(suites, context);
-  for (const suite of suites) {
-    if (!suite.ranking?.length) continue;
-    const of = suites.length > 1 ? ` of ${suite.name}` : "";
-    lines.push(
-      "",
-      `<details><summary>Most unreliable tests${of} on ${branches(context)}</summary>`,
-      "",
-      "| Test | Failed runs | Passed on retry | Proven flaky |",
-      "|---|--:|--:|:-:|",
-      ...suite.ranking.map(
-        (t) => `| ${code(t.id)} | ${t.failures} / ${t.runs} | ${t.retries} | ${t.confirmed ? "yes" : "probably"} |`
-      ),
-      "",
-      "</details>"
-    );
-  }
-  return lines.join("\n");
-}
-function renderBody(suites, context) {
-  const all = combine(suites.map((suite) => suite.analysis));
-  const lines = [`### ${headline(all)}`, ""];
-  for (const suite of suites) {
-    if (suites.length > 1) {
-      lines.push(`#### ${escapeHtml(suite.name)}`, "");
-      const { analysis } = suite;
-      if (analysis.failures.length === 0 && analysis.fixed.length === 0) {
-        lines.push(`${badge("passed", "\u2705", 20)} All ${plural(analysis.total - analysis.skipped, "test")} passed.`, "");
-      }
-    }
-    lines.push(...renderSuite(suite.analysis, context));
-  }
-  if (context.mode === "quarantine" && all.failures.length > 0) {
-    const tolerated = [...context.tolerated].map((v) => `\`${v}\``).join(", ") || "nothing";
-    lines.push(
-      context.blocking === 0 ? `\u{1F6E1}\uFE0F **Quarantine:** every failure is tolerated (${tolerated}), so this check passes.` : `\u274C **Quarantine:** ${plural(context.blocking, "failure")} not tolerated (${tolerated}), so this check fails.`,
-      ""
-    );
-  }
-  const withoutHistory = suites.filter((suite) => suite.historyRuns === 0);
-  if (withoutHistory.length > 0) {
-    const which = suites.length > 1 ? ` for ${withoutHistory.map((suite) => escapeHtml(suite.name)).join(", ")}` : "";
-    lines.push(
-      `\u2139\uFE0F No history on ${branches(context)} yet${which}. Verdicts get sharper once a few runs have been recorded there.`,
-      ""
-    );
-  }
-  lines.push(footer(all.retried, context));
-  return lines;
-}
-function combine(analyses) {
-  return {
-    total: analyses.reduce((sum, a) => sum + a.total, 0),
-    passed: analyses.reduce((sum, a) => sum + a.passed, 0),
-    skipped: analyses.reduce((sum, a) => sum + a.skipped, 0),
-    failures: analyses.flatMap((a) => a.failures),
-    retried: analyses.flatMap((a) => a.retried),
-    fixed: analyses.flatMap((a) => a.fixed)
-  };
-}
-function renderSuite(analysis, context) {
-  const lines = [];
-  if (analysis.failures.length > 0) {
-    lines.push("| Test | Why |", "|---|---|");
-    for (const failure of analysis.failures.slice(0, MAX_ROWS)) {
-      const icon = badge(failure.verdict, EMOJI[failure.verdict], 24);
-      lines.push(`| ${code(failure.test.title)} | ${icon} ${explain(failure, context)} |`);
-    }
-    if (analysis.failures.length > MAX_ROWS) {
-      lines.push(`| _\u2026and ${analysis.failures.length - MAX_ROWS} more_ | |`);
-    }
-    lines.push("");
-    lines.push(...renderMessages(analysis.failures));
-  }
-  if (analysis.fixed.length > 0) lines.push(...renderFixed(analysis.fixed, context));
-  return lines;
-}
-function headline(analysis) {
-  const failed = analysis.failures.length;
-  if (failed === 0) {
-    const retried = analysis.retried.length;
-    const suffix = retried > 0 ? ` (${retried} only after a retry)` : "";
-    return `${badge("passed", "\u2705", 32)} All ${plural(analysis.total - analysis.skipped, "test")} passed${suffix}`;
-  }
-  const yours = analysis.failures.filter((f) => f.verdict === "new" || f.verdict === "suspect").length;
-  if (yours === 0) return `${badge("passed", "\u{1F7E2}", 32)} ${plural(failed, "test")} failed, none of them look like your fault`;
-  return `${badge("new", "\u{1F534}", 32)} ${plural(failed, "test")} failed, ${yours} ${yours === 1 ? "looks" : "look"} related to this change`;
-}
-function plainExplanation(failure, context) {
-  return explain(failure, context).replace(/\*\*|`/g, "");
-}
-function explain(failure, context) {
-  const where = branches(context);
-  switch (failure.verdict) {
-    case "new":
-      if (failure.usually) return `**New failure.** ${usualBehavior(failure, where)}, but this error was never seen there.`;
-      return failure.trailingPasses > 0 ? `**New failure.** Passed the last ${plural(failure.trailingPasses, "run")} on ${where}.` : `**New failure.** No history for this test on ${where}.`;
-    case "suspect":
-      return `**Suspect.** Failed in isolation ${times(failure.isolatedFailures)} in the last ${plural(failure.runs, "run")} on ${where}.`;
-    case "broken":
-      return failure.trailingFailures === 1 ? `**Already failing on ${where}.** The latest run there failed too.` : `**Already failing on ${where}.** Failed the last ${failure.trailingFailures} runs there${failure.confirmed ? ", too many in a row to be flakiness" : ""}.`;
-    case "flaky": {
-      const parts = [];
-      if (failure.failures > 0) parts.push(`failed ${failure.failures} of the last ${plural(failure.runs, "run")} on ${where}`);
-      if (failure.retries > 0) parts.push(`passed only after a retry ${plural(failure.retries, "time")}`);
-      if (failure.latestEvidence) {
-        const day = failure.latestEvidence.at.slice(0, 10);
-        parts.push(
-          failure.latestEvidence.kind === "rerun" ? `passed when the same commit was re-run on ${day}` : `passed after a retry on ${day}`
-        );
-      }
-      const detail = parts.length > 0 ? ` ${capitalize(parts.join("; "))}.` : "";
-      return failure.confirmed ? `**Known flaky.**${detail}` : `**Probably flaky.**${detail}`;
-    }
-  }
-}
-function usualBehavior(failure, where) {
-  switch (failure.usually) {
-    case "flaky":
-      return `${failure.confirmed ? "Known" : "Probably"} flaky on ${where}`;
-    case "broken":
-      return `Already failing on ${where}`;
-    default:
-      return `Failed in isolation ${times(failure.isolatedFailures)} on ${where}`;
-  }
-}
-function renderMessages(failures) {
-  const withMessages = failures.filter((f) => f.test.message).slice(0, MAX_MESSAGES);
-  if (withMessages.length === 0) return [];
-  return [
-    "<details><summary>Failure messages</summary>",
-    "",
-    ...withMessages.flatMap((f) => [`${code(f.test.title)}`, `<pre>${escapeHtml(f.test.message ?? "")}</pre>`]),
-    "</details>",
-    ""
-  ];
-}
-function renderFixed(fixed, context) {
-  const lines = [
-    `\u{1F6E0}\uFE0F **Fixed:** ${plural(fixed.length, "test")} failing on ${branches(context)} ${fixed.length === 1 ? "passes" : "pass"} in this run.`,
-    "",
-    ...fixed.slice(0, MAX_FIXED).map(
-      (f) => `- ${code(f.test.title)}, ${f.trailingFailures === 1 ? "failed the latest run" : `failed the last ${f.trailingFailures} runs`} there`
-    )
-  ];
-  if (fixed.length > MAX_FIXED) lines.push(`- _\u2026and ${fixed.length - MAX_FIXED} more_`);
-  lines.push("");
-  return lines;
-}
-function footer(retried, context) {
-  const parts = [];
-  if (retried.length > 0) {
-    const names = retried.slice(0, 5).map((t) => code(t.title)).join(", ");
-    const more = retried.length > 5 ? ` and ${retried.length - 5} more` : "";
-    parts.push(`\u{1F501} Passed only after a retry: ${names}${more}`);
-  }
-  if (context.runUrl) parts.push(`[Workflow run](${context.runUrl})`);
-  parts.push(`Reported by [notmyfault](${PROJECT_URL})`);
-  return `<sub>${parts.join(" \xB7 ")}</sub>`;
-}
-function branches(context) {
-  return context.trackedBranches.map((b) => `\`${b}\``).join(", ");
-}
-function plural(n, word) {
-  return `${n} ${word}${n === 1 ? "" : "s"}`;
-}
-function times(n) {
-  return n === 1 ? "once" : n === 2 ? "twice" : `${n} times`;
-}
-function capitalize(value) {
-  return value.charAt(0).toUpperCase() + value.slice(1);
-}
-function code(value) {
-  return `<code>${escapeHtml(value)}</code>`;
-}
-var ESCAPED = {
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-  '"': "&quot;",
-  "|": "&#124;",
-  "[": "&#91;",
-  "]": "&#93;",
-  "(": "&#40;",
-  ")": "&#41;",
-  "*": "&#42;",
-  _: "&#95;",
-  "`": "&#96;",
-  "~": "&#126;",
-  "\\": "&#92;",
-  "!": "&#33;"
-};
-function escapeHtml(value) {
-  return value.replace(/[&<>"|[\]()*_`~\\!]/g, (char) => ESCAPED[char] ?? char);
-}
-
 // src/main.ts
 var EVIDENCE_TTL_DAYS = 30;
 var RETENTION_DAYS = 90;
@@ -1162,6 +1323,9 @@ async function evaluate(loaded, context, settings, store, io, now) {
   if (settings.record) {
     for (const suite of suites) await recordHistory(store, suite.key, suite.results, context, settings, io, now);
   }
+  if (settings.flakyIssues && isTracked(context, settings) && !context.pullRequest?.fromFork) {
+    await manageFlakyIssues(suites, context, settings, reportContext.runUrl, io, now);
+  }
   const reports = suites.map((suite) => ({
     name: suite.key,
     analysis: suite.analysis,
@@ -1214,6 +1378,7 @@ function readSettings(io, context) {
     commentKey: suites.map((suite) => suite.key).join("+"),
     comment: io.booleanInput("comment", true),
     annotations: io.booleanInput("annotations", true),
+    flakyIssues: io.booleanInput("flaky-issues", false),
     record: io.booleanInput("record", true),
     window: io.integerInput("window", 50, 5)
   };
@@ -1309,7 +1474,7 @@ async function recordHistory(store, key, results, context, settings, io, now) {
     io.info("Pull request from a fork: the token is read-only, history is not recorded.");
     return;
   }
-  const tracked = !context.eventName.startsWith("pull_request") && context.ref === `refs/heads/${context.refName}` && settings.trackedBranches.includes(context.refName);
+  const tracked = isTracked(context, settings);
   try {
     const pushed = await store.update(
       historyPath(key),
@@ -1334,6 +1499,48 @@ async function recordHistory(store, key, results, context, settings, io, now) {
     io.warning(
       `Could not record history on branch "${settings.branch}". Does the job have "contents: write" permission? ${errorMessage(error)}`
     );
+  }
+}
+function isTracked(context, settings) {
+  return !context.eventName.startsWith("pull_request") && context.ref === `refs/heads/${context.refName}` && settings.trackedBranches.includes(context.refName);
+}
+async function manageFlakyIssues(suites, context, settings, runUrl2, io, now) {
+  const client = new GitHubClient(settings.token, context.apiUrl, context.repository);
+  try {
+    const after = suites.map((suite) => {
+      const history = structuredClone(suite.history);
+      recordRun(history, suite.results, { sha: context.sha, tracked: true, now, window: settings.window, retentionDays: RETENTION_DAYS });
+      return { key: suite.key, history, results: suite.results };
+    });
+    const { actions, postponed } = planFlakyIssues(after, await client.listIssues(FLAKY_LABEL.name), {
+      trackedBranches: settings.trackedBranches,
+      now,
+      evidenceTtlDays: EVIDENCE_TTL_DAYS,
+      sha: context.sha,
+      ...runUrl2 ? { runUrl: runUrl2 } : {}
+    });
+    if (actions.some((action) => action.kind === "create")) {
+      await client.ensureLabel(FLAKY_LABEL.name, FLAKY_LABEL.color, FLAKY_LABEL.description);
+    }
+    const done = { created: 0, updated: 0, closed: 0 };
+    for (const action of actions) {
+      if (action.kind === "create") {
+        await client.createIssue(action.title, action.body, [FLAKY_LABEL.name]);
+        done.created++;
+      } else if (action.kind === "update") {
+        await client.updateIssue(action.issue, { body: action.body, ...action.reopen ? { state: "open" } : {} });
+        done.updated++;
+      } else {
+        await client.addComment(action.issue, action.comment);
+        await client.updateIssue(action.issue, { state: "closed" });
+        done.closed++;
+      }
+    }
+    const later = postponed > 0 ? ` ${postponed} more flaky test(s) will get an issue on the next runs.` : "";
+    io.info(`Flaky test issues: ${done.created} created, ${done.updated} updated, ${done.closed} closed.${later}`);
+  } catch (error) {
+    const hint = error instanceof GitHubApiError && error.status === 403 ? ' Does the job have "issues: write" permission?' : "";
+    io.warning(`Could not update flaky test issues.${hint} ${errorMessage(error)}`);
   }
 }
 async function comment(context, settings, body, create, io) {

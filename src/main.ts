@@ -5,6 +5,7 @@ import { ActionIO } from "./actions";
 import { analyze, blockingFailures, rankFlakyTests, type Analysis, type FailureVerdict, type Verdict } from "./analyze";
 import { readContext, runUrl, type RunContext } from "./context";
 import { GitStore } from "./git-store";
+import { FLAKY_LABEL, planFlakyIssues } from "./flaky-issues";
 import { GitHubApiError, GitHubClient } from "./github";
 import { emptyHistory, parseHistory, recordRun, serializeHistory, type History } from "./history";
 import { combineReports, parseJUnit, type TestResult } from "./junit";
@@ -51,6 +52,7 @@ export interface Settings {
   commentKey: string;
   comment: boolean;
   annotations: boolean;
+  flakyIssues: boolean;
   record: boolean;
   window: number;
 }
@@ -140,6 +142,9 @@ async function evaluate(
   if (settings.record) {
     for (const suite of suites) await recordHistory(store, suite.key, suite.results, context, settings, io, now);
   }
+  if (settings.flakyIssues && isTracked(context, settings) && !context.pullRequest?.fromFork) {
+    await manageFlakyIssues(suites, context, settings, reportContext.runUrl, io, now);
+  }
 
   const reports: SuiteReport[] = suites.map((suite) => ({
     name: suite.key,
@@ -200,6 +205,7 @@ export function readSettings(io: ActionIO, context: RunContext): Settings {
     commentKey: suites.map((suite) => suite.key).join("+"),
     comment: io.booleanInput("comment", true),
     annotations: io.booleanInput("annotations", true),
+    flakyIssues: io.booleanInput("flaky-issues", false),
     record: io.booleanInput("record", true),
     window: io.integerInput("window", 50, 5),
   };
@@ -324,10 +330,7 @@ async function recordHistory(
     io.info("Pull request from a fork: the token is read-only, history is not recorded.");
     return;
   }
-  const tracked =
-    !context.eventName.startsWith("pull_request") &&
-    context.ref === `refs/heads/${context.refName}` &&
-    settings.trackedBranches.includes(context.refName);
+  const tracked = isTracked(context, settings);
 
   try {
     const pushed = await store.update(
@@ -353,6 +356,63 @@ async function recordHistory(
     io.warning(
       `Could not record history on branch "${settings.branch}". Does the job have "contents: write" permission? ${errorMessage(error)}`,
     );
+  }
+}
+
+/** Whether the run happened on a tracked branch, whose runs build the history. */
+function isTracked(context: RunContext, settings: Settings): boolean {
+  return (
+    !context.eventName.startsWith("pull_request") &&
+    context.ref === `refs/heads/${context.refName}` &&
+    settings.trackedBranches.includes(context.refName)
+  );
+}
+
+/** Opens, updates and closes an issue per flaky test, from the history including this run. */
+async function manageFlakyIssues(
+  suites: Suite[],
+  context: RunContext,
+  settings: Settings,
+  runUrl: string | undefined,
+  io: ActionIO,
+  now: Date,
+): Promise<void> {
+  const client = new GitHubClient(settings.token, context.apiUrl, context.repository);
+  try {
+    const after = suites.map((suite) => {
+      const history = structuredClone(suite.history);
+      recordRun(history, suite.results, { sha: context.sha, tracked: true, now, window: settings.window, retentionDays: RETENTION_DAYS });
+      return { key: suite.key, history, results: suite.results };
+    });
+    const { actions, postponed } = planFlakyIssues(after, await client.listIssues(FLAKY_LABEL.name), {
+      trackedBranches: settings.trackedBranches,
+      now,
+      evidenceTtlDays: EVIDENCE_TTL_DAYS,
+      sha: context.sha,
+      ...(runUrl ? { runUrl } : {}),
+    });
+    if (actions.some((action) => action.kind === "create")) {
+      await client.ensureLabel(FLAKY_LABEL.name, FLAKY_LABEL.color, FLAKY_LABEL.description);
+    }
+    const done = { created: 0, updated: 0, closed: 0 };
+    for (const action of actions) {
+      if (action.kind === "create") {
+        await client.createIssue(action.title, action.body, [FLAKY_LABEL.name]);
+        done.created++;
+      } else if (action.kind === "update") {
+        await client.updateIssue(action.issue, { body: action.body, ...(action.reopen ? { state: "open" as const } : {}) });
+        done.updated++;
+      } else {
+        await client.addComment(action.issue, action.comment);
+        await client.updateIssue(action.issue, { state: "closed" });
+        done.closed++;
+      }
+    }
+    const later = postponed > 0 ? ` ${postponed} more flaky test(s) will get an issue on the next runs.` : "";
+    io.info(`Flaky test issues: ${done.created} created, ${done.updated} updated, ${done.closed} closed.${later}`);
+  } catch (error) {
+    const hint = error instanceof GitHubApiError && error.status === 403 ? ' Does the job have "issues: write" permission?' : "";
+    io.warning(`Could not update flaky test issues.${hint} ${errorMessage(error)}`);
   }
 }
 

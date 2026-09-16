@@ -38,6 +38,7 @@ npm run check   # typecheck, build dist/ and run all tests
 | `src/history.ts` | History format and recording rules |
 | `src/analyze.ts` | Classification and ranking |
 | `src/locate.ts` | Finding the file and line of a failed test, for annotations |
+| `src/flaky-issues.ts` | Deciding which flaky test issues to open, update and close |
 | `src/report.ts` | Pull request comment and job summary rendering |
 | `src/git-store.ts` | Reading and writing the history branch |
 | `src/github.ts` | REST API client for comments |

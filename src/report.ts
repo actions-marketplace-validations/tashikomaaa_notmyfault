@@ -263,7 +263,7 @@ function capitalize(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-function code(value: string): string {
+export function code(value: string): string {
   return `<code>${escapeHtml(value)}</code>`;
 }
 
@@ -288,6 +288,6 @@ const ESCAPED: Record<string, string> = {
   "!": "&#33;",
 };
 
-function escapeHtml(value: string): string {
+export function escapeHtml(value: string): string {
   return value.replace(/[&<>"|[\]()*_`~\\!]/g, (char) => ESCAPED[char] ?? char);
 }

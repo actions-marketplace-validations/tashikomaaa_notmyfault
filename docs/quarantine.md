@@ -49,7 +49,7 @@ One blind spot remains: two test cases with the **same name in the same suite** 
 
 ## What quarantine does not do
 
-- **It does not fix tests.** Flaky tests stay listed in the pull request comment and in the ranking of the job summary. Use that list to fix them.
+- **It does not fix tests.** Flaky tests stay listed in the pull request comment and in the ranking of the job summary. To make sure they get fixed, set [`flaky-issues: true`](configuration.md#flaky-issues): each one gets an issue, closed once it stops failing.
 - **It does not hide failures.** The test step still shows as failed in the logs, and the comment explains every failure.
 - **It does not skip or retry tests.** Your test runner still runs everything. Retries configured in the runner keep working and give notmyfault more proof, see [Test runners](test-runners.md#detecting-retries).
 

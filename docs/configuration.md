@@ -22,6 +22,7 @@
 | [`key`](#key) | `<workflow>-<job>` | Name of the test suite in the history |
 | [`comment`](#comment) | `true` | Comment on pull requests |
 | [`annotations`](#annotations) | `true` | Annotate failed tests next to their code |
+| [`flaky-issues`](#flaky-issues) | `false` | Open an issue for each flaky test |
 | [`record`](#record) | `true` | Record the run in the history |
 | [`window`](#window) | `50` | Runs remembered per test |
 
@@ -96,6 +97,23 @@ When `true`, notmyfault comments on pull requests. A comment is created only whe
 ### `annotations`
 
 When `true`, each failed test the report lets notmyfault find in the repository gets an annotation with its verdict: an error for new and suspect failures, a notice for flaky and already failing tests. Annotations appear in the workflow run and, on pull requests, next to the code in the Files changed tab. See [Annotations](verdicts.md#annotations). Set `annotations: false` if your test runner already annotates failures and you prefer fewer of them.
+
+### `flaky-issues`
+
+When `true`, runs on tracked branches keep an issue open for each flaky test, labeled `flaky-test`, so that flaky tests get fixed instead of only tolerated. It needs the `issues: write` permission:
+
+```yaml
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+```
+
+- A test **proven flaky** that failed on a tracked branch in the last 30 days gets an issue, with its verdict, its runs and its proof of flakiness. At most 5 issues are opened per run, the others on the next runs.
+- When the test fails again on a tracked branch, or passes only after a retry, the issue is updated with the latest failure message and a link to the run. A closed issue is reopened.
+- After 30 days without a failure on a tracked branch, or when the test leaves the history, the issue is closed with a comment.
+
+Pull request runs never touch issues. Assign, discuss and label the issues as you like: notmyfault only rewrites their description. See [How it works](how-it-works.md#flaky-test-issues).
 
 ### `record`
 
