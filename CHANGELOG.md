@@ -4,9 +4,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-16
+
 ### Added
 
-- Demo repository with a real pull request, and a screenshot of its comment in the README.
+- [Demo repository](https://github.com/tashikomaaa/notmyfault-demo) with pull requests showing every verdict, and a screenshot of a real comment in the README.
 - A mascot, a banner, verdict badges and illustrations throughout the README, the documentation, the wiki and the issue forms.
 
 ### Changed
@@ -42,6 +44,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Pull request comment kept up to date, job summary with the most unreliable tests, and step outputs.
 - Quarantine mode, so that known flaky tests stop blocking merges.
 
-[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/tashikomaaa/notmyfault/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/tashikomaaa/notmyfault/releases/tag/v1.0.0
