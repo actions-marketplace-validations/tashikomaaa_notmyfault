@@ -19,7 +19,7 @@ Check, in order:
 
 ### `No JUnit report matched "…" in …`
 
-No file matched the `junit` patterns. Patterns are relative to the workspace, and `node_modules` and `.git` directories are skipped.
+No file matched the `junit` patterns, or the patterns of one of the `suites`, which the message then names. Patterns are relative to the workspace, and `node_modules` and `.git` directories are skipped.
 
 - Check the path your test runner writes to, for example with `- run: find . -name "*.xml" -not -path "*/node_modules/*"` before the notmyfault step.
 - If the tests did not run at all (build error, dependency install failure), this error is expected: fix the earlier step.
@@ -41,9 +41,17 @@ Quarantine mode worked as intended: these failures are not covered by `tolerate`
 
 An input has an invalid value. Boolean inputs accept `true`, `false`, `yes`, `no`, `on`, `off`, `1` and `0`. See [Configuration](configuration.md).
 
-### `Input "junit" is required: a glob matching your JUnit XML reports.`
+### `Input "junit" is required: a glob matching your JUnit XML reports. Or list several suites in "suites".`
 
-Add the `junit` input.
+Add the `junit` input, or [`suites`](configuration.md#suites).
+
+### `Inputs "junit" and "key" cannot be used with "suites": …`
+
+`suites` replaces `junit` and `key`: name each suite and its reports in it, and remove the other two inputs.
+
+### `Input "suites" expects one "name: glob" per line, got "…"` or `names the suite "…" twice`
+
+Each line of `suites` needs a name, a colon, then one or more glob patterns separated by commas, and each name can only appear once. Names are compared after being turned into keys, so `Unit` and `unit` are the same suite.
 
 ### `Input "token" is empty.`
 

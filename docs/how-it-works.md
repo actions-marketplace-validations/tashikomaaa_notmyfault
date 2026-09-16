@@ -166,13 +166,13 @@ The token reaches git through environment variables, never on the command line, 
 
 ## Pull request comments
 
-Each comment starts with a hidden marker, `<!-- notmyfault:<key> -->`. notmyfault looks for its marker among the pull request comments and updates that comment instead of adding a new one. It creates a comment only when a test failed, passed after a retry, or passed while it would have been classified already failing had it failed. One key means one comment.
+Each comment starts with a hidden marker, `<!-- notmyfault:<key> -->`. notmyfault looks for its marker among the pull request comments and updates that comment instead of adding a new one. It creates a comment only when a test failed, passed after a retry, or passed while it would have been classified already failing had it failed. One key means one comment. With [`suites`](configuration.md#suites), the marker holds the names of every suite joined with `+`, and one comment covers them all.
 
 ## Limits
 
 - **Only GitHub Actions** is supported.
 - **Names are identities**: renamed tests start over, tests with dynamic names are not followed, and two test cases sharing a name inside one suite are read as attempts of the same test.
 - **Retries** are only visible when the runner reports them, see [Test runners](test-runners.md#detecting-retries).
-- **One comment per key.** Jobs sharing a key overwrite each other's comment, see [Recipes](recipes.md#sharded-tests).
+- **One comment per step.** Jobs sharing a key overwrite each other's comment. Collect their reports in one job instead, with [`suites`](configuration.md#suites) when they need separate histories, see [Recipes](recipes.md#sharded-tests).
 - **Tested on Linux runners.** macOS and Windows runners have `git` and should work, but are not covered by the test suite yet.
 - **GitHub Enterprise Server** should work through `GITHUB_SERVER_URL` and `GITHUB_API_URL`, provided the runner supports the `node24` runtime, but is untested.

@@ -10,6 +10,8 @@ notmyfault reports in two places: a comment on the pull request and the job summ
 | <img alt="" src="assets/verdict-passed.png" width="24" align="absmiddle"> *N* tests failed, none of them look like your fault | Every failure is known flaky or already failing on the tracked branch. |
 | <img alt="" src="assets/verdict-new.png" width="24" align="absmiddle"> *N* tests failed, *M* look related to this change | *M* failures are new or suspect. |
 
+With [`suites`](configuration.md#suites), the headline counts the tests of every suite, and each suite then gets its own section.
+
 ## The verdicts
 
 Each failed test gets one verdict, shown by its badge. Where images do not load, an emoji stands in: 🔴 new failure, 🟠 suspect, ⚫ already failing, 🟡 flaky. The verdicts are listed from the most actionable one.

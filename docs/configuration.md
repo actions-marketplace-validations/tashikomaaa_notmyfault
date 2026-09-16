@@ -6,13 +6,14 @@
     junit: reports/**/*.xml
 ```
 
-`junit` is the only required input.
+`junit` is the only required input, unless you list several suites with `suites`.
 
 ## Inputs
 
 | Input | Default | Description |
 |---|---|---|
-| [`junit`](#junit) | required | Glob(s) matching the JUnit XML reports |
+| [`junit`](#junit) | required, unless `suites` | Glob(s) matching the JUnit XML reports |
+| [`suites`](#suites) | none | Several suites, each with its own history, in one comment |
 | [`mode`](#mode) | `report` | `report` or `quarantine` |
 | [`tolerate`](#tolerate) | `flaky` | Verdicts that do not fail the step in quarantine mode |
 | [`token`](#token) | `${{ github.token }}` | Token used to store the history and comment |
@@ -35,6 +36,24 @@ junit: |
 ```
 
 When the same test appears in several matched files, the worst outcome wins: failed, then passed after a retry, then passed, then skipped.
+
+### `suites`
+
+Several test suites reported in a single step and a single pull request comment, each with its own history. One suite per line: its name, a colon, then its glob patterns separated by commas.
+
+```yaml
+suites: |
+  unit: reports/unit/*.xml
+  e2e: reports/e2e/*.xml, reports/smoke/*.xml
+```
+
+- Each name is used as a [`key`](#key): the suite keeps the history file of that key. Use it **instead of** `junit` and `key`, setting them together is an error.
+- The comment and the job summary start with a headline counting every suite, then have a section per suite.
+- Outputs count the tests of every suite. In quarantine mode, the step fails when any suite has a failure that is not tolerated.
+- Every suite needs at least one matching report with test cases, like `junit`.
+- The comment is identified by the names of the suites, joined with `+`. Adding, removing or renaming a suite starts a new comment.
+
+See [Recipes](recipes.md#several-test-suites-in-one-job) for suites in one job, and for the same tests run in several environments.
 
 ### `mode`
 
@@ -68,7 +87,7 @@ A run is tracked when it is not a `pull_request` or `pull_request_target` event 
 
 Identifies the test suite in the history. Each key has its own file on the history branch and its own pull request comment. Defaults to `<workflow name>-<job id>`, lowercased with every character outside `a-z`, `0-9`, `.`, `_` and `-` replaced by `-`: a workflow named `CI` with a job `test` gives `ci-test`.
 
-Set it when one job runs several suites, or when matrix jobs run the same tests in different environments. See [Recipes](recipes.md).
+Set it when one job runs several suites, or when matrix jobs run the same tests in different environments. To report several suites in one comment, use [`suites`](#suites) instead. See [Recipes](recipes.md).
 
 ### `comment`
 

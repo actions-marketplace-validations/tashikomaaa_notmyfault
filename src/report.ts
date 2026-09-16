@@ -4,6 +4,7 @@ import type { TestResult } from "./junit";
 export type Mode = "report" | "quarantine";
 
 export interface ReportContext {
+  /** Identifies the pull request comment. */
   key: string;
   trackedBranches: string[];
   /** Tracked-branch runs recorded before this one. */
@@ -13,6 +14,16 @@ export interface ReportContext {
   /** Failures not covered by the tolerated verdicts. */
   blocking: number;
   runUrl?: string;
+}
+
+/** The analysis of one test suite, with its own history. */
+export interface SuiteReport {
+  name: string;
+  analysis: Analysis;
+  /** Tracked-branch runs recorded before this one. */
+  historyRuns: number;
+  /** Most unreliable tests, for the job summary. */
+  ranking?: RankedTest[];
 }
 
 const MAX_ROWS = 30;
@@ -34,19 +45,30 @@ export function commentMarker(key: string): string {
 }
 
 export function renderComment(analysis: Analysis, context: ReportContext): string {
-  return [commentMarker(context.key), ...renderBody(analysis, context)].join("\n");
+  return renderSuitesComment([{ name: context.key, analysis, historyRuns: context.historyRuns }], context);
 }
 
 export function renderSummary(analysis: Analysis, ranking: RankedTest[], context: ReportContext): string {
-  const lines = renderBody(analysis, context);
-  if (ranking.length > 0) {
+  return renderSuitesSummary([{ name: context.key, analysis, historyRuns: context.historyRuns, ranking }], context);
+}
+
+/** One comment for every suite: a headline counting them all, then a section per suite when there are several. */
+export function renderSuitesComment(suites: SuiteReport[], context: ReportContext): string {
+  return [commentMarker(context.key), ...renderBody(suites, context)].join("\n");
+}
+
+export function renderSuitesSummary(suites: SuiteReport[], context: ReportContext): string {
+  const lines = renderBody(suites, context);
+  for (const suite of suites) {
+    if (!suite.ranking?.length) continue;
+    const of = suites.length > 1 ? ` of ${suite.name}` : "";
     lines.push(
       "",
-      `<details><summary>Most unreliable tests on ${branches(context)}</summary>`,
+      `<details><summary>Most unreliable tests${of} on ${branches(context)}</summary>`,
       "",
       "| Test | Failed runs | Passed on retry | Proven flaky |",
       "|---|--:|--:|:-:|",
-      ...ranking.map(
+      ...suite.ranking.map(
         (t) => `| ${code(t.id)} | ${t.failures} / ${t.runs} | ${t.retries} | ${t.confirmed ? "yes" : "probably"} |`,
       ),
       "",
@@ -56,9 +78,57 @@ export function renderSummary(analysis: Analysis, ranking: RankedTest[], context
   return lines.join("\n");
 }
 
-function renderBody(analysis: Analysis, context: ReportContext): string[] {
-  const lines = [`### ${headline(analysis)}`, ""];
+function renderBody(suites: SuiteReport[], context: ReportContext): string[] {
+  const all = combine(suites.map((suite) => suite.analysis));
+  const lines = [`### ${headline(all)}`, ""];
 
+  for (const suite of suites) {
+    if (suites.length > 1) {
+      lines.push(`#### ${escapeHtml(suite.name)}`, "");
+      const { analysis } = suite;
+      if (analysis.failures.length === 0 && analysis.fixed.length === 0) {
+        lines.push(`${badge("passed", "✅", 20)} All ${plural(analysis.total - analysis.skipped, "test")} passed.`, "");
+      }
+    }
+    lines.push(...renderSuite(suite.analysis, context));
+  }
+
+  if (context.mode === "quarantine" && all.failures.length > 0) {
+    const tolerated = [...context.tolerated].map((v) => `\`${v}\``).join(", ") || "nothing";
+    lines.push(
+      context.blocking === 0
+        ? `🛡️ **Quarantine:** every failure is tolerated (${tolerated}), so this check passes.`
+        : `❌ **Quarantine:** ${plural(context.blocking, "failure")} not tolerated (${tolerated}), so this check fails.`,
+      "",
+    );
+  }
+
+  const withoutHistory = suites.filter((suite) => suite.historyRuns === 0);
+  if (withoutHistory.length > 0) {
+    const which = suites.length > 1 ? ` for ${withoutHistory.map((suite) => escapeHtml(suite.name)).join(", ")}` : "";
+    lines.push(
+      `ℹ️ No history on ${branches(context)} yet${which}. Verdicts get sharper once a few runs have been recorded there.`,
+      "",
+    );
+  }
+
+  lines.push(footer(all.retried, context));
+  return lines;
+}
+
+function combine(analyses: Analysis[]): Analysis {
+  return {
+    total: analyses.reduce((sum, a) => sum + a.total, 0),
+    passed: analyses.reduce((sum, a) => sum + a.passed, 0),
+    skipped: analyses.reduce((sum, a) => sum + a.skipped, 0),
+    failures: analyses.flatMap((a) => a.failures),
+    retried: analyses.flatMap((a) => a.retried),
+    fixed: analyses.flatMap((a) => a.fixed),
+  };
+}
+
+function renderSuite(analysis: Analysis, context: ReportContext): string[] {
+  const lines: string[] = [];
   if (analysis.failures.length > 0) {
     lines.push("| Test | Why |", "|---|---|");
     for (const failure of analysis.failures.slice(0, MAX_ROWS)) {
@@ -74,25 +144,6 @@ function renderBody(analysis: Analysis, context: ReportContext): string[] {
   }
 
   if (analysis.fixed.length > 0) lines.push(...renderFixed(analysis.fixed, context));
-
-  if (context.mode === "quarantine" && analysis.failures.length > 0) {
-    const tolerated = [...context.tolerated].map((v) => `\`${v}\``).join(", ") || "nothing";
-    lines.push(
-      context.blocking === 0
-        ? `🛡️ **Quarantine:** every failure is tolerated (${tolerated}), so this check passes.`
-        : `❌ **Quarantine:** ${plural(context.blocking, "failure")} not tolerated (${tolerated}), so this check fails.`,
-      "",
-    );
-  }
-
-  if (context.historyRuns === 0) {
-    lines.push(
-      `ℹ️ No history on ${branches(context)} yet. Verdicts get sharper once a few runs have been recorded there.`,
-      "",
-    );
-  }
-
-  lines.push(footer(analysis.retried, context));
   return lines;
 }
 

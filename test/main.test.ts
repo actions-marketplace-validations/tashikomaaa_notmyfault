@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ActionIO } from "../src/actions";
 import { findFiles, run, sanitizeKey } from "../src/main";
@@ -79,7 +79,7 @@ afterEach(async () => {
 /** "fail" fails with a message of its own, "fail: message" with the given one. */
 type Outcomes = Record<string, "pass" | "fail" | `fail: ${string}`>;
 
-function writeReport(outcomes: Outcomes): void {
+function writeReport(outcomes: Outcomes, path = "reports/junit.xml"): void {
   const cases = Object.entries(outcomes)
     .map(([name, outcome]) =>
       outcome === "pass"
@@ -87,7 +87,8 @@ function writeReport(outcomes: Outcomes): void {
         : `<testcase classname="checkout" name="${name}"><failure message="${outcome === "fail" ? `${name} broke` : outcome.slice(6)}"/></testcase>`,
     )
     .join("");
-  writeFileSync(join(root, "workspace", "reports", "junit.xml"), `<testsuites><testsuite name="unit">${cases}</testsuite></testsuites>`);
+  mkdirSync(dirname(join(root, "workspace", path)), { recursive: true });
+  writeFileSync(join(root, "workspace", path), `<testsuites><testsuite name="unit">${cases}</testsuite></testsuites>`);
 }
 
 interface RunOptions {
@@ -96,10 +97,13 @@ interface RunOptions {
   attempt?: number;
   fork?: boolean;
   inputs?: Record<string, string>;
+  /** Reports to write instead of reports/junit.xml, by path. */
+  reports?: Record<string, Outcomes>;
 }
 
 async function simulate(outcomes: Outcomes, options: RunOptions = {}) {
-  writeReport(outcomes);
+  if (options.reports) for (const [path, report] of Object.entries(options.reports)) writeReport(report, path);
+  else writeReport(outcomes);
   const event = options.event ?? "push";
   const eventPath = join(root, "event.json");
   const payload =
@@ -159,10 +163,10 @@ function parseOutputs(raw: string): Record<string, string> {
   return outputs;
 }
 
-function storedHistory(): { runs: number; tests: Record<string, { outcomes: string; evidence?: unknown[] }> } {
+function storedHistory(key = "ci-test"): { runs: number; tests: Record<string, { outcomes: string; evidence?: unknown[] }> } {
   const bare = join(root, "remote", "acme", "shop.git");
   return JSON.parse(
-    execFileSync("git", ["-C", bare, "show", "notmyfault-history:history/ci-test.json"], {
+    execFileSync("git", ["-C", bare, "show", `notmyfault-history:history/${key}.json`], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }),
@@ -281,6 +285,41 @@ describe("run", () => {
 
     const quiet = await simulate({ totals: "fail: at checkout.test.ts:7:3" }, { event: "pull_request", inputs: { annotations: "false" } });
     expect(quiet.logs).not.toContain("::error file=");
+  });
+
+  it("reports several suites, each with its own history, in one comment", async () => {
+    const suites = "unit: reports/unit/*.xml\ne2e: reports/e2e/*.xml";
+    const both = (unit: Outcomes, e2e: Outcomes) => ({ "reports/unit/junit.xml": unit, "reports/e2e/junit.xml": e2e });
+    for (let run = 0; run < 2; run++) await simulate({}, { inputs: { junit: "", suites }, reports: both({ totals: "pass" }, { login: "pass" }) });
+    await simulate({}, { inputs: { junit: "", suites }, reports: both({ totals: "pass" }, { login: "fail" }) });
+    expect(storedHistory("unit")).toMatchObject({ runs: 3, tests: { "unit › checkout › totals": { outcomes: "ppp" } } });
+    expect(storedHistory("e2e")).toMatchObject({ runs: 3, tests: { "unit › checkout › login": { outcomes: "ppf" } } });
+
+    const pr = await simulate(
+      {},
+      {
+        event: "pull_request",
+        inputs: { junit: "", suites, mode: "quarantine", tolerate: "flaky, broken" },
+        reports: both({ totals: "fail" }, { login: "fail" }),
+      },
+    );
+    expect(pr.code).toBe(1);
+    expect(pr.outputs).toMatchObject({ total: "2", failed: "2", "new-failures": "1", "broken-failures": "1", blocking: "1" });
+    expect(pr.logs).toContain("Read 1 tests from 1 report(s) for e2e.");
+    expect(api.comments).toHaveLength(1);
+    const comment = api.comments[0]!.body;
+    expect(comment.startsWith("<!-- notmyfault:unit+e2e -->")).toBe(true);
+    expect(comment).toMatch(/#### unit\n[\s\S]*\*\*New failure\.\*\*[\s\S]*#### e2e\n[\s\S]*\*\*Already failing on `main`\.\*\*/);
+  });
+
+  it("rejects suites that are malformed or mixed with junit and key", async () => {
+    const malformed = await simulate({ ok: "pass" }, { inputs: { junit: "", suites: "unit reports/*.xml" } });
+    expect(malformed.logs).toContain('::error::Input "suites" expects one "name: glob" per line, got "unit reports/*.xml"');
+    const twice = await simulate({ ok: "pass" }, { inputs: { junit: "", suites: "unit: a.xml\nUnit: b.xml" } });
+    expect(twice.logs).toContain('::error::Input "suites" names the suite "unit" twice.');
+    const mixed = await simulate({ ok: "pass" }, { inputs: { suites: "unit: reports/*.xml" } });
+    expect(mixed.code).toBe(1);
+    expect(mixed.logs).toContain('::error::Inputs "junit" and "key" cannot be used with "suites"');
   });
 
   it("keeps working when the history cannot be read", async () => {

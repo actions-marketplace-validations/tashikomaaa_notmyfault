@@ -2,7 +2,7 @@ import { statSync } from "node:fs";
 import { glob, readFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { ActionIO } from "./actions";
-import { analyze, blockingFailures, rankFlakyTests, type Analysis, type Verdict } from "./analyze";
+import { analyze, blockingFailures, rankFlakyTests, type Analysis, type FailureVerdict, type Verdict } from "./analyze";
 import { readContext, runUrl, type RunContext } from "./context";
 import { GitStore } from "./git-store";
 import { GitHubApiError, GitHubClient } from "./github";
@@ -12,10 +12,11 @@ import { locate } from "./locate";
 import {
   commentMarker,
   plainExplanation,
-  renderComment,
-  renderSummary,
+  renderSuitesComment,
+  renderSuitesSummary,
   type Mode,
   type ReportContext,
+  type SuiteReport,
 } from "./report";
 
 const EVIDENCE_TTL_DAYS = 30;
@@ -33,14 +34,21 @@ It stores the recent outcome of each test, so failures can be told apart: new, f
 The branch is rewritten as a single commit on every update. Deleting it simply resets the history.
 `;
 
-export interface Settings {
+export interface SuiteSettings {
+  /** Name of the suite in the history. */
+  key: string;
   patterns: string[];
+}
+
+export interface Settings {
+  suites: SuiteSettings[];
   mode: Mode;
   tolerated: Set<Verdict>;
   token: string;
   branch: string;
   trackedBranches: string[];
-  key: string;
+  /** Identifies the pull request comment: the key of the suite, or of every suite joined with "+". */
+  commentKey: string;
   comment: boolean;
   annotations: boolean;
   record: boolean;
@@ -54,8 +62,12 @@ export async function run(env: NodeJS.ProcessEnv = process.env, io = new ActionI
     const settings = readSettings(io, context);
     io.mask(settings.token);
 
-    const results = await loadResults(settings.patterns, context.workspace, io);
-    if (!results) return 1;
+    const loaded: LoadedSuite[] = [];
+    for (const suite of settings.suites) {
+      const results = await loadResults(suite, settings.suites.length > 1, context.workspace, io);
+      if (!results) return 1;
+      loaded.push({ ...suite, results });
+    }
 
     const store = new GitStore({
       remoteUrl: `${context.serverUrl}/${context.repository}.git`,
@@ -64,7 +76,7 @@ export async function run(env: NodeJS.ProcessEnv = process.env, io = new ActionI
       tempDir: context.tempDir,
     });
     try {
-      return await evaluate(results, context, settings, store, io, now);
+      return await evaluate(loaded, context, settings, store, io, now);
     } finally {
       await store.dispose();
     }
@@ -74,23 +86,36 @@ export async function run(env: NodeJS.ProcessEnv = process.env, io = new ActionI
   }
 }
 
+interface LoadedSuite extends SuiteSettings {
+  results: TestResult[];
+}
+
+interface Suite extends LoadedSuite {
+  history: History;
+  analysis: Analysis;
+}
+
 async function evaluate(
-  results: TestResult[],
+  loaded: LoadedSuite[],
   context: RunContext,
   settings: Settings,
   store: GitStore,
   io: ActionIO,
   now: Date,
 ): Promise<number> {
-  const historyPath = `history/${settings.key}.json`;
-  const history = await loadHistory(store, historyPath, settings, io);
-
-  const analysis = analyze(results, history, now, EVIDENCE_TTL_DAYS);
-  const blocking = blockingFailures(analysis, settings.tolerated);
+  const suites: Suite[] = [];
+  for (const suite of loaded) {
+    const history = await loadHistory(store, historyPath(suite.key), settings, io);
+    suites.push({ ...suite, history, analysis: analyze(suite.results, history, now, EVIDENCE_TTL_DAYS) });
+  }
+  const named = suites.length > 1;
+  const sum = (count: (analysis: Analysis) => number) => suites.reduce((total, suite) => total + count(suite.analysis), 0);
+  const failures = suites.flatMap((suite) => suite.analysis.failures);
+  const blocking = suites.flatMap((suite) => blockingFailures(suite.analysis, settings.tolerated));
   const reportContext: ReportContext = {
-    key: settings.key,
+    key: settings.commentKey,
     trackedBranches: settings.trackedBranches,
-    historyRuns: history.runs,
+    historyRuns: suites[0]!.history.runs,
     mode: settings.mode,
     tolerated: settings.tolerated,
     blocking: blocking.length,
@@ -98,34 +123,44 @@ async function evaluate(
   const url = runUrl(context);
   if (url) reportContext.runUrl = url;
 
-  io.group(
-    `notmyfault: ${analysis.failures.length} failed, ${analysis.retried.length} retried, ${analysis.fixed.length} fixed, ${analysis.total} total`,
-  );
-  for (const failure of analysis.failures) {
-    const reason = failure.usually ? ` (${failure.usually} on ${settings.trackedBranches.join(", ")}, but with a new error)` : "";
-    io.info(`${failure.verdict.padEnd(8)} ${failure.test.title}${reason}`);
+  for (const { key, analysis } of suites) {
+    io.group(
+      `notmyfault${named ? ` ${key}` : ""}: ${analysis.failures.length} failed, ${analysis.retried.length} retried, ${analysis.fixed.length} fixed, ${analysis.total} total`,
+    );
+    for (const failure of analysis.failures) {
+      const reason = failure.usually ? ` (${failure.usually} on ${settings.trackedBranches.join(", ")}, but with a new error)` : "";
+      io.info(`${failure.verdict.padEnd(8)} ${failure.test.title}${reason}`);
+    }
+    for (const test of analysis.retried) io.info(`retried  ${test.title}`);
+    for (const fixed of analysis.fixed) io.info(`fixed    ${fixed.test.title}`);
+    io.endGroup();
   }
-  for (const test of analysis.retried) io.info(`retried  ${test.title}`);
-  for (const fixed of analysis.fixed) io.info(`fixed    ${fixed.test.title}`);
-  io.endGroup();
 
-  if (settings.annotations) annotate(analysis, reportContext, context.workspace, io);
-  if (settings.record) await recordHistory(store, historyPath, results, context, settings, io, now);
+  if (settings.annotations) annotate(failures, reportContext, context.workspace, io);
+  if (settings.record) {
+    for (const suite of suites) await recordHistory(store, suite.key, suite.results, context, settings, io, now);
+  }
 
-  io.appendSummary(renderSummary(analysis, rankFlakyTests(history, now, EVIDENCE_TTL_DAYS, RANKING_SIZE), reportContext));
+  const reports: SuiteReport[] = suites.map((suite) => ({
+    name: suite.key,
+    analysis: suite.analysis,
+    historyRuns: suite.history.runs,
+    ranking: rankFlakyTests(suite.history, now, EVIDENCE_TTL_DAYS, RANKING_SIZE),
+  }));
+  io.appendSummary(renderSuitesSummary(reports, reportContext));
   if (settings.comment && context.pullRequest) {
-    const noteworthy = analysis.failures.length + analysis.retried.length + analysis.fixed.length > 0;
-    await comment(context, settings, renderComment(analysis, reportContext), noteworthy, io);
+    const noteworthy = sum((a) => a.failures.length + a.retried.length + a.fixed.length) > 0;
+    await comment(context, settings, renderSuitesComment(reports, reportContext), noteworthy, io);
   }
 
-  const count = (verdicts: Verdict[]) => analysis.failures.filter((f) => verdicts.includes(f.verdict)).length;
-  io.setOutput("total", analysis.total);
-  io.setOutput("failed", analysis.failures.length);
+  const count = (verdicts: Verdict[]) => failures.filter((f) => verdicts.includes(f.verdict)).length;
+  io.setOutput("total", sum((a) => a.total));
+  io.setOutput("failed", failures.length);
   io.setOutput("new-failures", count(["new", "suspect"]));
   io.setOutput("flaky-failures", count(["flaky"]));
   io.setOutput("broken-failures", count(["broken"]));
-  io.setOutput("retried", analysis.retried.length);
-  io.setOutput("fixed", analysis.fixed.length);
+  io.setOutput("retried", sum((a) => a.retried.length));
+  io.setOutput("fixed", sum((a) => a.fixed.length));
   io.setOutput("blocking", blocking.length);
 
   if (settings.mode === "quarantine" && blocking.length > 0) {
@@ -137,8 +172,7 @@ async function evaluate(
 }
 
 export function readSettings(io: ActionIO, context: RunContext): Settings {
-  const patterns = splitList(io.input("junit"));
-  if (patterns.length === 0) throw new Error('Input "junit" is required: a glob matching your JUnit XML reports.');
+  const suites = readSuites(io, `${context.workflow}-${context.job}`);
 
   const mode = io.input("mode", "report");
   if (mode !== "report" && mode !== "quarantine") {
@@ -157,18 +191,43 @@ export function readSettings(io: ActionIO, context: RunContext): Settings {
   if (!token) throw new Error('Input "token" is empty. Pass `token: ${{ github.token }}`.');
 
   return {
-    patterns,
+    suites,
     mode,
     tolerated,
     token,
     branch: io.input("history-branch", "notmyfault-history"),
     trackedBranches: splitList(io.input("track-branches", context.defaultBranch ?? "main")),
-    key: sanitizeKey(io.input("key", `${context.workflow}-${context.job}`)),
+    commentKey: suites.map((suite) => suite.key).join("+"),
     comment: io.booleanInput("comment", true),
     annotations: io.booleanInput("annotations", true),
     record: io.booleanInput("record", true),
     window: io.integerInput("window", 50, 5),
   };
+}
+
+/** Either one suite from "junit" and "key", or several, one "name: glob" per line of "suites". */
+function readSuites(io: ActionIO, defaultKey: string): SuiteSettings[] {
+  const list = io.input("suites");
+  if (!list) {
+    const patterns = splitList(io.input("junit"));
+    if (patterns.length === 0) {
+      throw new Error('Input "junit" is required: a glob matching your JUnit XML reports. Or list several suites in "suites".');
+    }
+    return [{ key: sanitizeKey(io.input("key", defaultKey)), patterns }];
+  }
+  if (io.input("junit") || io.input("key")) {
+    throw new Error('Inputs "junit" and "key" cannot be used with "suites": name each suite and its reports in "suites".');
+  }
+  const suites: SuiteSettings[] = [];
+  for (const line of list.split("\n").map((part) => part.trim()).filter(Boolean)) {
+    const match = /^([^:]+):(.*)$/.exec(line);
+    const patterns = splitList(match?.[2] ?? "");
+    if (!match || patterns.length === 0) throw new Error(`Input "suites" expects one "name: glob" per line, got "${line}"`);
+    const key = sanitizeKey(match[1]!);
+    if (suites.some((suite) => suite.key === key)) throw new Error(`Input "suites" names the suite "${key}" twice.`);
+    suites.push({ key, patterns });
+  }
+  return suites;
 }
 
 export function sanitizeKey(key: string): string {
@@ -180,10 +239,16 @@ export function sanitizeKey(key: string): string {
   );
 }
 
-async function loadResults(patterns: string[], workspace: string, io: ActionIO): Promise<TestResult[] | undefined> {
-  const files = await findFiles(patterns, workspace);
+async function loadResults(
+  suite: SuiteSettings,
+  named: boolean,
+  workspace: string,
+  io: ActionIO,
+): Promise<TestResult[] | undefined> {
+  const of = named ? ` for ${suite.key}` : "";
+  const files = await findFiles(suite.patterns, workspace);
   if (files.length === 0) {
-    io.error(`No JUnit report matched ${patterns.map((p) => `"${p}"`).join(", ")} in ${workspace}.`);
+    io.error(`No JUnit report matched ${suite.patterns.map((p) => `"${p}"`).join(", ")}${of} in ${workspace}.`);
     return undefined;
   }
 
@@ -197,10 +262,10 @@ async function loadResults(patterns: string[], workspace: string, io: ActionIO):
   }
   const results = combineReports(reports);
   if (results.length === 0) {
-    io.error(`The ${files.length} matched report(s) contain no test cases.`);
+    io.error(`The ${files.length} matched report(s)${of} contain no test cases.`);
     return undefined;
   }
-  io.info(`Read ${results.length} tests from ${files.length} report(s).`);
+  io.info(`Read ${results.length} tests from ${files.length} report(s)${of}.`);
   return results;
 }
 
@@ -219,10 +284,10 @@ export async function findFiles(patterns: string[], workspace: string): Promise<
 }
 
 /** Annotates each failed test the report locates in the workspace, most actionable verdicts first. */
-function annotate(analysis: Analysis, context: ReportContext, workspace: string, io: ActionIO): void {
+function annotate(failures: FailureVerdict[], context: ReportContext, workspace: string, io: ActionIO): void {
   const isFile = (path: string) => statSync(join(workspace, path), { throwIfNoEntry: false })?.isFile() ?? false;
   const emitted = { error: 0, notice: 0 };
-  for (const failure of analysis.failures) {
+  for (const failure of failures) {
     const level = failure.verdict === "new" || failure.verdict === "suspect" ? "error" : "notice";
     if (emitted[level] === MAX_ANNOTATIONS_PER_LEVEL) continue;
     const location = locate(failure.test, workspace, isFile);
@@ -242,9 +307,13 @@ async function loadHistory(store: GitStore, path: string, settings: Settings, io
   }
 }
 
+function historyPath(key: string): string {
+  return `history/${key}.json`;
+}
+
 async function recordHistory(
   store: GitStore,
-  path: string,
+  key: string,
   results: TestResult[],
   context: RunContext,
   settings: Settings,
@@ -262,7 +331,7 @@ async function recordHistory(
 
   try {
     const pushed = await store.update(
-      path,
+      historyPath(key),
       (current) => {
         const history = parseHistory(current);
         const changed = recordRun(history, results, {
@@ -275,7 +344,7 @@ async function recordHistory(
         return changed ? serializeHistory(history) : undefined;
       },
       {
-        message: `Record ${settings.key} (run ${context.runId || "local"}, attempt ${context.runAttempt})`,
+        message: `Record ${key} (run ${context.runId || "local"}, attempt ${context.runAttempt})`,
         extraFiles: { "README.md": BRANCH_README },
       },
     );
@@ -292,7 +361,7 @@ async function comment(context: RunContext, settings: Settings, body: string, cr
   if (!pullRequest) return;
   const client = new GitHubClient(settings.token, context.apiUrl, context.repository);
   try {
-    const result = await client.upsertComment(pullRequest.number, commentMarker(settings.key), body, create);
+    const result = await client.upsertComment(pullRequest.number, commentMarker(settings.commentKey), body, create);
     if (result !== "skipped") io.info(`Pull request comment ${result}.`);
   } catch (error) {
     const hint =

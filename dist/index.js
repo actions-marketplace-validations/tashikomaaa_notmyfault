@@ -886,19 +886,21 @@ function badge(image, emoji, size) {
 function commentMarker(key) {
   return `<!-- notmyfault:${key} -->`;
 }
-function renderComment(analysis, context) {
-  return [commentMarker(context.key), ...renderBody(analysis, context)].join("\n");
+function renderSuitesComment(suites, context) {
+  return [commentMarker(context.key), ...renderBody(suites, context)].join("\n");
 }
-function renderSummary(analysis, ranking, context) {
-  const lines = renderBody(analysis, context);
-  if (ranking.length > 0) {
+function renderSuitesSummary(suites, context) {
+  const lines = renderBody(suites, context);
+  for (const suite of suites) {
+    if (!suite.ranking?.length) continue;
+    const of = suites.length > 1 ? ` of ${suite.name}` : "";
     lines.push(
       "",
-      `<details><summary>Most unreliable tests on ${branches(context)}</summary>`,
+      `<details><summary>Most unreliable tests${of} on ${branches(context)}</summary>`,
       "",
       "| Test | Failed runs | Passed on retry | Proven flaky |",
       "|---|--:|--:|:-:|",
-      ...ranking.map(
+      ...suite.ranking.map(
         (t) => `| ${code(t.id)} | ${t.failures} / ${t.runs} | ${t.retries} | ${t.confirmed ? "yes" : "probably"} |`
       ),
       "",
@@ -907,8 +909,49 @@ function renderSummary(analysis, ranking, context) {
   }
   return lines.join("\n");
 }
-function renderBody(analysis, context) {
-  const lines = [`### ${headline(analysis)}`, ""];
+function renderBody(suites, context) {
+  const all = combine(suites.map((suite) => suite.analysis));
+  const lines = [`### ${headline(all)}`, ""];
+  for (const suite of suites) {
+    if (suites.length > 1) {
+      lines.push(`#### ${escapeHtml(suite.name)}`, "");
+      const { analysis } = suite;
+      if (analysis.failures.length === 0 && analysis.fixed.length === 0) {
+        lines.push(`${badge("passed", "\u2705", 20)} All ${plural(analysis.total - analysis.skipped, "test")} passed.`, "");
+      }
+    }
+    lines.push(...renderSuite(suite.analysis, context));
+  }
+  if (context.mode === "quarantine" && all.failures.length > 0) {
+    const tolerated = [...context.tolerated].map((v) => `\`${v}\``).join(", ") || "nothing";
+    lines.push(
+      context.blocking === 0 ? `\u{1F6E1}\uFE0F **Quarantine:** every failure is tolerated (${tolerated}), so this check passes.` : `\u274C **Quarantine:** ${plural(context.blocking, "failure")} not tolerated (${tolerated}), so this check fails.`,
+      ""
+    );
+  }
+  const withoutHistory = suites.filter((suite) => suite.historyRuns === 0);
+  if (withoutHistory.length > 0) {
+    const which = suites.length > 1 ? ` for ${withoutHistory.map((suite) => escapeHtml(suite.name)).join(", ")}` : "";
+    lines.push(
+      `\u2139\uFE0F No history on ${branches(context)} yet${which}. Verdicts get sharper once a few runs have been recorded there.`,
+      ""
+    );
+  }
+  lines.push(footer(all.retried, context));
+  return lines;
+}
+function combine(analyses) {
+  return {
+    total: analyses.reduce((sum, a) => sum + a.total, 0),
+    passed: analyses.reduce((sum, a) => sum + a.passed, 0),
+    skipped: analyses.reduce((sum, a) => sum + a.skipped, 0),
+    failures: analyses.flatMap((a) => a.failures),
+    retried: analyses.flatMap((a) => a.retried),
+    fixed: analyses.flatMap((a) => a.fixed)
+  };
+}
+function renderSuite(analysis, context) {
+  const lines = [];
   if (analysis.failures.length > 0) {
     lines.push("| Test | Why |", "|---|---|");
     for (const failure of analysis.failures.slice(0, MAX_ROWS)) {
@@ -922,20 +965,6 @@ function renderBody(analysis, context) {
     lines.push(...renderMessages(analysis.failures));
   }
   if (analysis.fixed.length > 0) lines.push(...renderFixed(analysis.fixed, context));
-  if (context.mode === "quarantine" && analysis.failures.length > 0) {
-    const tolerated = [...context.tolerated].map((v) => `\`${v}\``).join(", ") || "nothing";
-    lines.push(
-      context.blocking === 0 ? `\u{1F6E1}\uFE0F **Quarantine:** every failure is tolerated (${tolerated}), so this check passes.` : `\u274C **Quarantine:** ${plural(context.blocking, "failure")} not tolerated (${tolerated}), so this check fails.`,
-      ""
-    );
-  }
-  if (context.historyRuns === 0) {
-    lines.push(
-      `\u2139\uFE0F No history on ${branches(context)} yet. Verdicts get sharper once a few runs have been recorded there.`,
-      ""
-    );
-  }
-  lines.push(footer(analysis.retried, context));
   return lines;
 }
 function headline(analysis) {
@@ -1075,8 +1104,12 @@ async function run2(env = process.env, io = new ActionIO(env), now = /* @__PURE_
     const context = readContext(env);
     const settings = readSettings(io, context);
     io.mask(settings.token);
-    const results = await loadResults(settings.patterns, context.workspace, io);
-    if (!results) return 1;
+    const loaded = [];
+    for (const suite of settings.suites) {
+      const results = await loadResults(suite, settings.suites.length > 1, context.workspace, io);
+      if (!results) return 1;
+      loaded.push({ ...suite, results });
+    }
     const store = new GitStore({
       remoteUrl: `${context.serverUrl}/${context.repository}.git`,
       branch: settings.branch,
@@ -1084,7 +1117,7 @@ async function run2(env = process.env, io = new ActionIO(env), now = /* @__PURE_
       tempDir: context.tempDir
     });
     try {
-      return await evaluate(results, context, settings, store, io, now);
+      return await evaluate(loaded, context, settings, store, io, now);
     } finally {
       await store.dispose();
     }
@@ -1093,46 +1126,61 @@ async function run2(env = process.env, io = new ActionIO(env), now = /* @__PURE_
     return 1;
   }
 }
-async function evaluate(results, context, settings, store, io, now) {
-  const historyPath = `history/${settings.key}.json`;
-  const history = await loadHistory(store, historyPath, settings, io);
-  const analysis = analyze(results, history, now, EVIDENCE_TTL_DAYS);
-  const blocking = blockingFailures(analysis, settings.tolerated);
+async function evaluate(loaded, context, settings, store, io, now) {
+  const suites = [];
+  for (const suite of loaded) {
+    const history = await loadHistory(store, historyPath(suite.key), settings, io);
+    suites.push({ ...suite, history, analysis: analyze(suite.results, history, now, EVIDENCE_TTL_DAYS) });
+  }
+  const named = suites.length > 1;
+  const sum = (count3) => suites.reduce((total, suite) => total + count3(suite.analysis), 0);
+  const failures = suites.flatMap((suite) => suite.analysis.failures);
+  const blocking = suites.flatMap((suite) => blockingFailures(suite.analysis, settings.tolerated));
   const reportContext = {
-    key: settings.key,
+    key: settings.commentKey,
     trackedBranches: settings.trackedBranches,
-    historyRuns: history.runs,
+    historyRuns: suites[0].history.runs,
     mode: settings.mode,
     tolerated: settings.tolerated,
     blocking: blocking.length
   };
   const url = runUrl(context);
   if (url) reportContext.runUrl = url;
-  io.group(
-    `notmyfault: ${analysis.failures.length} failed, ${analysis.retried.length} retried, ${analysis.fixed.length} fixed, ${analysis.total} total`
-  );
-  for (const failure of analysis.failures) {
-    const reason = failure.usually ? ` (${failure.usually} on ${settings.trackedBranches.join(", ")}, but with a new error)` : "";
-    io.info(`${failure.verdict.padEnd(8)} ${failure.test.title}${reason}`);
+  for (const { key, analysis } of suites) {
+    io.group(
+      `notmyfault${named ? ` ${key}` : ""}: ${analysis.failures.length} failed, ${analysis.retried.length} retried, ${analysis.fixed.length} fixed, ${analysis.total} total`
+    );
+    for (const failure of analysis.failures) {
+      const reason = failure.usually ? ` (${failure.usually} on ${settings.trackedBranches.join(", ")}, but with a new error)` : "";
+      io.info(`${failure.verdict.padEnd(8)} ${failure.test.title}${reason}`);
+    }
+    for (const test of analysis.retried) io.info(`retried  ${test.title}`);
+    for (const fixed of analysis.fixed) io.info(`fixed    ${fixed.test.title}`);
+    io.endGroup();
   }
-  for (const test of analysis.retried) io.info(`retried  ${test.title}`);
-  for (const fixed of analysis.fixed) io.info(`fixed    ${fixed.test.title}`);
-  io.endGroup();
-  if (settings.annotations) annotate(analysis, reportContext, context.workspace, io);
-  if (settings.record) await recordHistory(store, historyPath, results, context, settings, io, now);
-  io.appendSummary(renderSummary(analysis, rankFlakyTests(history, now, EVIDENCE_TTL_DAYS, RANKING_SIZE), reportContext));
+  if (settings.annotations) annotate(failures, reportContext, context.workspace, io);
+  if (settings.record) {
+    for (const suite of suites) await recordHistory(store, suite.key, suite.results, context, settings, io, now);
+  }
+  const reports = suites.map((suite) => ({
+    name: suite.key,
+    analysis: suite.analysis,
+    historyRuns: suite.history.runs,
+    ranking: rankFlakyTests(suite.history, now, EVIDENCE_TTL_DAYS, RANKING_SIZE)
+  }));
+  io.appendSummary(renderSuitesSummary(reports, reportContext));
   if (settings.comment && context.pullRequest) {
-    const noteworthy = analysis.failures.length + analysis.retried.length + analysis.fixed.length > 0;
-    await comment(context, settings, renderComment(analysis, reportContext), noteworthy, io);
+    const noteworthy = sum((a) => a.failures.length + a.retried.length + a.fixed.length) > 0;
+    await comment(context, settings, renderSuitesComment(reports, reportContext), noteworthy, io);
   }
-  const count2 = (verdicts) => analysis.failures.filter((f) => verdicts.includes(f.verdict)).length;
-  io.setOutput("total", analysis.total);
-  io.setOutput("failed", analysis.failures.length);
+  const count2 = (verdicts) => failures.filter((f) => verdicts.includes(f.verdict)).length;
+  io.setOutput("total", sum((a) => a.total));
+  io.setOutput("failed", failures.length);
   io.setOutput("new-failures", count2(["new", "suspect"]));
   io.setOutput("flaky-failures", count2(["flaky"]));
   io.setOutput("broken-failures", count2(["broken"]));
-  io.setOutput("retried", analysis.retried.length);
-  io.setOutput("fixed", analysis.fixed.length);
+  io.setOutput("retried", sum((a) => a.retried.length));
+  io.setOutput("fixed", sum((a) => a.fixed.length));
   io.setOutput("blocking", blocking.length);
   if (settings.mode === "quarantine" && blocking.length > 0) {
     const names = blocking.slice(0, 5).map((f) => f.test.title).join(", ");
@@ -1142,8 +1190,7 @@ async function evaluate(results, context, settings, store, io, now) {
   return 0;
 }
 function readSettings(io, context) {
-  const patterns = splitList(io.input("junit"));
-  if (patterns.length === 0) throw new Error('Input "junit" is required: a glob matching your JUnit XML reports.');
+  const suites = readSuites(io, `${context.workflow}-${context.job}`);
   const mode = io.input("mode", "report");
   if (mode !== "report" && mode !== "quarantine") {
     throw new Error(`Input "mode" must be "report" or "quarantine", got "${mode}"`);
@@ -1158,26 +1205,50 @@ function readSettings(io, context) {
   const token = io.input("token");
   if (!token) throw new Error('Input "token" is empty. Pass `token: ${{ github.token }}`.');
   return {
-    patterns,
+    suites,
     mode,
     tolerated,
     token,
     branch: io.input("history-branch", "notmyfault-history"),
     trackedBranches: splitList(io.input("track-branches", context.defaultBranch ?? "main")),
-    key: sanitizeKey(io.input("key", `${context.workflow}-${context.job}`)),
+    commentKey: suites.map((suite) => suite.key).join("+"),
     comment: io.booleanInput("comment", true),
     annotations: io.booleanInput("annotations", true),
     record: io.booleanInput("record", true),
     window: io.integerInput("window", 50, 5)
   };
 }
+function readSuites(io, defaultKey) {
+  const list = io.input("suites");
+  if (!list) {
+    const patterns = splitList(io.input("junit"));
+    if (patterns.length === 0) {
+      throw new Error('Input "junit" is required: a glob matching your JUnit XML reports. Or list several suites in "suites".');
+    }
+    return [{ key: sanitizeKey(io.input("key", defaultKey)), patterns }];
+  }
+  if (io.input("junit") || io.input("key")) {
+    throw new Error('Inputs "junit" and "key" cannot be used with "suites": name each suite and its reports in "suites".');
+  }
+  const suites = [];
+  for (const line of list.split("\n").map((part) => part.trim()).filter(Boolean)) {
+    const match = /^([^:]+):(.*)$/.exec(line);
+    const patterns = splitList(match?.[2] ?? "");
+    if (!match || patterns.length === 0) throw new Error(`Input "suites" expects one "name: glob" per line, got "${line}"`);
+    const key = sanitizeKey(match[1]);
+    if (suites.some((suite) => suite.key === key)) throw new Error(`Input "suites" names the suite "${key}" twice.`);
+    suites.push({ key, patterns });
+  }
+  return suites;
+}
 function sanitizeKey(key) {
   return key.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "") || "default";
 }
-async function loadResults(patterns, workspace, io) {
-  const files = await findFiles(patterns, workspace);
+async function loadResults(suite, named, workspace, io) {
+  const of = named ? ` for ${suite.key}` : "";
+  const files = await findFiles(suite.patterns, workspace);
   if (files.length === 0) {
-    io.error(`No JUnit report matched ${patterns.map((p) => `"${p}"`).join(", ")} in ${workspace}.`);
+    io.error(`No JUnit report matched ${suite.patterns.map((p) => `"${p}"`).join(", ")}${of} in ${workspace}.`);
     return void 0;
   }
   const reports = [];
@@ -1190,10 +1261,10 @@ async function loadResults(patterns, workspace, io) {
   }
   const results = combineReports(reports);
   if (results.length === 0) {
-    io.error(`The ${files.length} matched report(s) contain no test cases.`);
+    io.error(`The ${files.length} matched report(s)${of} contain no test cases.`);
     return void 0;
   }
-  io.info(`Read ${results.length} tests from ${files.length} report(s).`);
+  io.info(`Read ${results.length} tests from ${files.length} report(s)${of}.`);
   return results;
 }
 async function findFiles(patterns, workspace) {
@@ -1209,10 +1280,10 @@ async function findFiles(patterns, workspace) {
   }
   return [...found].sort();
 }
-function annotate(analysis, context, workspace, io) {
+function annotate(failures, context, workspace, io) {
   const isFile = (path) => statSync(join2(workspace, path), { throwIfNoEntry: false })?.isFile() ?? false;
   const emitted = { error: 0, notice: 0 };
-  for (const failure of analysis.failures) {
+  for (const failure of failures) {
     const level = failure.verdict === "new" || failure.verdict === "suspect" ? "error" : "notice";
     if (emitted[level] === MAX_ANNOTATIONS_PER_LEVEL) continue;
     const location = locate(failure.test, workspace, isFile);
@@ -1230,7 +1301,10 @@ async function loadHistory(store, path, settings, io) {
     return emptyHistory();
   }
 }
-async function recordHistory(store, path, results, context, settings, io, now) {
+function historyPath(key) {
+  return `history/${key}.json`;
+}
+async function recordHistory(store, key, results, context, settings, io, now) {
   if (context.pullRequest?.fromFork) {
     io.info("Pull request from a fork: the token is read-only, history is not recorded.");
     return;
@@ -1238,7 +1312,7 @@ async function recordHistory(store, path, results, context, settings, io, now) {
   const tracked = !context.eventName.startsWith("pull_request") && context.ref === `refs/heads/${context.refName}` && settings.trackedBranches.includes(context.refName);
   try {
     const pushed = await store.update(
-      path,
+      historyPath(key),
       (current) => {
         const history = parseHistory(current);
         const changed = recordRun(history, results, {
@@ -1251,7 +1325,7 @@ async function recordHistory(store, path, results, context, settings, io, now) {
         return changed ? serializeHistory(history) : void 0;
       },
       {
-        message: `Record ${settings.key} (run ${context.runId || "local"}, attempt ${context.runAttempt})`,
+        message: `Record ${key} (run ${context.runId || "local"}, attempt ${context.runAttempt})`,
         extraFiles: { "README.md": BRANCH_README }
       }
     );
@@ -1267,7 +1341,7 @@ async function comment(context, settings, body, create, io) {
   if (!pullRequest) return;
   const client = new GitHubClient(settings.token, context.apiUrl, context.repository);
   try {
-    const result = await client.upsertComment(pullRequest.number, commentMarker(settings.key), body, create);
+    const result = await client.upsertComment(pullRequest.number, commentMarker(settings.commentKey), body, create);
     if (result !== "skipped") io.info(`Pull request comment ${result}.`);
   } catch (error) {
     const hint = error instanceof GitHubApiError && error.status === 403 ? pullRequest.fromFork ? " Tokens are read-only on pull requests from forks; the job summary has the full report." : ' Does the job have "pull-requests: write" permission?' : "";

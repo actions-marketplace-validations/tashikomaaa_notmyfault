@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
+- The `suites` input reports several test suites in one step and one pull request comment, each with its own history: suites of one job, or the same tests run in several environments ([#5](https://github.com/tashikomaaa/notmyfault/issues/5)).
 - Failed tests are annotated next to their code with their verdict, when the report tells where they live: an error for new and suspect failures, a notice for flaky and already failing tests. Turn it off with `annotations: false` ([#4](https://github.com/tashikomaaa/notmyfault/issues/4)).
 
 ### Changed

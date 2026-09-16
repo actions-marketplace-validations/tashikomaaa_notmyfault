@@ -7,8 +7,11 @@ branding:
 
 inputs:
   junit:
-    description: Glob(s) matching your JUnit XML reports, one per line or comma-separated. Relative to the workspace.
-    required: true
+    description: Glob(s) matching your JUnit XML reports, one per line or comma-separated. Relative to the workspace. Required unless suites is set.
+    required: false
+  suites:
+    description: Several test suites reported in one comment, each with its own history. One "name, colon, globs" per line, instead of junit and key.
+    required: false
   mode:
     description: >
       `report` only reports and never fails the step. `quarantine` fails the step when a failure is not

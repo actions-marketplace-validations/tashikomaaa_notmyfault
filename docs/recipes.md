@@ -2,7 +2,7 @@
 
 ## Several test suites in one job
 
-Give each suite its own `key`. Each key gets its own history file and its own pull request comment.
+List them in [`suites`](configuration.md#suites). Each suite keeps its own history, and the pull request gets one comment with a section per suite:
 
 ```yaml
       - run: npm run test:unit    # writes reports/unit/*.xml
@@ -13,17 +13,13 @@ Give each suite its own `key`. Each key gets its own history file and its own pu
       - uses: tashikomaaa/notmyfault@v1
         if: ${{ !cancelled() }}
         with:
-          junit: reports/unit/*.xml
-          key: unit
-          mode: quarantine
-
-      - uses: tashikomaaa/notmyfault@v1
-        if: ${{ !cancelled() }}
-        with:
-          junit: reports/e2e/*.xml
-          key: e2e
+          suites: |
+            unit: reports/unit/*.xml
+            e2e: reports/e2e/*.xml
           mode: quarantine
 ```
+
+To get a comment per suite instead, use one step per suite, each with its own `junit` and `key`.
 
 ## Monorepos
 
@@ -76,23 +72,43 @@ The reporting job does not need a checkout: notmyfault reads the history from th
 
 ## The same tests in several environments
 
-When a matrix runs the **same** tests on different operating systems or runtime versions, give each environment its own key. A test that only fails on Windows then builds its own history instead of looking flaky on Linux.
+When a matrix runs the **same** tests on different operating systems or runtime versions, give each environment its own history. A test that only fails on Windows then builds its own history instead of looking flaky on Linux.
+
+For a single comment, upload each environment's reports and report them together with [`suites`](configuration.md#suites), one suite per environment:
 
 ```yaml
+jobs:
+  test:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       # ...
-      - uses: tashikomaaa/notmyfault@v1
+      - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
         with:
-          junit: reports/**/*.xml
-          key: test-${{ matrix.os }}
+          name: junit-${{ matrix.os }}
+          path: reports/
+
+  notmyfault:
+    needs: test
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: reports/   # one directory per artifact: reports/junit-ubuntu-latest/, …
+      - uses: tashikomaaa/notmyfault@v1
+        with:
+          suites: |
+            test-ubuntu-latest: reports/junit-ubuntu-latest/**/*.xml
+            test-windows-latest: reports/junit-windows-latest/**/*.xml
+            test-macos-latest: reports/junit-macos-latest/**/*.xml
 ```
 
-Each environment comments separately. To get a single comment, collect the reports in one job as for sharding, and accept that environments share one history.
+For a comment per environment instead, run notmyfault in each matrix job with `key: test-${{ matrix.os }}`. Both setups use the same keys, so switching from one to the other keeps the history.
 
 ## Build the history faster with scheduled runs
 

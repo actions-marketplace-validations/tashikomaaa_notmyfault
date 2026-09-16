@@ -4,7 +4,14 @@ import { describe, expect, it } from "vitest";
 import { analyze, rankFlakyTests, type Verdict } from "../src/analyze";
 import { emptyHistory, errorFingerprint } from "../src/history";
 import type { TestResult } from "../src/junit";
-import { commentMarker, renderComment, renderSummary, type ReportContext } from "../src/report";
+import {
+  commentMarker,
+  renderComment,
+  renderSuitesComment,
+  renderSuitesSummary,
+  renderSummary,
+  type ReportContext,
+} from "../src/report";
 
 const NOW = new Date("2026-09-16T12:00:00Z");
 
@@ -203,6 +210,31 @@ describe("renderComment", () => {
     const body = renderComment(analysis, context({ historyRuns: 0 }));
     expect(body).toContain("**New failure.** No history for this test on `main`.");
     expect(body).toContain("No history on `main` yet.");
+  });
+});
+
+describe("several suites", () => {
+  it("share one headline, then get a section each", () => {
+    const { history, analysis } = scenario();
+    const green = analyze([{ id: "e2e › logs in", title: "e2e › logs in", outcome: "passed" }], emptyHistory(), NOW, 30);
+    const suites = [
+      { name: "unit", analysis, historyRuns: 40, ranking: rankFlakyTests(history, NOW, 30, 10) },
+      { name: "e2e", analysis: green, historyRuns: 0 },
+    ];
+    const body = renderSuitesComment(suites, context({ key: "unit+e2e", mode: "quarantine", blocking: 1 }));
+    expect(body.startsWith(commentMarker("unit+e2e"))).toBe(true);
+    expect(body).toMatch(badge("new", "🔴", "3 tests failed, 1 looks related to this change"));
+    expect(body).toContain("#### unit\n");
+    expect(body).toContain("#### e2e\n\n");
+    expect(body).toMatch(badge("passed", "✅", "All 1 test passed."));
+    expect(body).toContain("No history on `main` yet for e2e.");
+    expect(body.match(/Quarantine:/g)).toHaveLength(1);
+    expect(body.match(/Reported by/g)).toHaveLength(1);
+    expect(body.indexOf("#### unit")).toBeLessThan(body.indexOf("**New failure.**"));
+    expect(body.indexOf("**New failure.**")).toBeLessThan(body.indexOf("#### e2e"));
+
+    const summary = renderSuitesSummary(suites, context({ key: "unit+e2e" }));
+    expect(summary).toContain("Most unreliable tests of unit on `main`");
   });
 });
 
