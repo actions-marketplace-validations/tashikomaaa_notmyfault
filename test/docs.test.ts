@@ -124,6 +124,21 @@ describe("dashboard/action.yml", () => {
   });
 });
 
+describe("templates/notmyfault/template.yml", () => {
+  const component = read("templates/notmyfault/template.yml");
+  const spec = component.slice(0, component.indexOf("\n---\n"));
+  const inputs = [...spec.matchAll(/^ {4}([\w-]+):$/gm)].map((match) => match[1]!);
+
+  it.each(inputs)("uses and documents the %s input", (input) => {
+    expect(component.slice(component.indexOf("\n---\n"))).toContain(`$[[ inputs.${input} ]]`);
+    expect(read("docs/gitlab.md")).toContain(`| \`${input}\` |`);
+  });
+
+  it("downloads the bundle of the commit of its version", () => {
+    expect(component).toContain("https://raw.githubusercontent.com/tashikomaaa/notmyfault/$[[ component.sha ]]/dist/notmyfault.mjs");
+  });
+});
+
 describe("templates/notmyfault.gitlab-ci.yml", () => {
   it("downloads the bundle committed in dist/", () => {
     const template = read("templates/notmyfault.gitlab-ci.yml");

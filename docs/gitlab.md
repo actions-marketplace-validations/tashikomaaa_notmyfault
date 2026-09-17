@@ -129,6 +129,62 @@ In [quarantine mode](quarantine.md), the notmyfault job fails when a failure is 
 
 If merge requests require a successful pipeline, the requirement now means "no failure that looks real".
 
+## CI/CD Catalog component
+
+notmyfault is also a component of the [CI/CD Catalog](https://docs.gitlab.com/ci/components/), with inputs instead of variables:
+
+```yaml
+include:
+  - component: $CI_SERVER_FQDN/notmyfault/notmyfault/notmyfault@1.10.0
+    inputs:
+      needs: [test]
+      junit: reports/junit.xml
+      key: test
+      mode: quarantine
+      tolerate: flaky, broken
+
+# The other variables go in a job of the same name.
+notmyfault:
+  variables:
+    NOTMYFAULT_FLAKY_ISSUES: "true"
+```
+
+| Input | Default | Description |
+|---|---|---|
+| `job-name` | `notmyfault` | Name of the job |
+| `stage` | `.post` | Stage of the job, which runs even when earlier jobs failed |
+| `needs` | `[]` | The jobs writing the JUnit reports, which must keep them in `artifacts:paths` |
+| `junit` | `**/junit*.xml` | Glob(s) matching the JUnit XML reports |
+| `key` | the job name | Name of the test suite in the history |
+| `mode` | `report` | `report` or `quarantine` |
+| `tolerate` | `flaky` | Verdicts that do not fail the job in quarantine mode |
+| `flaky-issues` | `false` | Keep an issue open for each flaky test |
+| `image` | `node:24-alpine` | Image with Node.js 24 |
+
+Each version of the component runs the `notmyfault.mjs` of the commit it was released from, so `@1.10.0` never changes. The catalog also lists `notmyfault.gitlab-ci`, the [template](#3-add-the-notmyfault-job) with its hidden jobs to extend.
+
+**Where it is published.** A component can only be included from the GitLab instance that publishes it. It is published on [gitlab.aldwin.fr](https://gitlab.aldwin.fr/explore/catalog), where the demo runs. On another self-managed instance, mirror [the repository](https://github.com/tashikomaaa/notmyfault) into a project, turn on **Settings > General > Visibility > CI/CD Catalog project**, and push a release tag like `v1.10.0`: the `.gitlab-ci.yml` of the repository creates the release, which publishes the version.
+
+## Publish the history pages
+
+The pages notmyfault writes on the history branch, a page per suite listing its unreliable tests, can be published with GitLab Pages. The template has a job for it, to run after notmyfault on the default branch:
+
+```yaml
+pages:
+  extends: .notmyfault-pages
+  needs: [notmyfault]
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+```
+
+It fetches the history branch with the job token, and publishes its `index.html`, `reports/` and `badges/`. The badges then have an address of their own, for a project badge:
+
+```
+https://img.shields.io/endpoint?url=https://<namespace>.gitlab.io/<project>/badges/<key>.json
+```
+
+See the pages of the [GitLab demo](https://pages.aldwin.fr/notmyfault/notmyfault-demo/).
+
 ## Pin a release
 
 `v1` follows every 1.x release. To run an exact file, pin the release and its checksum, published in the notes of each [GitHub release](https://github.com/tashikomaaa/notmyfault/releases) and in its `notmyfault.mjs.sha256` asset:

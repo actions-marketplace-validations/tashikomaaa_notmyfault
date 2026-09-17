@@ -49,7 +49,8 @@ npm run check   # typecheck, build dist/ and run all tests
 | `src/variables-io.ts` | Inputs as `NOTMYFAULT_*` variables, outputs and summary as files, for GitLab and other CI systems |
 | `src/forgejo/` | Forgejo and Gitea Actions: the GitHub Action, with their own API client |
 | `src/gitlab/` | GitLab CI/CD: predefined variables, `NOTMYFAULT_*` variables, dotenv and Code Quality reports, REST API client |
-| `templates/` | The GitLab CI/CD template |
+| `templates/` | The GitLab CI/CD template, and the CI/CD Catalog component in `templates/notmyfault/` |
+| `.gitlab-ci.yml` | Only for GitLab mirrors: publishes each release tag of the component to the CI/CD Catalog |
 | `test/` | Unit tests, JUnit fixtures and end-to-end tests |
 | `docs/` | Documentation, mirrored to the wiki. Images are in `docs/assets/` |
 | `brand/` | Original artwork: mascot, banner, badges, stickers. See [brand/README.md](brand/README.md) |
@@ -131,4 +132,4 @@ For maintainers:
    gh release create vX.Y.Z --title "vX.Y.Z" --notes-file notes.md
    ```
 
-   The `Release assets` workflow then rebuilds the bundles from the tag, checks them against `dist/`, attests their build provenance, attaches `notmyfault.mjs` and `notmyfault.mjs.sha256`, adds the checksum to the notes, and publishes the package to npm with provenance when the `NPM_TOKEN` secret exists. If it fails, fix the cause and run it again with `gh workflow run release.yml --ref vX.Y.Z`.
+   The `Release assets` workflow then rebuilds the bundles from the tag, checks them against `dist/`, attests their build provenance, attaches `notmyfault.mjs` and `notmyfault.mjs.sha256`, adds the checksum to the notes, publishes the package to npm with provenance when the `NPM_TOKEN` secret exists, and pushes the tag to the GitLab mirror named by the `GITLAB_MIRROR_URL` variable, with the `GITLAB_MIRROR_TOKEN` secret, where a pipeline publishes the component to the CI/CD Catalog. If it fails, fix the cause and run it again with `gh workflow run release.yml --ref vX.Y.Z`.

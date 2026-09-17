@@ -21,6 +21,9 @@ jobs:
       TAG: ${{ github.ref_name }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The whole history, for the GitLab mirror.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v7
         with:
@@ -58,6 +61,22 @@ jobs:
             printf '%s\n\n**SHA-256 of notmyfault.mjs:** `%s`\n' "$notes" "$checksum" > notes.md
             gh release edit "$TAG" --notes-file notes.md
           fi
+
+      # The GitLab mirror publishes the component to the CI/CD Catalog when it gets the tag.
+      # Skipped until the GITLAB_MIRROR_URL variable and the GITLAB_MIRROR_TOKEN secret exist.
+      - name: Push to the GitLab mirror
+        env:
+          MIRROR_URL: ${{ vars.GITLAB_MIRROR_URL }}
+          MIRROR_TOKEN: ${{ secrets.GITLAB_MIRROR_TOKEN }}
+        run: |
+          if [ -z "$MIRROR_URL" ] || [ -z "$MIRROR_TOKEN" ]; then
+            echo "::notice::No GitLab mirror configured: the component is not published to the CI/CD Catalog."
+            exit 0
+          fi
+          header="AUTHORIZATION: basic $(printf 'oauth2:%s' "$MIRROR_TOKEN" | base64 -w0)"
+          # main without a pipeline, then the tag alone, whose pipeline creates the release.
+          git -c "http.extraheader=$header" push --force -o ci.skip "$MIRROR_URL" origin/main:refs/heads/main
+          git -c "http.extraheader=$header" push --force "$MIRROR_URL" "refs/tags/$TAG:refs/tags/$TAG"
 
       # npx notmyfault, for CI systems without an integration. Skipped until the NPM_TOKEN secret exists.
       - name: Publish to npm

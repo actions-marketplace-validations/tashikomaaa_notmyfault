@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- notmyfault is a component of the GitLab CI/CD Catalog, with inputs, published from the repository by a release job when a GitLab mirror gets a release tag. The template gets a `.notmyfault-pages` job, which publishes the history pages with GitLab Pages ([#24](https://github.com/tashikomaaa/notmyfault/issues/24)).
+
 ## [1.9.0] - 2026-09-17
 
 ### Added

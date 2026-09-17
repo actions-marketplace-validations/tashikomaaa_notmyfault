@@ -11,6 +11,6 @@ release:
     # glab signs in with the job token.
     GLAB_ENABLE_CI_AUTOLOGIN: "true"
   script:
-    # The Catalog wants versions without the v of the tags.
+    # The Catalog wants versions without the v of the tags. A release created in a job is published to it.
     - version="${CI_COMMIT_TAG#v}"
-    - glab release create "$version" --ref "$CI_COMMIT_SHA" --name "notmyfault $version" --notes "See https://github.com/tashikomaaa/notmyfault/releases/tag/$CI_COMMIT_TAG" --publish-to-catalog
+    - glab release create "$version" --ref "$CI_COMMIT_SHA" --name "notmyfault $version" --notes "See https://github.com/tashikomaaa/notmyfault/releases/tag/$CI_COMMIT_TAG"
