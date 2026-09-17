@@ -4,7 +4,7 @@ import type { Issue } from "./platform";
 import type { History, TestHistory } from "./history";
 import type { TestResult } from "./junit";
 import type { Rename } from "./renames";
-import { code, escapeHtml } from "./report";
+import { code, escapeHtml, sinceCommit } from "./report";
 
 export const FLAKY_LABEL = { name: "flaky-test", color: "fcbd34", description: "A test notmyfault found flaky" };
 /** An issue is closed after this many days without a failure on the tracked branch. */
@@ -174,7 +174,7 @@ function latestFailure(result: TestResult, context: IssueContext): string {
 function verdict(stats: TestStats): string {
   switch (verdictFor(stats)) {
     case "broken":
-      return `already failing, failed the last ${plural(stats.trailingFailures, "run")}`;
+      return `already failing, failed the last ${plural(stats.trailingFailures, "run")}${stats.failingSince ? ` since ${sinceCommit(stats.failingSince)}` : ""}`;
     case "flaky":
       return stats.confirmed ? "known flaky" : "probably flaky";
     case "suspect":

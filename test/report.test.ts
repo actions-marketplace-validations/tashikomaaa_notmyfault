@@ -7,6 +7,7 @@ import type { TestResult } from "../src/junit";
 import {
   commentMarker,
   duration,
+  plainExplanation,
   renderComment,
   renderSuitesComment,
   renderSuitesSummary,
@@ -138,6 +139,43 @@ describe("renderComment", () => {
     const body = renderComment(analysis, context());
     expect(body).toContain("**Already failing on `main`.** Failed the last 6 runs there, too many in a row to be flakiness.");
     expect(body).toContain("**Already failing on `main`.** Failed the last 2 runs there.");
+  });
+
+  it("says since which commit and change a test has been failing", () => {
+    const history = emptyHistory();
+    const since = {
+      sha: "0123456789ab",
+      at: "2026-09-14T09:30:00.000Z",
+      url: "https://github.com/o/r/commit/0123456789abcdef",
+      change: { ref: "#42", url: "https://github.com/o/r/pull/42" },
+    };
+    history.tests = {
+      streak: { outcomes: "ppfff", lastSeen: "2026-09-16", failingSince: since },
+      latest: { outcomes: "pppf", lastSeen: "2026-09-16", failingSince: { sha: "fedcba987654", at: "2026-09-16T08:00:00.000Z" } },
+      fixed: { outcomes: "ppff", lastSeen: "2026-09-16", failingSince: since },
+    };
+    const analysis = analyze(
+      [
+        { id: "streak", title: "streak", outcome: "failed" },
+        { id: "latest", title: "latest", outcome: "failed" },
+        { id: "fixed", title: "fixed", outcome: "passed" },
+      ],
+      history,
+      NOW,
+      30,
+    );
+    const body = renderComment(analysis, context());
+    expect(body).toContain(
+      "**Already failing on `main`.** Failed the last 3 runs there. Failing since [`0123456`](https://github.com/o/r/commit/0123456789abcdef) from [#42](https://github.com/o/r/pull/42), on 2026-09-14.",
+    );
+    expect(body).toContain("**Already failing on `main`.** The latest run there failed too, on `fedcba9`.");
+    expect(body).toContain(
+      "- <code>fixed</code>, failed the last 2 runs there, since [`0123456`](https://github.com/o/r/commit/0123456789abcdef) from [#42](https://github.com/o/r/pull/42)",
+    );
+    const streak = analysis.failures.find((failure) => failure.test.id === "streak")!;
+    expect(plainExplanation(streak, context())).toBe(
+      "Already failing on main. Failed the last 3 runs there. Failing since 0123456 from #42, on 2026-09-14.",
+    );
   });
 
   it("tells proven flakiness apart from a probable one", () => {

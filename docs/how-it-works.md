@@ -94,6 +94,18 @@ The branch always holds **a single commit without parent**, authored by `github-
    "errors": ["7c1e0a9b54d2"],
    "lastFailure": "2026-09-15",
    "durations": [812, 790, 845, 3120, 801]
+  },
+  "unit › search › finds products regardless of accents": {
+   "outcomes": "pppppppfff",
+   "failedOn": ["9c0d4e3f2a1b", "b2f3a41c07e9", "07e9b2f3a41c"],
+   "lastSeen": "2026-09-16",
+   "lastFailure": "2026-09-16",
+   "failingSince": {
+    "sha": "9c0d4e3f2a1b",
+    "at": "2026-09-14T09:12:40.000Z",
+    "url": "https://github.com/acme/shop/commit/9c0d4e3f2a1b5e8d7c6b5a4190817263544a3b2c",
+    "change": { "ref": "#42", "url": "https://github.com/acme/shop/pull/42" }
+   }
   }
  }
 }
@@ -110,8 +122,11 @@ The branch always holds **a single commit without parent**, authored by `github-
 | `errors` | Fingerprints of the last 10 distinct failure messages seen on tracked branches, see [Errors](#errors) |
 | `lastFailure` | Last day the test failed, or passed only after a retry, on a tracked branch |
 | `durations` | Durations of the last 10 runs on tracked branches, in milliseconds, when reports give them |
+| `failingSince` | While the test keeps failing on tracked branches: the commit, the time and the links of the first failed run of the streak, with the pull or merge request the commit came from when the API tells it |
 
-The file contains test names, outcomes, short commit SHAs, dates, durations and fingerprints of failure messages. It contains no failure message, log or source code.
+The file contains test names, outcomes, short commit SHAs, links to commits and pull requests, dates, durations and fingerprints of failure messages. It contains no failure message, log or source code.
+
+To find the pull request of a commit, notmyfault asks the API once, in the run where a test starts failing on a tracked branch, and never again while it keeps failing. Without the permission to read pull requests, only the commit is linked.
 
 ### What each run records
 
@@ -124,6 +139,7 @@ The file contains test names, outcomes, short commit SHAs, dates, durations and 
 | Adds the fingerprint of each failure message to `errors` | yes | no |
 | Sets `lastFailure` for tests that failed or passed after a retry | yes | no |
 | Appends the duration of every test to `durations` | yes | no |
+| Sets `failingSince` when a test starts failing, removes it when it passes | yes | no |
 | Creates an entry for a test that only passed | yes | no |
 | Follows [renamed tests](#renamed-tests) | yes | no |
 

@@ -37,6 +37,18 @@ describe("renderSuitePage", () => {
     expect(page).toContain('<td class="number">900 ms</td>');
   });
 
+  it("says since which commit an already failing test fails", () => {
+    const failing = history();
+    failing.tests["unit › broken"] = {
+      outcomes: "pppfff",
+      lastSeen: "2026-09-16",
+      failingSince: { sha: "0123456789ab", at: "2026-09-15T08:00:00.000Z", url: "https://x/c", change: { ref: "!7", url: "https://x/mr" } },
+    };
+    expect(renderSuitePage("ci-test", failing, CONTEXT)).toContain(
+      '<span class="verdict broken">Already failing</span><span class="since">since <a href="https://x/c"><code>0123456</code></a> from <a href="https://x/mr">&#33;7</a>, 2026-09-15</span>',
+    );
+  });
+
   it("says when no test failed", () => {
     const quiet = emptyHistory();
     quiet.tests = { stable: { outcomes: "ppp", lastSeen: "2026-09-16" } };

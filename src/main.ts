@@ -20,7 +20,7 @@ import { renderIndexPage, renderSuitePage, reportPath } from "./html-report";
 import { FLAKY_LABEL, planFlakyIssues } from "./flaky-issues";
 import { applyQuarantine, isActive, parseQuarantine, type QuarantineEntry } from "./quarantine";
 import { applyRenames, detectRenames, type Rename } from "./renames";
-import { emptyHistory, parseHistory, recordRun, serializeHistory, type History } from "./history";
+import { emptyHistory, FAIL, parseHistory, recordRun, serializeHistory, type History, type RecordOptions } from "./history";
 import { combineReports, parseJUnit, type TestResult } from "./junit";
 import { locate } from "./locate";
 import {
@@ -181,7 +181,9 @@ async function evaluate(loaded: LoadedSuite[], platform: Platform, settings: Set
     for (const failure of analysis.failures) {
       const reason = failure.usually ? ` (${failure.usually} on ${settings.trackedBranches.join(", ")}, but with a new error)` : "";
       const byHand = failure.quarantined ? ` (quarantined until ${failure.quarantined.until})` : "";
-      io.info(`${failure.verdict.padEnd(8)} ${failure.test.title}${reason}${byHand}`);
+      const since =
+        failure.verdict === "broken" && failure.failingSince ? ` (failing since ${failure.failingSince.sha.slice(0, 7)})` : "";
+      io.info(`${failure.verdict.padEnd(8)} ${failure.test.title}${since}${reason}${byHand}`);
     }
     for (const test of analysis.retried) io.info(`retried  ${test.title}`);
     for (const fixed of analysis.fixed) io.info(`fixed    ${fixed.test.title}`);
@@ -200,7 +202,8 @@ async function evaluate(loaded: LoadedSuite[], platform: Platform, settings: Set
   }
   if (settings.annotations) annotate(failures, reportContext, context.workspace, io, onlyFlaky ? 1 : 0);
   if (settings.record) {
-    for (const suite of suites) await recordHistory(store, suite.key, suite.results, platform, settings, now);
+    const commit = tracked && !context.pullRequest?.fromFork ? await describeCommit(suites, platform, settings) : undefined;
+    for (const suite of suites) await recordHistory(store, suite.key, suite.results, platform, settings, now, commit);
   }
   for (const { renames } of suites) for (const { from, to } of renames) io.info(`renamed  ${from} → ${to}`);
   if (settings.flakyIssues && isTracked(context, settings) && !context.pullRequest?.fromFork) {
@@ -401,6 +404,7 @@ async function recordHistory(
   platform: Platform,
   settings: Settings,
   now: Date,
+  commit?: RecordOptions["commit"],
 ): Promise<void> {
   const { context, io } = platform;
   if (context.pullRequest?.fromFork) {
@@ -423,6 +427,7 @@ async function recordHistory(
           now,
           window: settings.window,
           retentionDays: RETENTION_DAYS,
+          ...(commit ? { commit } : {}),
         });
         return changed ? serializeHistory(history) : undefined;
       },
@@ -449,6 +454,26 @@ async function recordHistory(
 }
 
 /** Whether the run happened on a tracked branch, whose runs build the history. */
+/**
+ * Links to the commit of a tracked run, and to the pull or merge request it came from, remembered by tests that
+ * start failing in this run. The API is only asked when one does.
+ */
+async function describeCommit(suites: Suite[], platform: Platform, settings: Settings): Promise<RecordOptions["commit"]> {
+  const { context, io, text } = platform;
+  const startsFailing = suites.some((suite) =>
+    suite.results.some((result) => result.outcome === "failed" && !suite.history.tests[result.id]?.outcomes.endsWith(FAIL)),
+  );
+  if (!startsFailing) return undefined;
+  const commit: NonNullable<RecordOptions["commit"]> = { url: platform.commitUrl(context.sha) };
+  try {
+    const change = await platform.forge(settings.token).changeOf(context.sha);
+    if (change) commit.change = { ref: `${text.changePrefix}${change.number}`, url: change.url };
+  } catch (error) {
+    io.info(`Could not tell which ${text.pullRequest} commit ${context.sha.slice(0, 7)} came from: ${errorMessage(error)}`);
+  }
+  return commit;
+}
+
 function isTracked(context: RunContext, settings: Settings): boolean {
   return context.branch !== undefined && settings.trackedBranches.includes(context.branch);
 }

@@ -157,6 +157,13 @@ var GitHubClient = class {
       await this.request("POST", `/repos/${this.repository}/labels`, { name, color, description });
     }
   }
+  async changeOf(sha) {
+    const response = await this.request("GET", `/repos/${this.repository}/commits/${sha}/pulls?per_page=100`);
+    const pulls = await response.json();
+    const merged = pulls.filter((pull2) => pull2.merged_at !== null);
+    const pull = merged.find((candidate) => candidate.merge_commit_sha === sha) ?? merged[0];
+    return pull && { number: pull.number, url: pull.html_url };
+  }
   async findComment(issue, marker) {
     let path = `/repos/${this.repository}/issues/${issue}/comments?per_page=100`;
     while (path) {
@@ -244,8 +251,10 @@ function githubPlatform(env, io = new ActionIO(env)) {
     gitUser: () => "x-access-token",
     gitAuthor: { name: "github-actions[bot]", email: "41898282+github-actions[bot]@users.noreply.github.com" },
     pushOptions: [],
+    commitUrl: (sha) => `${context.serverUrl}/${context.repository}/commit/${sha}`,
     text: {
       pullRequest: "pull request",
+      changePrefix: "#",
       runLink: "Workflow run",
       runName: "workflow run",
       tokenMissing: 'Input "token" is empty. Pass `token: ${{ github.token }}`.',
@@ -314,6 +323,16 @@ function recordRun(history, results, options) {
     }
     if (options.tracked) {
       const code2 = result.outcome === "failed" ? FAIL : result.outcome === "flaky" ? RETRY : PASS;
+      if (code2 !== FAIL) {
+        delete test.failingSince;
+      } else if (!test.outcomes.endsWith(FAIL)) {
+        test.failingSince = {
+          sha,
+          at: options.now.toISOString(),
+          ...options.commit?.url ? { url: options.commit.url } : {},
+          ...options.commit?.change ? { change: options.commit.change } : {}
+        };
+      }
       test.outcomes = (test.outcomes + code2).slice(-options.window);
       test.lastRun = history.runs + 1;
       testChanged = true;
@@ -454,6 +473,7 @@ function computeStats(history, now, evidenceTtlDays) {
   };
   const latest = evidence[evidence.length - 1];
   if (latest) stats.latestEvidence = latest;
+  if (trailing > 0 && history?.failingSince) stats.failingSince = history.failingSince;
   return stats;
 }
 function verdictFor(stats) {
@@ -876,7 +896,12 @@ function quarantineNote(quarantined, markdown = true) {
   return markdown ? `_${note}_` : note;
 }
 function plainExplanation(failure, context) {
-  return explain(failure, context).replace(/\*\*|`/g, "");
+  return explain(failure, context).replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "");
+}
+function sinceCommit(since2) {
+  const sha = `\`${since2.sha.slice(0, 7)}\``;
+  const commit = since2.url ? `[${sha}](${since2.url})` : sha;
+  return since2.change ? `${commit} from [${since2.change.ref}](${since2.change.url})` : commit;
 }
 function explain(failure, context) {
   const where = branches(context);
@@ -886,8 +911,14 @@ function explain(failure, context) {
       return failure.trailingPasses > 0 ? `**New failure.** Passed the last ${plural(failure.trailingPasses, "run")} on ${where}.` : `**New failure.** No history for this test on ${where}.`;
     case "suspect":
       return `**Suspect.** Failed in isolation ${times(failure.isolatedFailures)} in the last ${plural(failure.runs, "run")} on ${where}.`;
-    case "broken":
-      return failure.trailingFailures === 1 ? `**Already failing on ${where}.** The latest run there failed too.` : `**Already failing on ${where}.** Failed the last ${failure.trailingFailures} runs there${failure.confirmed ? ", too many in a row to be flakiness" : ""}.`;
+    case "broken": {
+      const since2 = failure.failingSince;
+      if (failure.trailingFailures === 1) {
+        return `**Already failing on ${where}.** The latest run there failed too${since2 ? `, on ${sinceCommit(since2)}` : ""}.`;
+      }
+      const streak = `**Already failing on ${where}.** Failed the last ${failure.trailingFailures} runs there${failure.confirmed ? ", too many in a row to be flakiness" : ""}.`;
+      return since2 ? `${streak} Failing since ${sinceCommit(since2)}, on ${since2.at.slice(0, 10)}.` : streak;
+    }
     case "flaky": {
       const parts = [];
       if (failure.failures > 0) parts.push(`failed ${failure.failures} of the last ${plural(failure.runs, "run")} on ${where}`);
@@ -929,7 +960,7 @@ function renderFixed(fixed, context) {
     `\u{1F6E0}\uFE0F **Fixed:** ${plural(fixed.length, "test")} failing on ${branches(context)} ${fixed.length === 1 ? "passes" : "pass"} in this run.`,
     "",
     ...fixed.slice(0, MAX_FIXED).map(
-      (f) => `- ${code(f.test.title)}, ${f.trailingFailures === 1 ? "failed the latest run" : `failed the last ${f.trailingFailures} runs`} there`
+      (f) => `- ${code(f.test.title)}, ${f.trailingFailures === 1 ? "failed the latest run" : `failed the last ${f.trailingFailures} runs`} there${f.failingSince ? `, since ${sinceCommit(f.failingSince)}` : ""}`
     )
   ];
   if (fixed.length > MAX_FIXED) lines.push(`- _\u2026and ${fixed.length - MAX_FIXED} more_`);
@@ -1050,7 +1081,7 @@ function renderRow(id, test, stats) {
   return [
     `<tr>`,
     `<td class="test"><code>${escapeHtml(id)}</code></td>`,
-    `<td><span class="verdict ${tone}">${label}</span></td>`,
+    `<td><span class="verdict ${tone}">${label}</span>${tone === "broken" && stats.failingSince ? since(stats.failingSince) : ""}</td>`,
     `<td><span class="timeline" role="img" aria-label="${summary}">${timeline}</span></td>`,
     `<td class="number">${failed}</td>`,
     `<td class="number">${retried}</td>`,
@@ -1059,6 +1090,12 @@ function renderRow(id, test, stats) {
     `<td class="number">${durations.length > 0 ? duration(median2(durations)) : ""}</td>`,
     `</tr>`
   ].join("");
+}
+function since(failing) {
+  const sha = `<code>${escapeHtml(failing.sha.slice(0, 7))}</code>`;
+  const commit = failing.url ? `<a href="${escapeAttribute(failing.url)}">${sha}</a>` : sha;
+  const change = failing.change ? ` from <a href="${escapeAttribute(failing.change.url)}">${escapeHtml(failing.change.ref)}</a>` : "";
+  return `<span class="since">since ${commit}${change}, ${failing.at.slice(0, 10)}</span>`;
 }
 function verdict(stats) {
   switch (verdictFor(stats)) {
@@ -1121,6 +1158,7 @@ td.test { white-space: normal; min-width: 18rem; }
 /* Text colors keep every chip at a contrast of 4.5:1 or more. */
 .verdict { display: inline-block; padding: 0.1rem 0.55rem; border-radius: 1rem; color: #1f2328; font-size: 0.8rem; font-weight: 600; }
 .verdict.new { background: #c93c3c; color: #fff; } .verdict.broken { background: var(--broken); color: var(--on-broken); }
+.since { display: block; margin-top: 0.25rem; color: var(--muted); font-size: 0.8rem; }
 .verdict.suspect { background: var(--suspect); } .verdict.flaky { background: var(--flaky); } .verdict.passed { background: var(--passed); }
 .timeline { display: inline-flex; gap: 1px; }
 i { display: inline-block; width: 5px; height: 16px; border-radius: 1px; }
@@ -1248,7 +1286,7 @@ function latestFailure(result, context) {
 function verdict2(stats) {
   switch (verdictFor(stats)) {
     case "broken":
-      return `already failing, failed the last ${plural3(stats.trailingFailures, "run")}`;
+      return `already failing, failed the last ${plural3(stats.trailingFailures, "run")}${stats.failingSince ? ` since ${sinceCommit(stats.failingSince)}` : ""}`;
     case "flaky":
       return stats.confirmed ? "known flaky" : "probably flaky";
     case "suspect":
@@ -1262,8 +1300,8 @@ function lastFailureDay(test) {
   return days.filter((day) => day !== void 0).sort().at(-1);
 }
 function quietComment(lastFailure2, context) {
-  const since = lastFailure2 ? ` since ${lastFailure2}` : "";
-  return `No failure on ${branches2(context)}${since}, for more than ${QUIET_DAYS} days: closing this issue. notmyfault reopens it if the test fails again.`;
+  const since2 = lastFailure2 ? ` since ${lastFailure2}` : "";
+  return `No failure on ${branches2(context)}${since2}, for more than ${QUIET_DAYS} days: closing this issue. notmyfault reopens it if the test fails again.`;
 }
 function issueTitle(title) {
   const short = title.length > MAX_TITLE_LENGTH ? `${title.slice(0, MAX_TITLE_LENGTH - 1)}\u2026` : title;
@@ -1789,7 +1827,8 @@ async function evaluate(loaded, platform, settings, store, now) {
     for (const failure of analysis.failures) {
       const reason = failure.usually ? ` (${failure.usually} on ${settings.trackedBranches.join(", ")}, but with a new error)` : "";
       const byHand = failure.quarantined ? ` (quarantined until ${failure.quarantined.until})` : "";
-      io.info(`${failure.verdict.padEnd(8)} ${failure.test.title}${reason}${byHand}`);
+      const since2 = failure.verdict === "broken" && failure.failingSince ? ` (failing since ${failure.failingSince.sha.slice(0, 7)})` : "";
+      io.info(`${failure.verdict.padEnd(8)} ${failure.test.title}${since2}${reason}${byHand}`);
     }
     for (const test of analysis.retried) io.info(`retried  ${test.title}`);
     for (const fixed of analysis.fixed) io.info(`fixed    ${fixed.test.title}`);
@@ -1806,7 +1845,8 @@ async function evaluate(loaded, platform, settings, store, now) {
   }
   if (settings.annotations) annotate(failures, reportContext, context.workspace, io, onlyFlaky ? 1 : 0);
   if (settings.record) {
-    for (const suite of suites) await recordHistory(store, suite.key, suite.results, platform, settings, now);
+    const commit = tracked && !context.pullRequest?.fromFork ? await describeCommit(suites, platform, settings) : void 0;
+    for (const suite of suites) await recordHistory(store, suite.key, suite.results, platform, settings, now, commit);
   }
   for (const { renames } of suites) for (const { from, to } of renames) io.info(`renamed  ${from} \u2192 ${to}`);
   if (settings.flakyIssues && isTracked(context, settings) && !context.pullRequest?.fromFork) {
@@ -1971,7 +2011,7 @@ async function loadHistory(store, path, settings, io) {
 function historyPath(key) {
   return `history/${key}.json`;
 }
-async function recordHistory(store, key, results, platform, settings, now) {
+async function recordHistory(store, key, results, platform, settings, now, commit) {
   const { context, io } = platform;
   if (context.pullRequest?.fromFork) {
     io.info(`${capitalize2(platform.text.pullRequest)} from a fork: the token is read-only, history is not recorded.`);
@@ -1989,7 +2029,8 @@ async function recordHistory(store, key, results, platform, settings, now) {
           tracked,
           now,
           window: settings.window,
-          retentionDays: RETENTION_DAYS
+          retentionDays: RETENTION_DAYS,
+          ...commit ? { commit } : {}
         });
         return changed ? serializeHistory(history) : void 0;
       },
@@ -2013,6 +2054,21 @@ async function recordHistory(store, key, results, platform, settings, now) {
   } catch (error) {
     io.warning(`Could not record history on branch "${settings.branch}". ${platform.text.recordDenied} ${errorMessage(error)}`);
   }
+}
+async function describeCommit(suites, platform, settings) {
+  const { context, io, text } = platform;
+  const startsFailing = suites.some(
+    (suite) => suite.results.some((result) => result.outcome === "failed" && !suite.history.tests[result.id]?.outcomes.endsWith(FAIL))
+  );
+  if (!startsFailing) return void 0;
+  const commit = { url: platform.commitUrl(context.sha) };
+  try {
+    const change = await platform.forge(settings.token).changeOf(context.sha);
+    if (change) commit.change = { ref: `${text.changePrefix}${change.number}`, url: change.url };
+  } catch (error) {
+    io.info(`Could not tell which ${text.pullRequest} commit ${context.sha.slice(0, 7)} came from: ${errorMessage(error)}`);
+  }
+  return commit;
 }
 function isTracked(context, settings) {
   return context.branch !== void 0 && settings.trackedBranches.includes(context.branch);

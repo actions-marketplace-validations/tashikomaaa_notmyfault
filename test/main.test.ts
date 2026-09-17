@@ -30,6 +30,8 @@ class FakeGitHub {
   comments: Comment[] = [];
   issues: FakeIssue[] = [];
   labels: string[] = [];
+  /** Pull requests associated with each commit. */
+  pulls: Record<string, unknown[]> = {};
   requests: string[] = [];
   status = 200;
   private server: Server | undefined;
@@ -52,7 +54,9 @@ class FakeGitHub {
         const route = (method: string, pattern: RegExp) => (req.method === method ? pattern.exec(path) : null);
         let match: RegExpExecArray | null;
 
-        if ((match = route("GET", /^\/issues\/(\d+)\/comments$/))) {
+        if ((match = route("GET", /^\/commits\/(\w+)\/pulls$/))) {
+          reply(200, this.pulls[match[1]!] ?? []);
+        } else if ((match = route("GET", /^\/issues\/(\d+)\/comments$/))) {
           reply(200, Number(match[1]) === PULL_REQUEST ? this.comments : []);
         } else if ((match = route("POST", /^\/issues\/(\d+)\/comments$/))) {
           if (Number(match[1]) === PULL_REQUEST) {
@@ -212,7 +216,7 @@ function parseOutputs(raw: string): Record<string, string> {
   return outputs;
 }
 
-function storedHistory(key = "ci-test"): { runs: number; tests: Record<string, { outcomes: string; evidence?: unknown[] }> } {
+function storedHistory(key = "ci-test"): { runs: number; tests: Record<string, { outcomes: string; evidence?: unknown[]; failingSince?: object }> } {
   const bare = join(root, "remote", "acme", "shop.git");
   return JSON.parse(
     execFileSync("git", ["-C", bare, "show", `notmyfault-history:history/${key}.json`], {
@@ -277,6 +281,41 @@ describe("run", () => {
     // Next time "totals" fails anywhere, it is recognized as flaky.
     const later = await simulate({ pays: "pass", totals: "fail" }, { event: "pull_request", sha: "b".repeat(40) });
     expect(later.outputs).toMatchObject({ "new-failures": "0", "flaky-failures": "1" });
+  });
+
+  it("tells since which commit and pull request a test has been failing", async () => {
+    for (let run = 0; run < 3; run++) await simulate({ search: "pass" });
+    const breaking = "b".repeat(40);
+    api.pulls[breaking] = [
+      { number: 11, html_url: "https://github.com/acme/shop/pull/11", merged_at: null, merge_commit_sha: null },
+      { number: 12, html_url: "https://github.com/acme/shop/pull/12", merged_at: "2026-09-01T12:00:00Z", merge_commit_sha: breaking },
+    ];
+    await simulate({ search: "fail" }, { sha: breaking });
+    await simulate({ search: "fail" });
+    // Only the run starting the streak asks which pull request the commit came from.
+    expect(api.requests.filter((request) => request.includes("/pulls"))).toEqual([`GET /repos/acme/shop/commits/${breaking}/pulls?per_page=100`]);
+    expect(storedHistory().tests["unit › checkout › search"]).toMatchObject({
+      failingSince: {
+        sha: "bbbbbbbbbbbb",
+        url: `file://${join(root, "remote")}/acme/shop/commit/${breaking}`,
+        change: { ref: "#12", url: "https://github.com/acme/shop/pull/12" },
+      },
+    });
+
+    const pr = await simulate({ search: "fail" }, { event: "pull_request" });
+    expect(pr.logs).toContain("broken   checkout › search (failing since bbbbbbb)");
+    expect(api.comments[0]!.body).toContain(
+      `**Already failing on \`main\`.** Failed the last 2 runs there. Failing since [\`bbbbbbb\`](file://${join(root, "remote")}/acme/shop/commit/${breaking}) from [#12](https://github.com/acme/shop/pull/12), on 2026-09-01.`,
+    );
+
+    // Passing on main ends the streak; the next one starts afresh, even when the API fails.
+    await simulate({ search: "pass" });
+    expect(storedHistory().tests["unit › checkout › search"]!).not.toHaveProperty("failingSince");
+    api.status = 500;
+    const again = await simulate({ search: "fail" }, { sha: "c".repeat(40) });
+    expect(again.logs).toContain(`Could not tell which pull request commit ccccccc came from: GitHub API 500`);
+    expect(storedHistory().tests["unit › checkout › search"]).toMatchObject({ failingSince: { sha: "cccccccccccc" } });
+    expect(storedHistory().tests["unit › checkout › search"]!.failingSince).not.toHaveProperty("change");
   });
 
   it("does not excuse a flaky test failing with an error never seen on main", async () => {

@@ -42,6 +42,35 @@ describe("errorFingerprint", () => {
 });
 
 describe("recordRun", () => {
+  it("remembers where a failure streak on tracked branches started, until the test passes", () => {
+    const history = emptyHistory();
+    const commit = { url: "https://github.com/o/r/commit/bbb", change: { ref: "#42", url: "https://github.com/o/r/pull/42" } };
+    recordRun(history, [test("t", "passed")], options({ commit }));
+    expect(history.tests.t!.failingSince).toBeUndefined();
+
+    recordRun(history, [test("t", "failed")], options({ sha: "b".repeat(40), commit, now: new Date("2026-09-17T08:00:00Z") }));
+    const since = { sha: "bbbbbbbbbbbb", at: "2026-09-17T08:00:00.000Z", ...commit };
+    expect(history.tests.t!.failingSince).toEqual(since);
+
+    // The streak goes on: its start does not move, and pull request runs never touch it.
+    recordRun(history, [test("t", "failed")], options({ sha: "c".repeat(40), commit: { url: "https://github.com/o/r/commit/ccc" } }));
+    recordRun(history, [test("t", "failed")], options({ sha: "d".repeat(40), tracked: false }));
+    expect(history.tests.t!.failingSince).toEqual(since);
+
+    recordRun(history, [test("t", "flaky")], options());
+    expect(history.tests.t!.failingSince).toBeUndefined();
+  });
+
+  it("does not guess where a streak recorded before failingSince started", () => {
+    const history = emptyHistory();
+    history.tests.t = { outcomes: "pff", lastSeen: "2026-09-16" };
+    recordRun(history, [test("t", "failed")], options());
+    expect(history.tests.t!.failingSince).toBeUndefined();
+    // A test failing on its very first tracked run starts a streak.
+    recordRun(history, [test("u", "failed")], options());
+    expect(history.tests.u!.failingSince).toMatchObject({ sha: "aaaaaaaaaaaa" });
+  });
+
   it("appends outcomes on tracked branches and keeps a bounded window", () => {
     const history = emptyHistory();
     for (const outcome of ["passed", "failed", "flaky", "passed", "passed", "passed"] as Outcome[]) {

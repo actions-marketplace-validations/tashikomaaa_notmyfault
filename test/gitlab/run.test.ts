@@ -32,6 +32,8 @@ class FakeGitLab {
   notes: Note[] = [{ id: 1, body: "added 1 commit", system: true }];
   issues: FakeIssue[] = [];
   labels: string[] = [];
+  /** Merge requests associated with each commit. */
+  mergeRequests: Record<string, unknown[]> = {};
   /** Method, path and the header carrying the token. */
   requests: string[] = [];
   status = 200;
@@ -57,7 +59,9 @@ class FakeGitLab {
         const issue = (iid: string) => this.issues.find((i) => i.iid === Number(iid));
         let match: RegExpExecArray | null;
 
-        if (route("GET", new RegExp(`^/merge_requests/${MERGE_REQUEST}/notes$`))) {
+        if ((match = route("GET", /^\/repository\/commits\/(\w+)\/merge_requests$/))) {
+          reply(200, this.mergeRequests[match[1]!] ?? []);
+        } else if (route("GET", new RegExp(`^/merge_requests/${MERGE_REQUEST}/notes$`))) {
           reply(200, this.notes);
         } else if (route("POST", new RegExp(`^/merge_requests/${MERGE_REQUEST}/notes$`))) {
           const note = { id: this.notes.length + 1, body: String(body.body), system: false };
@@ -257,6 +261,20 @@ describe("runOn GitLab", () => {
     expect(api.notes.filter((note) => !note.system)).toHaveLength(1);
     expect(api.notes.at(-1)!.body).toMatch(/All 2 tests passed/);
     expect(fixed.codeQuality).toEqual([]);
+  });
+
+  it("tells since which commit and merge request a test has been failing", async () => {
+    await simulate({ search: "pass" });
+    const breaking = "e".repeat(40);
+    api.mergeRequests[breaking] = [
+      { iid: 9, web_url: "https://gitlab.example.com/acme/shop/-/merge_requests/9", state: "merged", merge_commit_sha: null, squash_commit_sha: breaking },
+    ];
+    await simulate({ search: "fail: no match" }, { sha: breaking });
+    const mr = await simulate({ search: "fail: no match" }, { mergeRequest: true });
+    expect(api.notes.at(-1)!.body).toContain(
+      `**Already failing on \`main\`.** The latest run there failed too, on [\`eeeeeee\`](file://${join(root, "remote")}/acme/shop/-/commit/${breaking}) from [!9](https://gitlab.example.com/acme/shop/-/merge_requests/9).`,
+    );
+    expect(mr.codeQuality).toMatchObject([{ description: expect.stringContaining("The latest run there failed too, on eeeeeee from !9.") }]);
   });
 
   it("opens and closes an issue per flaky test", async () => {

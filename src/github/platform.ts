@@ -14,8 +14,10 @@ export function githubPlatform(env: NodeJS.ProcessEnv, io: Io = new ActionIO(env
     gitUser: () => "x-access-token",
     gitAuthor: { name: "github-actions[bot]", email: "41898282+github-actions[bot]@users.noreply.github.com" },
     pushOptions: [],
+    commitUrl: (sha) => `${context.serverUrl}/${context.repository}/commit/${sha}`,
     text: {
       pullRequest: "pull request",
+      changePrefix: "#",
       runLink: "Workflow run",
       runName: "workflow run",
       tokenMissing: 'Input "token" is empty. Pass `token: ${{ github.token }}`.',

@@ -17,6 +17,18 @@ export interface FlakyEvidence {
   kind: "retry" | "rerun";
 }
 
+/** Where the current failure streak of a test on tracked branches started. */
+export interface FailingSince {
+  /** Commit of the first failed run of the streak (12-char prefix). */
+  sha: string;
+  /** ISO timestamp of that run. */
+  at: string;
+  /** Link to the commit. */
+  url?: string;
+  /** The pull or merge request the commit came from, e.g. { ref: "#42", url }. */
+  change?: { ref: string; url: string };
+}
+
 export interface TestHistory {
   /** Outcomes on tracked branches, oldest first, one char per run (p, f or r). */
   outcomes: string;
@@ -28,6 +40,8 @@ export interface TestHistory {
   errors?: string[];
   /** Last day (YYYY-MM-DD) the test failed, or passed only after a retry, on a tracked branch. */
   lastFailure?: string;
+  /** Set while the test keeps failing on tracked branches: where the streak started. */
+  failingSince?: FailingSince;
   /** Durations in milliseconds of the last runs on tracked branches, oldest first. */
   durations?: number[];
   /** Number of the last run on a tracked branch the test was part of, see {@link History.runs}. */
@@ -54,6 +68,8 @@ export interface RecordOptions {
   window: number;
   /** Tests not seen for this many days are forgotten. */
   retentionDays: number;
+  /** Links to the commit and to the change it came from, kept when a test starts failing. */
+  commit?: { url?: string; change?: { ref: string; url: string } };
 }
 
 export const MAX_FAILED_ON = 20;
@@ -130,6 +146,17 @@ export function recordRun(history: History, results: TestResult[], options: Reco
 
     if (options.tracked) {
       const code = result.outcome === "failed" ? FAIL : result.outcome === "flaky" ? RETRY : PASS;
+      if (code !== FAIL) {
+        delete test.failingSince;
+      } else if (!test.outcomes.endsWith(FAIL)) {
+        // A streak recorded before failingSince existed stays without one: its start is unknown.
+        test.failingSince = {
+          sha,
+          at: options.now.toISOString(),
+          ...(options.commit?.url ? { url: options.commit.url } : {}),
+          ...(options.commit?.change ? { change: options.commit.change } : {}),
+        };
+      }
       test.outcomes = (test.outcomes + code).slice(-options.window);
       test.lastRun = history.runs + 1;
       testChanged = true;

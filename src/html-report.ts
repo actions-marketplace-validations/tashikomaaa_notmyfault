@@ -1,5 +1,5 @@
 import { computeStats, verdictFor, type TestStats } from "./analyze";
-import { FAIL, RETRY, type History, type TestHistory } from "./history";
+import { FAIL, RETRY, type FailingSince, type History, type TestHistory } from "./history";
 import { duration, escapeHtml } from "./report";
 
 export interface PageContext {
@@ -74,7 +74,7 @@ function renderRow(id: string, test: TestHistory, stats: TestStats): string {
   return [
     `<tr>`,
     `<td class="test"><code>${escapeHtml(id)}</code></td>`,
-    `<td><span class="verdict ${tone}">${label}</span></td>`,
+    `<td><span class="verdict ${tone}">${label}</span>${tone === "broken" && stats.failingSince ? since(stats.failingSince) : ""}</td>`,
     `<td><span class="timeline" role="img" aria-label="${summary}">${timeline}</span></td>`,
     `<td class="number">${failed}</td>`,
     `<td class="number">${retried}</td>`,
@@ -83,6 +83,13 @@ function renderRow(id: string, test: TestHistory, stats: TestStats): string {
     `<td class="number">${durations.length > 0 ? duration(median(durations)) : ""}</td>`,
     `</tr>`,
   ].join("");
+}
+
+function since(failing: FailingSince): string {
+  const sha = `<code>${escapeHtml(failing.sha.slice(0, 7))}</code>`;
+  const commit = failing.url ? `<a href="${escapeAttribute(failing.url)}">${sha}</a>` : sha;
+  const change = failing.change ? ` from <a href="${escapeAttribute(failing.change.url)}">${escapeHtml(failing.change.ref)}</a>` : "";
+  return `<span class="since">since ${commit}${change}, ${failing.at.slice(0, 10)}</span>`;
 }
 
 function verdict(stats: TestStats): [string, string] {
@@ -154,6 +161,7 @@ td.test { white-space: normal; min-width: 18rem; }
 /* Text colors keep every chip at a contrast of 4.5:1 or more. */
 .verdict { display: inline-block; padding: 0.1rem 0.55rem; border-radius: 1rem; color: #1f2328; font-size: 0.8rem; font-weight: 600; }
 .verdict.new { background: #c93c3c; color: #fff; } .verdict.broken { background: var(--broken); color: var(--on-broken); }
+.since { display: block; margin-top: 0.25rem; color: var(--muted); font-size: 0.8rem; }
 .verdict.suspect { background: var(--suspect); } .verdict.flaky { background: var(--flaky); } .verdict.passed { background: var(--passed); }
 .timeline { display: inline-flex; gap: 1px; }
 i { display: inline-block; width: 5px; height: 16px; border-radius: 1px; }

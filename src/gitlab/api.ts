@@ -76,6 +76,14 @@ export class GitLabClient implements Forge {
     }
   }
 
+  async changeOf(sha: string): Promise<{ number: number; url: string } | undefined> {
+    const response = await this.request("GET", `/projects/${this.project}/repository/commits/${sha}/merge_requests`);
+    const requests = (await response.json()) as { iid: number; web_url: string; state: string; merge_commit_sha: string | null; squash_commit_sha: string | null }[];
+    const merged = requests.filter((request) => request.state === "merged");
+    const request = merged.find((candidate) => candidate.merge_commit_sha === sha || candidate.squash_commit_sha === sha) ?? merged[0];
+    return request && { number: request.iid, url: request.web_url };
+  }
+
   private async list<T>(path: string): Promise<T[]> {
     const items: T[] = [];
     let next: string | undefined = path;

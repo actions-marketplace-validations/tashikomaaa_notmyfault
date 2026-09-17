@@ -77,6 +77,14 @@ export class GitHubClient implements Forge {
     }
   }
 
+  async changeOf(sha: string): Promise<{ number: number; url: string } | undefined> {
+    const response = await this.request("GET", `/repos/${this.repository}/commits/${sha}/pulls?per_page=100`);
+    const pulls = (await response.json()) as { number: number; html_url: string; merged_at: string | null; merge_commit_sha: string | null }[];
+    const merged = pulls.filter((pull) => pull.merged_at !== null);
+    const pull = merged.find((candidate) => candidate.merge_commit_sha === sha) ?? merged[0];
+    return pull && { number: pull.number, url: pull.html_url };
+  }
+
   private async findComment(issue: number, marker: string): Promise<IssueComment | undefined> {
     let path: string | undefined = `/repos/${this.repository}/issues/${issue}/comments?per_page=100`;
     while (path) {

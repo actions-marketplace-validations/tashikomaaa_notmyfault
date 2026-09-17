@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- Tests already failing on the tracked branch say since when: the commit of the first failed run of the streak and the pull or merge request it came from, both linked, in the comment, the logs, the annotations, the flaky test issues and the history pages. The history records it as `failingSince` ([#15](https://github.com/tashikomaaa/notmyfault/issues/15)).
+
 ## [1.5.0] - 2026-09-17
 
 ### Added

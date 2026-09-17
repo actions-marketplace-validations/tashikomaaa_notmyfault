@@ -73,6 +73,8 @@ export interface Forge {
   updateIssue(issue: number, changes: { title?: string; body?: string; state?: "open" | "closed" }): Promise<void>;
   /** Creates the label unless it exists. `color` is a hexadecimal color without `#`. */
   ensureLabel(name: string, color: string, description: string): Promise<void>;
+  /** The merged pull or merge request a commit of a tracked branch came from, if any. */
+  changeOf(sha: string): Promise<{ number: number; url: string } | undefined>;
 }
 
 export class ApiError extends Error {
@@ -95,6 +97,8 @@ export class ApiError extends Error {
 export interface PlatformText {
   /** "pull request" or "merge request". */
   pullRequest: string;
+  /** How references to a pull or merge request start: "#" or "!". */
+  changePrefix: string;
   /** Label of the link to the run, at the bottom of reports: "Workflow run". */
   runLink: string;
   /** The run in a sentence: "workflow run". */
@@ -115,6 +119,8 @@ export interface Platform {
   gitUser(token: string): string;
   /** Author of history commits. */
   gitAuthor: { name: string; email: string };
+  /** Link to a commit of the repository. */
+  commitUrl(sha: string): string;
   /** Options sent with history pushes. */
   pushOptions: string[];
   text: PlatformText;

@@ -9,6 +9,7 @@ import {
   type SlowTest,
   type Verdict,
 } from "./analyze";
+import type { FailingSince } from "./history";
 import type { TestResult } from "./junit";
 import type { Rename } from "./renames";
 
@@ -246,7 +247,16 @@ export function quarantineNote(quarantined: { until: string; reason?: string }, 
 
 /** The explanation of a verdict without Markdown, for annotations. */
 export function plainExplanation(failure: FailureVerdict, context: ReportContext): string {
-  return explain(failure, context).replace(/\*\*|`/g, "");
+  return explain(failure, context)
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\*\*|`/g, "");
+}
+
+/** The commit a failure streak started with, linked, and the pull or merge request it came from: "`abc1234` from #42". */
+export function sinceCommit(since: FailingSince): string {
+  const sha = `\`${since.sha.slice(0, 7)}\``;
+  const commit = since.url ? `[${sha}](${since.url})` : sha;
+  return since.change ? `${commit} from [${since.change.ref}](${since.change.url})` : commit;
 }
 
 function explain(failure: FailureVerdict, context: ReportContext): string {
@@ -259,10 +269,14 @@ function explain(failure: FailureVerdict, context: ReportContext): string {
         : `**New failure.** No history for this test on ${where}.`;
     case "suspect":
       return `**Suspect.** Failed in isolation ${times(failure.isolatedFailures)} in the last ${plural(failure.runs, "run")} on ${where}.`;
-    case "broken":
-      return failure.trailingFailures === 1
-        ? `**Already failing on ${where}.** The latest run there failed too.`
-        : `**Already failing on ${where}.** Failed the last ${failure.trailingFailures} runs there${failure.confirmed ? ", too many in a row to be flakiness" : ""}.`;
+    case "broken": {
+      const since = failure.failingSince;
+      if (failure.trailingFailures === 1) {
+        return `**Already failing on ${where}.** The latest run there failed too${since ? `, on ${sinceCommit(since)}` : ""}.`;
+      }
+      const streak = `**Already failing on ${where}.** Failed the last ${failure.trailingFailures} runs there${failure.confirmed ? ", too many in a row to be flakiness" : ""}.`;
+      return since ? `${streak} Failing since ${sinceCommit(since)}, on ${since.at.slice(0, 10)}.` : streak;
+    }
     case "flaky": {
       const parts: string[] = [];
       if (failure.failures > 0) parts.push(`failed ${failure.failures} of the last ${plural(failure.runs, "run")} on ${where}`);
@@ -312,7 +326,7 @@ function renderFixed(fixed: FixedTest[], context: ReportContext): string[] {
       .slice(0, MAX_FIXED)
       .map(
         (f) =>
-          `- ${code(f.test.title)}, ${f.trailingFailures === 1 ? "failed the latest run" : `failed the last ${f.trailingFailures} runs`} there`,
+          `- ${code(f.test.title)}, ${f.trailingFailures === 1 ? "failed the latest run" : `failed the last ${f.trailingFailures} runs`} there${f.failingSince ? `, since ${sinceCommit(f.failingSince)}` : ""}`,
       ),
   ];
   if (fixed.length > MAX_FIXED) lines.push(`- _…and ${fixed.length - MAX_FIXED} more_`);

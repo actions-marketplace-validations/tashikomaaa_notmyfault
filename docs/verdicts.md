@@ -46,9 +46,11 @@ The test failed once or twice on the tracked branch, each time between two succe
 
 <img align="right" alt="Already failing" src="assets/verdict-broken.png" width="104">
 
-> **Already failing on `main`.** Failed the last 3 runs there.
+> **Already failing on `main`.** Failed the last 3 runs there. Failing since `3f2a1b9` from #42, on 2026-09-14.
 
 The most recent runs on the tracked branch failed too, so the problem predates your pull request.
+
+When notmyfault saw the streak start, it names the commit of the first failed run on the tracked branch, and the pull request that commit came from, both linked: most of the time, the change that broke the test, and the people to ask. The job logs, the flaky test issues and the history pages show it too, and the list of tests a pull request fixes says since when they were failing.
 
 **What to do:** nothing in your pull request. Once the tracked branch is fixed, update your branch.
 

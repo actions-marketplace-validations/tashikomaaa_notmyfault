@@ -22,8 +22,10 @@ export function gitlabPlatform(env: NodeJS.ProcessEnv, io: Io = new GitLabIO(env
     gitAuthor: { name: "notmyfault", email: `notmyfault@noreply.${new URL(context.serverUrl).hostname || "gitlab.com"}` },
     // History pushes have no pipeline to run.
     pushOptions: ["ci.skip"],
+    commitUrl: (sha) => `${context.serverUrl}/${context.repository}/-/commit/${sha}`,
     text: {
       pullRequest: "merge request",
+      changePrefix: "!",
       runLink: "CI job",
       runName: "CI job",
       tokenMissing: "No token: set NOTMYFAULT_TOKEN, or run in a GitLab CI/CD job, which provides CI_JOB_TOKEN.",

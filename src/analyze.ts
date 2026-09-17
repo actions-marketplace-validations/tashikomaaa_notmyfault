@@ -1,4 +1,4 @@
-import { errorFingerprint, FAIL, RETRY, type FlakyEvidence, type History, type TestHistory } from "./history";
+import { errorFingerprint, FAIL, RETRY, type FailingSince, type FlakyEvidence, type History, type TestHistory } from "./history";
 import type { TestResult } from "./junit";
 
 /**
@@ -18,6 +18,8 @@ export interface TestStats {
   retries: number;
   /** Consecutive failures at the end of the tracked history. */
   trailingFailures: number;
+  /** Where those trailing failures started, when known. */
+  failingSince?: FailingSince;
   /** Share of failed runs on tracked branches before those trailing failures. */
   failureRate: number;
   /** Failures in a row after which a test proven flaky counts as broken: a streak too unlikely to be bad luck. */
@@ -177,6 +179,7 @@ export function computeStats(history: TestHistory | undefined, now: Date, eviden
   };
   const latest = evidence[evidence.length - 1];
   if (latest) stats.latestEvidence = latest;
+  if (trailing > 0 && history?.failingSince) stats.failingSince = history.failingSince;
   return stats;
 }
 
