@@ -190,7 +190,7 @@ Every [input](configuration.md#inputs) of the GitHub Action is a variable: its n
 | `NOTMYFAULT_CODE_QUALITY_FILE` | `gl-code-quality-report.json` | Where the Code Quality report is written |
 | `NOTMYFAULT_OUTPUT_FILE` | `notmyfault.env` | Where the outputs are written, as a dotenv file |
 
-The others: `NOTMYFAULT_SUITES`, `NOTMYFAULT_MODE`, `NOTMYFAULT_TOLERATE`, `NOTMYFAULT_QUARANTINE`, `NOTMYFAULT_HISTORY_BRANCH`, `NOTMYFAULT_COMMENT`, `NOTMYFAULT_ANNOTATIONS`, `NOTMYFAULT_FLAKY_ISSUES`, `NOTMYFAULT_MISSING_TESTS`, `NOTMYFAULT_RECORD` and `NOTMYFAULT_WINDOW`. Multi-line values, like several suites, work in YAML:
+The others: `NOTMYFAULT_SUITES`, `NOTMYFAULT_MODE`, `NOTMYFAULT_TOLERATE`, `NOTMYFAULT_QUARANTINE`, `NOTMYFAULT_HISTORY_BRANCH`, `NOTMYFAULT_COMMENT`, `NOTMYFAULT_ANNOTATIONS`, `NOTMYFAULT_FLAKY_ISSUES`, `NOTMYFAULT_MISSING_TESTS`, `NOTMYFAULT_RERUN_FLAKY`, `NOTMYFAULT_RECORD` and `NOTMYFAULT_WINDOW`. Multi-line values, like several suites, work in YAML:
 
 ```yaml
   variables:
@@ -223,9 +223,22 @@ Without `NOTMYFAULT_TOKEN`, notmyfault uses the job token. It reads the history,
 - it can only push the history once **Allow Git push requests to the repository** is on in **Settings > CI/CD > Job token permissions**;
 - it cannot comment on merge requests or manage issues, and logs a warning instead.
 
+## Re-run flaky failures
+
+Passing when the same commit runs again proves a test flaky, and unblocks the merge request. With `NOTMYFAULT_RERUN_FLAKY: "true"`, notmyfault starts a new pipeline for the commit when only flaky tests stand in the way:
+
+- in report mode, when every failure is flaky, as the test job then fails the pipeline;
+- in quarantine mode, when every failure that is not tolerated is flaky, which needs `flaky` left out of `NOTMYFAULT_TOLERATE`.
+
+For a merge request, the new pipeline runs for the merge request. For a tracked branch, it runs for the branch, unless a newer commit was pushed since. It happens **once per commit**: a commit that already has another pipeline of the same kind is never re-run, whatever the outcome. The comment says so, and the next pipeline updates it:
+
+> 🔁 **Re-run:** only flaky tests stand in the way, so notmyfault started [a new pipeline](#re-run-flaky-failures) for this commit. Passing there proves them flaky.
+
+It needs `NOTMYFAULT_TOKEN` with the `api` scope and the Developer role; the job token cannot start pipelines.
+
 ## Differences with GitHub
 
-- **No re-run notice.** GitHub workflows can re-run failed jobs when only flaky tests failed. On GitLab, [`retry`](https://docs.gitlab.com/ci/yaml/#retry) on the test job retries every failure.
+- **Re-runs.** On GitHub, a companion workflow re-runs failed jobs when only flaky tests failed. On GitLab, notmyfault starts the new pipeline itself, see [Re-run flaky failures](#re-run-flaky-failures). Unlike [`retry`](https://docs.gitlab.com/ci/yaml/#retry), it leaves real failures alone.
 - **No separate check.** GitLab has no checks: `NOTMYFAULT_CHECK` is ignored, with a warning. In quarantine mode, the notmyfault job already fails only on failures that are not tolerated.
 - **No annotations next to the code.** The Code Quality widget takes their place. Showing its findings in the diff needs GitLab Ultimate.
 - **Merge requests from forks** are compared with the history of the target project, but never recorded. Their pipelines run in the fork by default, without the variables of your project: the comment is missing and the job log explains why. A maintainer can run the pipeline in the parent project instead.
@@ -244,6 +257,10 @@ The token cannot push. Check its role and scopes. When a protected branch patter
 ### `Could not comment on the merge request. …`
 
 With `NOTMYFAULT_TOKEN`, the token lacks the `api` scope or the Reporter role. Without it, set it: the job token cannot comment.
+
+### `Could not start a new pipeline. …`
+
+[`NOTMYFAULT_RERUN_FLAKY`](#re-run-flaky-failures) is on, but the token cannot create pipelines: it needs the `api` scope and the Developer role. On a protected branch, the role must also be allowed to merge or push to it.
 
 ### `CI_PROJECT_PATH is not set. notmyfault must run inside GitLab CI/CD.`
 

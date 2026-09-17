@@ -76,6 +76,23 @@ export class GitLabClient implements Forge {
     }
   }
 
+  async rerun(run: { sha: string; mergeRequest?: number; branch?: string }): Promise<string | undefined> {
+    const project = `/projects/${this.project}`;
+    // Once per commit: a commit that already has another pipeline of the same kind is left alone.
+    const kind = run.mergeRequest ? "source=merge_request_event" : `ref=${encodeURIComponent(run.branch ?? "")}`;
+    const pipelines = await this.list<{ id: number }>(`${project}/pipelines?sha=${run.sha}&${kind}&per_page=100`);
+    if (pipelines.length > 1) return undefined;
+    if (run.mergeRequest) {
+      const response = await this.request("POST", `${project}/merge_requests/${run.mergeRequest}/pipelines`);
+      return ((await response.json()) as { web_url: string }).web_url;
+    }
+    if (!run.branch) return undefined;
+    const branch = await this.request("GET", `${project}/repository/branches/${encodeURIComponent(run.branch)}`);
+    if (((await branch.json()) as { commit: { id: string } }).commit.id !== run.sha) return undefined;
+    const response = await this.request("POST", `${project}/pipeline`, { ref: run.branch });
+    return ((await response.json()) as { web_url: string }).web_url;
+  }
+
   async changeOf(sha: string): Promise<{ number: number; url: string } | undefined> {
     const response = await this.request("GET", `/projects/${this.project}/repository/commits/${sha}/merge_requests`);
     const requests = (await response.json()) as { iid: number; web_url: string; state: string; merge_commit_sha: string | null; squash_commit_sha: string | null }[];

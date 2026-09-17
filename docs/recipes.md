@@ -137,7 +137,7 @@ Filter them with the `flaky-test` label, or assign them in your triage routine.
 
 ## Re-run flaky failures automatically
 
-Re-running the same commit is the fastest way to prove a test flaky, and it unblocks the change. When every failed test is known or probably flaky, notmyfault adds a notice titled `notmyfault: only flaky tests failed` to its step. A second workflow can watch for it and re-run the failed jobs once, on its own:
+Re-running the same commit is the fastest way to prove a test flaky, and it unblocks the change. On GitLab, notmyfault does it itself, see [Re-run flaky failures](gitlab.md#re-run-flaky-failures). When every failed test is known or probably flaky, notmyfault adds a notice titled `notmyfault: only flaky tests failed` to its step. A second workflow can watch for it and re-run the failed jobs once, on its own:
 
 ```yaml
 # .github/workflows/rerun-flaky.yml

@@ -82,6 +82,7 @@ export interface Settings {
   missingTests: boolean;
   /** Name of the check to report the run as, if any. */
   check?: string;
+  rerunFlaky: boolean;
   record: boolean;
   window: number;
 }
@@ -220,6 +221,11 @@ async function evaluate(loaded: LoadedSuite[], platform: Platform, settings: Set
     await manageFlakyIssues(suites, platform, settings, now);
   }
 
+  if (settings.rerunFlaky && rerunWorthIt(failures, blocking, settings)) {
+    const url = await rerun(platform, settings);
+    if (url) reportContext.rerunUrl = url;
+  }
+
   const reports: SuiteReport[] = suites.map((suite) => {
     const ranking = rankFlakyTests(suite.history, now, EVIDENCE_TTL_DAYS, RANKING_SIZE);
     return {
@@ -295,6 +301,7 @@ export function readSettings(platform: Platform): Settings {
     flakyIssues: io.booleanInput("flaky-issues", false),
     missingTests: io.booleanInput("missing-tests", true),
     ...(io.booleanInput("check", false) ? { check: io.input("check-name", "notmyfault") } : {}),
+    rerunFlaky: io.booleanInput("rerun-flaky", false),
     record: io.booleanInput("record", true),
     window: io.integerInput("window", 50, 5),
   };
@@ -552,6 +559,43 @@ async function comment(platform: Platform, settings: Settings, body: string, cre
     const hint =
       error instanceof ApiError && error.denied ? ` ${pullRequest.fromFork ? text.commentFromFork : text.commentDenied}` : "";
     io.warning(`Could not comment on the ${text.pullRequest}.${hint} ${errorMessage(error)}`);
+  }
+}
+
+/**
+ * Whether a new pipeline could turn this one green: flaky tests failed, and nothing else stands in the way. In report
+ * mode, the tests fail the pipeline, so every failure must be flaky. In quarantine mode, every failure that blocks.
+ */
+function rerunWorthIt(failures: FailureVerdict[], blocking: FailureVerdict[], settings: Settings): boolean {
+  const flaky = (failure: FailureVerdict) => failure.verdict === "flaky";
+  if (settings.mode === "report") return failures.length > 0 && failures.every(flaky);
+  return blocking.length > 0 && blocking.every(flaky);
+}
+
+async function rerun(platform: Platform, settings: Settings): Promise<string | undefined> {
+  const { context, io, text } = platform;
+  const forge = platform.forge(settings.token);
+  if (!forge.rerun) {
+    io.warning(
+      `${io.describeInput("rerun-flaky")} is ignored: a job cannot re-run its own workflow run on GitHub. Use a companion workflow instead: https://github.com/tashikomaaa/notmyfault/blob/main/docs/recipes.md#re-run-flaky-failures-automatically`,
+    );
+    return undefined;
+  }
+  try {
+    const url = await forge.rerun({
+      sha: context.sha,
+      ...(context.pullRequest ? { mergeRequest: context.pullRequest.number } : context.branch ? { branch: context.branch } : {}),
+    });
+    io.info(
+      url
+        ? `Only flaky tests failed: started a new pipeline for this commit, ${url}`
+        : "Only flaky tests failed, but this commit already had another pipeline, or moved on: not re-running.",
+    );
+    return url;
+  } catch (error) {
+    const hint = error instanceof ApiError && error.denied ? ` ${text.rerunDenied}` : "";
+    io.warning(`Could not start a new pipeline.${hint} ${errorMessage(error)}`);
+    return undefined;
   }
 }
 

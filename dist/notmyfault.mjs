@@ -279,6 +279,7 @@ function githubPlatform(env, io = new ActionIO(env)) {
       commentDenied: 'Does the job have "pull-requests: write" permission?',
       commentFromFork: "Tokens are read-only on pull requests from forks; the job summary has the full report.",
       checkDenied: 'Does the job have "checks: write" permission?',
+      rerunDenied: "",
       issuesDenied: 'Does the job have "issues: write" permission?'
     },
     rerunNotice: true
@@ -890,6 +891,12 @@ function renderBody(suites, context, decision = "Quarantine") {
     const tolerated = `${verdicts}${byHand}`;
     lines.push(
       context.blocking === 0 ? `\u{1F6E1}\uFE0F **${decision}:** every failure is tolerated (${tolerated}), so this check passes.` : `\u274C **${decision}:** ${plural(context.blocking, "failure")} not tolerated (${tolerated}), so this check fails.`,
+      ""
+    );
+  }
+  if (context.rerunUrl) {
+    lines.push(
+      `\u{1F501} **Re-run:** only flaky tests stand in the way, so notmyfault started [a new pipeline](${context.rerunUrl}) for this commit. Passing there proves them flaky.`,
       ""
     );
   }
@@ -1919,6 +1926,10 @@ async function evaluate(loaded, platform, settings, store, now) {
   if (settings.flakyIssues && isTracked(context, settings) && !context.pullRequest?.fromFork) {
     await manageFlakyIssues(suites, platform, settings, now);
   }
+  if (settings.rerunFlaky && rerunWorthIt(failures, blocking, settings)) {
+    const url = await rerun(platform, settings);
+    if (url) reportContext.rerunUrl = url;
+  }
   const reports = suites.map((suite) => {
     const ranking = rankFlakyTests(suite.history, now, EVIDENCE_TTL_DAYS, RANKING_SIZE);
     return {
@@ -1987,6 +1998,7 @@ function readSettings(platform) {
     flakyIssues: io.booleanInput("flaky-issues", false),
     missingTests: io.booleanInput("missing-tests", true),
     ...io.booleanInput("check", false) ? { check: io.input("check-name", "notmyfault") } : {},
+    rerunFlaky: io.booleanInput("rerun-flaky", false),
     record: io.booleanInput("record", true),
     window: io.integerInput("window", 50, 5)
   };
@@ -2203,6 +2215,35 @@ async function comment(platform, settings, body, create) {
     io.warning(`Could not comment on the ${text.pullRequest}.${hint} ${errorMessage(error)}`);
   }
 }
+function rerunWorthIt(failures, blocking, settings) {
+  const flaky = (failure) => failure.verdict === "flaky";
+  if (settings.mode === "report") return failures.length > 0 && failures.every(flaky);
+  return blocking.length > 0 && blocking.every(flaky);
+}
+async function rerun(platform, settings) {
+  const { context, io, text } = platform;
+  const forge = platform.forge(settings.token);
+  if (!forge.rerun) {
+    io.warning(
+      `${io.describeInput("rerun-flaky")} is ignored: a job cannot re-run its own workflow run on GitHub. Use a companion workflow instead: https://github.com/tashikomaaa/notmyfault/blob/main/docs/recipes.md#re-run-flaky-failures-automatically`
+    );
+    return void 0;
+  }
+  try {
+    const url = await forge.rerun({
+      sha: context.sha,
+      ...context.pullRequest ? { mergeRequest: context.pullRequest.number } : context.branch ? { branch: context.branch } : {}
+    });
+    io.info(
+      url ? `Only flaky tests failed: started a new pipeline for this commit, ${url}` : "Only flaky tests failed, but this commit already had another pipeline, or moved on: not re-running."
+    );
+    return url;
+  } catch (error) {
+    const hint = error instanceof ApiError && error.denied ? ` ${text.rerunDenied}` : "";
+    io.warning(`Could not start a new pipeline.${hint} ${errorMessage(error)}`);
+    return void 0;
+  }
+}
 async function reportCheck(name, platform, settings, output, success) {
   const { context, io, text } = platform;
   const forge = platform.forge(settings.token);
@@ -2296,6 +2337,21 @@ var GitLabClient = class {
       if (!(error instanceof ApiError) || error.status !== 404) throw error;
       await this.request("POST", `/projects/${this.project}/labels`, { name, color: `#${color}`, description });
     }
+  }
+  async rerun(run2) {
+    const project = `/projects/${this.project}`;
+    const kind = run2.mergeRequest ? "source=merge_request_event" : `ref=${encodeURIComponent(run2.branch ?? "")}`;
+    const pipelines = await this.list(`${project}/pipelines?sha=${run2.sha}&${kind}&per_page=100`);
+    if (pipelines.length > 1) return void 0;
+    if (run2.mergeRequest) {
+      const response2 = await this.request("POST", `${project}/merge_requests/${run2.mergeRequest}/pipelines`);
+      return (await response2.json()).web_url;
+    }
+    if (!run2.branch) return void 0;
+    const branch = await this.request("GET", `${project}/repository/branches/${encodeURIComponent(run2.branch)}`);
+    if ((await branch.json()).commit.id !== run2.sha) return void 0;
+    const response = await this.request("POST", `${project}/pipeline`, { ref: run2.branch });
+    return (await response.json()).web_url;
   }
   async changeOf(sha) {
     const response = await this.request("GET", `/projects/${this.project}/repository/commits/${sha}/merge_requests`);
@@ -2477,7 +2533,7 @@ function gitlabPlatform(env, io = new GitLabIO(env)) {
   const context = readGitLabContext(env);
   const isJobToken = (token) => token === env.CI_JOB_TOKEN;
   const jobTokenOnly = io.input("token") === "";
-  const apiDenied = jobTokenOnly ? "The job token cannot do this: set NOTMYFAULT_TOKEN to an access token with the api scope and at least the Reporter role." : "Does NOTMYFAULT_TOKEN have the api scope and at least the Reporter role?";
+  const apiDenied = (role) => jobTokenOnly ? `The job token cannot do this: set NOTMYFAULT_TOKEN to an access token with the api scope and at least the ${role} role.` : `Does NOTMYFAULT_TOKEN have the api scope and at least the ${role} role?`;
   return {
     name: "gitlab",
     context,
@@ -2496,10 +2552,11 @@ function gitlabPlatform(env, io = new GitLabIO(env)) {
       runName: "CI job",
       tokenMissing: "No token: set NOTMYFAULT_TOKEN, or run in a GitLab CI/CD job, which provides CI_JOB_TOKEN.",
       recordDenied: jobTokenOnly ? 'The job token can only push once "Allow Git push requests to the repository" is on in Settings > CI/CD > Job token permissions. Or set NOTMYFAULT_TOKEN to an access token with the write_repository scope and at least the Developer role.' : "Does NOTMYFAULT_TOKEN have the write_repository scope and at least the Developer role?",
-      commentDenied: apiDenied,
+      commentDenied: apiDenied("Reporter"),
       commentFromFork: "Pipelines of merge requests from forks cannot use the variables of the project; the summary file has the full report.",
-      issuesDenied: apiDenied,
-      checkDenied: ""
+      issuesDenied: apiDenied("Reporter"),
+      checkDenied: "",
+      rerunDenied: apiDenied("Developer")
     },
     rerunNotice: false
   };

@@ -53,6 +53,9 @@ inputs:
   check-name:
     description: Name of the check.
     default: notmyfault
+  rerun-flaky:
+    description: GitLab only. When only flaky tests stand in the way, start a new pipeline for the commit, once. On GitHub, use a companion workflow.
+    default: "false"
   record:
     description: Record this run in the history.
     default: "true"

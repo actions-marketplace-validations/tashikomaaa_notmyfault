@@ -27,6 +27,7 @@
 | [`missing-tests`](#missing-tests) | `true` | Report tests of the latest tracked run missing from this run |
 | [`check`](#check) | `false` | Report the run as a check of its own |
 | [`check-name`](#check-name) | `notmyfault` | Name of that check |
+| [`rerun-flaky`](#rerun-flaky) | `false` | GitLab only: re-run pipelines blocked only by flaky tests |
 | [`record`](#record) | `true` | Record the run in the history |
 | [`window`](#window) | `50` | Runs remembered per test |
 
@@ -157,6 +158,10 @@ Branch protection can then require that check instead of the job: failures that 
 ### `check-name`
 
 The name of the check, `notmyfault` by default. Jobs reporting different suites need different names, as a new check with the same name on the same commit replaces the previous one.
+
+### `rerun-flaky`
+
+GitLab only, as `NOTMYFAULT_RERUN_FLAKY`: when only flaky tests stand in the way, notmyfault starts a new pipeline for the commit, once. See [Re-run flaky failures](gitlab.md#re-run-flaky-failures). On GitHub, a job cannot re-run its own workflow run: the input is ignored with a warning, and a [companion workflow](recipes.md#re-run-flaky-failures-automatically) does it instead.
 
 ### `record`
 

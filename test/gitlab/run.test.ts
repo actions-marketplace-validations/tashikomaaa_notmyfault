@@ -34,6 +34,9 @@ class FakeGitLab {
   labels: string[] = [];
   /** Merge requests associated with each commit. */
   mergeRequests: Record<string, unknown[]> = {};
+  /** Pipelines of the project: their commit, and their merge request or branch. */
+  pipelines: { sha: string; mergeRequest?: number; ref?: string }[] = [];
+  branchHead = "";
   /** Method, path and the header carrying the token. */
   requests: string[] = [];
   status = 200;
@@ -59,7 +62,20 @@ class FakeGitLab {
         const issue = (iid: string) => this.issues.find((i) => i.iid === Number(iid));
         let match: RegExpExecArray | null;
 
-        if ((match = route("GET", /^\/repository\/commits\/(\w+)\/merge_requests$/))) {
+        if (route("GET", /^\/pipelines$/)) {
+          const sha = url.searchParams.get("sha");
+          const ref = url.searchParams.get("ref");
+          const mergeRequests = url.searchParams.get("source") === "merge_request_event";
+          reply(200, this.pipelines.filter((p) => p.sha === sha && (mergeRequests ? p.mergeRequest : p.ref === ref)).map((_, id) => ({ id })));
+        } else if (route("POST", new RegExp(`^/merge_requests/${MERGE_REQUEST}/pipelines$`))) {
+          this.pipelines.push({ sha: "head", mergeRequest: MERGE_REQUEST });
+          reply(201, { id: this.pipelines.length, web_url: `https://gitlab.example.com/acme/shop/-/pipelines/${this.pipelines.length}` });
+        } else if (route("GET", /^\/repository\/branches\/main$/)) {
+          reply(200, { name: "main", commit: { id: this.branchHead } });
+        } else if (route("POST", /^\/pipeline$/)) {
+          this.pipelines.push({ sha: this.branchHead, ref: String(body.ref) });
+          reply(201, { id: this.pipelines.length, web_url: `https://gitlab.example.com/acme/shop/-/pipelines/${this.pipelines.length}` });
+        } else if ((match = route("GET", /^\/repository\/commits\/(\w+)\/merge_requests$/))) {
           reply(200, this.mergeRequests[match[1]!] ?? []);
         } else if (route("GET", new RegExp(`^/merge_requests/${MERGE_REQUEST}/notes$`))) {
           reply(200, this.notes);
@@ -312,6 +328,38 @@ describe("runOn GitLab", () => {
     const mr = await simulate({ totals: "fail: boom" }, { mergeRequest: true, fork: true });
     expect(mr.logs).toContain("Merge request from a fork: the token is read-only, history is not recorded.");
     expect(() => git("show", "notmyfault-history:history/unit-tests.json")).toThrow();
+  });
+
+  it("starts a new pipeline, once per commit, when only flaky tests stand in the way", async () => {
+    for (const pays of ["pass", "fail: bank timeout", "pass", "fail: bank timeout", "pass", "fail: bank timeout", "pass"] as const) {
+      await simulate({ pays, totals: "pass" });
+    }
+    const variables = { mode: "quarantine", tolerate: "broken", "rerun-flaky": "true" };
+    const sha = "a".repeat(40);
+    api.pipelines.push({ sha, mergeRequest: MERGE_REQUEST });
+
+    const mr = await simulate({ pays: "fail: bank timeout", totals: "pass" }, { mergeRequest: true, sha, variables });
+    expect(mr.code).toBe(1);
+    expect(mr.logs).toContain("Only flaky tests failed: started a new pipeline for this commit, https://gitlab.example.com/acme/shop/-/pipelines/2");
+    expect(api.notes.at(-1)!.body).toContain(
+      "🔁 **Re-run:** only flaky tests stand in the way, so notmyfault started [a new pipeline](https://gitlab.example.com/acme/shop/-/pipelines/2) for this commit. Passing there proves them flaky.",
+    );
+
+    // The commit already has another pipeline: no second re-run.
+    api.pipelines.push({ sha, mergeRequest: MERGE_REQUEST });
+    const again = await simulate({ pays: "fail: bank timeout", totals: "pass" }, { mergeRequest: true, sha, variables });
+    expect(again.logs).toContain("Only flaky tests failed, but this commit already had another pipeline, or moved on: not re-running.");
+    expect(api.requests.filter((request) => request.startsWith("POST") && request.includes("/pipelines "))).toHaveLength(1);
+
+    // A failure that is not flaky would fail the new pipeline too.
+    const mixed = await simulate({ pays: "fail: bank timeout", totals: "fail: 3 != 4" }, { mergeRequest: true, sha: "b".repeat(40), variables });
+    expect(mixed.logs).not.toContain("new pipeline");
+
+    // In report mode on the tracked branch, the branch is re-run while it is still at that commit.
+    api.branchHead = "c".repeat(40);
+    const main = await simulate({ pays: "fail: bank timeout", totals: "pass" }, { sha: api.branchHead, variables: { "rerun-flaky": "true" } });
+    expect(main.logs).toContain("started a new pipeline for this commit, https://gitlab.example.com/acme/shop/-/pipelines/4");
+    expect(api.requests).toContain("POST /api/v4/projects/42/pipeline PRIVATE-TOKEN");
   });
 
   it("ignores checks, which GitLab does not have", async () => {

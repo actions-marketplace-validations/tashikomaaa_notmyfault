@@ -539,6 +539,15 @@ describe("run", () => {
     expect(invalid.logs).toContain('::error::Input "quarantine" expects "YYYY-MM-DD test name # reason" per line');
   });
 
+  it("points to the companion workflow when asked to re-run on GitHub", async () => {
+    for (const pays of ["pass", "fail", "pass", "fail", "pass", "fail", "pass"] as const) await simulate({ pays });
+    const result = await simulate({ pays: "fail" }, { event: "pull_request", inputs: { "rerun-flaky": "true" } });
+    expect(result.code).toBe(0);
+    expect(result.logs).toContain(
+      '::warning::Input "rerun-flaky" is ignored: a job cannot re-run its own workflow run on GitHub. Use a companion workflow instead',
+    );
+  });
+
   it("flags runs where only flaky tests failed, for a workflow re-running them", async () => {
     for (const pays of ["pass", "fail", "pass", "fail", "pass", "fail", "pass"] as const) await simulate({ pays, totals: "pass" });
     const marker = "::notice title=notmyfault%3A only flaky tests failed::Every failed test is known or probably flaky";

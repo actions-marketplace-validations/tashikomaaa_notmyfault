@@ -31,6 +31,8 @@ export interface ReportContext {
   runUrl?: string;
   /** Label of the link to the run. Defaults to "Workflow run". */
   runLink?: string;
+  /** The pipeline notmyfault started to re-run flaky failures. */
+  rerunUrl?: string;
 }
 
 /** Longest summary a check run accepts. */
@@ -194,6 +196,13 @@ function renderBody(suites: SuiteReport[], context: ReportContext, decision = "Q
       context.blocking === 0
         ? `🛡️ **${decision}:** every failure is tolerated (${tolerated}), so this check passes.`
         : `❌ **${decision}:** ${plural(context.blocking, "failure")} not tolerated (${tolerated}), so this check fails.`,
+      "",
+    );
+  }
+
+  if (context.rerunUrl) {
+    lines.push(
+      `🔁 **Re-run:** only flaky tests stand in the way, so notmyfault started [a new pipeline](${context.rerunUrl}) for this commit. Passing there proves them flaky.`,
       "",
     );
   }

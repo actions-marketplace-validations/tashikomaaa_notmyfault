@@ -77,6 +77,11 @@ export interface Forge {
   changeOf(sha: string): Promise<{ number: number; url: string } | undefined>;
   /** Reports the run as a completed check of a commit, where the platform has checks. Resolves to its URL. */
   createCheck?(check: CheckReport): Promise<string>;
+  /**
+   * Starts a new pipeline for the commit of a merge request or a branch, where the CI system lets a job do it.
+   * Resolves to its URL, or to undefined when the commit already had another pipeline, or moved on.
+   */
+  rerun?(run: { sha: string; mergeRequest?: number; branch?: string }): Promise<string | undefined>;
 }
 
 export interface CheckReport {
@@ -120,6 +125,7 @@ export interface PlatformText {
   commentFromFork: string;
   issuesDenied: string;
   checkDenied: string;
+  rerunDenied: string;
 }
 
 export interface Platform {
