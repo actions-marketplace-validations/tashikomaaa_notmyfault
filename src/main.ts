@@ -470,6 +470,8 @@ async function manageFlakyIssues(suites: Suite[], platform: Platform, settings: 
       evidenceTtlDays: EVIDENCE_TTL_DAYS,
       sha: context.sha,
       ...(runUrl ? { runUrl } : {}),
+      runName: platform.text.runName,
+      pullRequest: platform.text.pullRequest,
     });
     if (actions.some((action) => action.kind === "create")) {
       await client.ensureLabel(FLAKY_LABEL.name, FLAKY_LABEL.color, FLAKY_LABEL.description);

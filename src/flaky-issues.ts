@@ -31,6 +31,10 @@ export interface IssueContext {
   evidenceTtlDays: number;
   sha: string;
   runUrl?: string;
+  /** What the run is called: "workflow run" by default, "CI job" on GitLab. */
+  runName?: string;
+  /** "pull request" by default, "merge request" on GitLab. */
+  pullRequest?: string;
 }
 
 export type IssueAction =
@@ -156,12 +160,12 @@ function renderFlakyIssue(
 
   // Issues are only updated when their test fails, which gives the latest failure.
   if (result?.outcome === "failed" || result?.outcome === "flaky") lines.push("", latestFailure(result, context));
-  lines.push("", `Until it is fixed, [quarantine mode](${QUARANTINE_URL}) keeps it from blocking pull requests.`);
+  lines.push("", `Until it is fixed, [quarantine mode](${QUARANTINE_URL}) keeps it from blocking ${context.pullRequest ?? "pull request"}s.`);
   return lines.join("\n");
 }
 
 function latestFailure(result: TestResult, context: IssueContext): string {
-  const run = context.runUrl ? `, in [this workflow run](${context.runUrl})` : "";
+  const run = context.runUrl ? `, in [this ${context.runName ?? "workflow run"}](${context.runUrl})` : "";
   const what = result.outcome === "flaky" ? "Latest retry" : "Latest failure";
   const message = result.message ? `<pre>${escapeHtml(result.message)}</pre>` : "_The report has no failure message._";
   return [`**${what}**, on commit \`${context.sha.slice(0, 12)}\`${run}:`, "", message].join("\n");

@@ -7,6 +7,11 @@ import { GitLabIO } from "./io";
 export function gitlabPlatform(env: NodeJS.ProcessEnv, io: Io = new GitLabIO(env)): Platform {
   const context = readGitLabContext(env);
   const isJobToken = (token: string) => token === env.CI_JOB_TOKEN;
+  // Without NOTMYFAULT_TOKEN the job token is used, and hints say what it cannot do.
+  const jobTokenOnly = io.input("token") === "";
+  const apiDenied = jobTokenOnly
+    ? "The job token cannot do this: set NOTMYFAULT_TOKEN to an access token with the api scope and at least the Reporter role."
+    : "Does NOTMYFAULT_TOKEN have the api scope and at least the Reporter role?";
   return {
     name: "gitlab",
     context,
@@ -20,13 +25,15 @@ export function gitlabPlatform(env: NodeJS.ProcessEnv, io: Io = new GitLabIO(env
     text: {
       pullRequest: "merge request",
       runLink: "CI job",
+      runName: "CI job",
       tokenMissing: "No token: set NOTMYFAULT_TOKEN, or run in a GitLab CI/CD job, which provides CI_JOB_TOKEN.",
-      recordDenied:
-        "Does NOTMYFAULT_TOKEN have the write_repository scope and at least the Developer role? CI_JOB_TOKEN cannot push.",
-      commentDenied: "Does NOTMYFAULT_TOKEN have the api scope and at least the Reporter role? CI_JOB_TOKEN cannot comment.",
+      recordDenied: jobTokenOnly
+        ? 'The job token can only push once "Allow Git push requests to the repository" is on in Settings > CI/CD > Job token permissions. Or set NOTMYFAULT_TOKEN to an access token with the write_repository scope and at least the Developer role.'
+        : "Does NOTMYFAULT_TOKEN have the write_repository scope and at least the Developer role?",
+      commentDenied: apiDenied,
       commentFromFork:
         "Pipelines of merge requests from forks cannot use the variables of the project; the summary file has the full report.",
-      issuesDenied: "Does NOTMYFAULT_TOKEN have the api scope and at least the Reporter role?",
+      issuesDenied: apiDenied,
     },
     rerunNotice: false,
   };

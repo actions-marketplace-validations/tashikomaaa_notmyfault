@@ -95,8 +95,10 @@ export class ApiError extends Error {
 export interface PlatformText {
   /** "pull request" or "merge request". */
   pullRequest: string;
-  /** Label of the link to the run, at the bottom of reports. */
+  /** Label of the link to the run, at the bottom of reports: "Workflow run". */
   runLink: string;
+  /** The run in a sentence: "workflow run". */
+  runName: string;
   tokenMissing: string;
   recordDenied: string;
   commentDenied: string;

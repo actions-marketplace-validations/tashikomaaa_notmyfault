@@ -247,6 +247,7 @@ function githubPlatform(env, io = new ActionIO(env)) {
     text: {
       pullRequest: "pull request",
       runLink: "Workflow run",
+      runName: "workflow run",
       tokenMissing: 'Input "token" is empty. Pass `token: ${{ github.token }}`.',
       recordDenied: 'Does the job have "contents: write" permission?',
       commentDenied: 'Does the job have "pull-requests: write" permission?',
@@ -1235,11 +1236,11 @@ function renderFlakyIssue(key, id, test, stats, result, context) {
     );
   }
   if (result?.outcome === "failed" || result?.outcome === "flaky") lines.push("", latestFailure(result, context));
-  lines.push("", `Until it is fixed, [quarantine mode](${QUARANTINE_URL}) keeps it from blocking pull requests.`);
+  lines.push("", `Until it is fixed, [quarantine mode](${QUARANTINE_URL}) keeps it from blocking ${context.pullRequest ?? "pull request"}s.`);
   return lines.join("\n");
 }
 function latestFailure(result, context) {
-  const run2 = context.runUrl ? `, in [this workflow run](${context.runUrl})` : "";
+  const run2 = context.runUrl ? `, in [this ${context.runName ?? "workflow run"}](${context.runUrl})` : "";
   const what = result.outcome === "flaky" ? "Latest retry" : "Latest failure";
   const message = result.message ? `<pre>${escapeHtml(result.message)}</pre>` : "_The report has no failure message._";
   return [`**${what}**, on commit \`${context.sha.slice(0, 12)}\`${run2}:`, "", message].join("\n");
@@ -2021,7 +2022,9 @@ async function manageFlakyIssues(suites, platform, settings, now) {
       now,
       evidenceTtlDays: EVIDENCE_TTL_DAYS,
       sha: context.sha,
-      ...runUrl ? { runUrl } : {}
+      ...runUrl ? { runUrl } : {},
+      runName: platform.text.runName,
+      pullRequest: platform.text.pullRequest
     });
     if (actions.some((action) => action.kind === "create")) {
       await client.ensureLabel(FLAKY_LABEL.name, FLAKY_LABEL.color, FLAKY_LABEL.description);
@@ -2304,6 +2307,8 @@ function seconds() {
 function gitlabPlatform(env, io = new GitLabIO(env)) {
   const context = readGitLabContext(env);
   const isJobToken = (token) => token === env.CI_JOB_TOKEN;
+  const jobTokenOnly = io.input("token") === "";
+  const apiDenied = jobTokenOnly ? "The job token cannot do this: set NOTMYFAULT_TOKEN to an access token with the api scope and at least the Reporter role." : "Does NOTMYFAULT_TOKEN have the api scope and at least the Reporter role?";
   return {
     name: "gitlab",
     context,
@@ -2317,11 +2322,12 @@ function gitlabPlatform(env, io = new GitLabIO(env)) {
     text: {
       pullRequest: "merge request",
       runLink: "CI job",
+      runName: "CI job",
       tokenMissing: "No token: set NOTMYFAULT_TOKEN, or run in a GitLab CI/CD job, which provides CI_JOB_TOKEN.",
-      recordDenied: "Does NOTMYFAULT_TOKEN have the write_repository scope and at least the Developer role? CI_JOB_TOKEN cannot push.",
-      commentDenied: "Does NOTMYFAULT_TOKEN have the api scope and at least the Reporter role? CI_JOB_TOKEN cannot comment.",
+      recordDenied: jobTokenOnly ? 'The job token can only push once "Allow Git push requests to the repository" is on in Settings > CI/CD > Job token permissions. Or set NOTMYFAULT_TOKEN to an access token with the write_repository scope and at least the Developer role.' : "Does NOTMYFAULT_TOKEN have the write_repository scope and at least the Developer role?",
+      commentDenied: apiDenied,
       commentFromFork: "Pipelines of merge requests from forks cannot use the variables of the project; the summary file has the full report.",
-      issuesDenied: "Does NOTMYFAULT_TOKEN have the api scope and at least the Reporter role?"
+      issuesDenied: apiDenied
     },
     rerunNotice: false
   };

@@ -17,6 +17,7 @@ export function githubPlatform(env: NodeJS.ProcessEnv, io: Io = new ActionIO(env
     text: {
       pullRequest: "pull request",
       runLink: "Workflow run",
+      runName: "workflow run",
       tokenMissing: 'Input "token" is empty. Pass `token: ${{ github.token }}`.',
       recordDenied: 'Does the job have "contents: write" permission?',
       commentDenied: 'Does the job have "pull-requests: write" permission?',

@@ -267,6 +267,9 @@ describe("runOn GitLab", () => {
     expect(api.labels).toEqual(["flaky-test #fcbd34"]);
     expect(api.issues).toMatchObject([{ iid: 1, title: "Flaky test: checkout › pays", state: "opened", labels: ["flaky-test"] }]);
     expect(api.issues[0]!.description).toContain("<!-- notmyfault:flaky:unit-tests:");
+    expect(api.issues[0]!.description).toContain("keeps it from blocking merge requests.");
+    await simulate({ pays: "fail: socket hang up" }, { variables });
+    expect(api.issues[0]!.description).toMatch(/\*\*Latest failure\*\*, on commit `\d+`, in \[this CI job\]\(https:\/\/gitlab\.example\.com\/acme\/shop\/-\/jobs\/\d+\):/);
 
     clock += 31 * 24 * 60 * 60 * 1000;
     const quiet = await simulate({ pays: "pass" }, { variables });
@@ -280,7 +283,11 @@ describe("runOn GitLab", () => {
     const mr = await simulate({ totals: "fail: boom" }, { mergeRequest: true, jobTokenOnly: true });
     expect(mr.code).toBe(0);
     expect(api.requests.at(-1)).toMatch(/JOB-TOKEN$/);
-    expect(mr.logs).toContain("Warning: Could not comment on the merge request. Does NOTMYFAULT_TOKEN have the api scope");
+    expect(mr.logs).toContain("Warning: Could not comment on the merge request. The job token cannot do this: set NOTMYFAULT_TOKEN");
+    expect(mr.logs).not.toContain("job-token");
+
+    const scoped = await simulate({ totals: "fail: boom" }, { mergeRequest: true });
+    expect(scoped.logs).toContain("Warning: Could not comment on the merge request. Does NOTMYFAULT_TOKEN have the api scope");
   });
 
   it("does not record merge requests from forks", async () => {

@@ -247,6 +247,7 @@ function githubPlatform(env, io = new ActionIO(env)) {
     text: {
       pullRequest: "pull request",
       runLink: "Workflow run",
+      runName: "workflow run",
       tokenMissing: 'Input "token" is empty. Pass `token: ${{ github.token }}`.',
       recordDenied: 'Does the job have "contents: write" permission?',
       commentDenied: 'Does the job have "pull-requests: write" permission?',
@@ -1235,11 +1236,11 @@ function renderFlakyIssue(key, id, test, stats, result, context) {
     );
   }
   if (result?.outcome === "failed" || result?.outcome === "flaky") lines.push("", latestFailure(result, context));
-  lines.push("", `Until it is fixed, [quarantine mode](${QUARANTINE_URL}) keeps it from blocking pull requests.`);
+  lines.push("", `Until it is fixed, [quarantine mode](${QUARANTINE_URL}) keeps it from blocking ${context.pullRequest ?? "pull request"}s.`);
   return lines.join("\n");
 }
 function latestFailure(result, context) {
-  const run3 = context.runUrl ? `, in [this workflow run](${context.runUrl})` : "";
+  const run3 = context.runUrl ? `, in [this ${context.runName ?? "workflow run"}](${context.runUrl})` : "";
   const what = result.outcome === "flaky" ? "Latest retry" : "Latest failure";
   const message = result.message ? `<pre>${escapeHtml(result.message)}</pre>` : "_The report has no failure message._";
   return [`**${what}**, on commit \`${context.sha.slice(0, 12)}\`${run3}:`, "", message].join("\n");
@@ -2031,7 +2032,9 @@ async function manageFlakyIssues(suites, platform, settings, now) {
       now,
       evidenceTtlDays: EVIDENCE_TTL_DAYS,
       sha: context.sha,
-      ...runUrl ? { runUrl } : {}
+      ...runUrl ? { runUrl } : {},
+      runName: platform.text.runName,
+      pullRequest: platform.text.pullRequest
     });
     if (actions.some((action) => action.kind === "create")) {
       await client.ensureLabel(FLAKY_LABEL.name, FLAKY_LABEL.color, FLAKY_LABEL.description);
