@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-09-17
+
 ### Added
 
 - notmyfault runs in GitLab CI/CD. `dist/notmyfault.mjs`, the same code bundled in one file, reads `NOTMYFAULT_*` variables, comments on merge requests, lists failed tests in the Code Quality widget, writes its outputs as dotenv variables and its summary as an artifact, and manages flaky test issues. A template runs it in a job of its own, whatever the language of the tests ([#14](https://github.com/tashikomaaa/notmyfault/issues/14)).
@@ -81,7 +83,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - Pull request comment kept up to date, job summary with the most unreliable tests, and step outputs.
 - Quarantine mode, so that known flaky tests stop blocking merges.
 
-[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.1.0...v1.2.0
