@@ -1,7 +1,7 @@
 // src/main.ts
 import { statSync } from "node:fs";
 import { glob, readFile } from "node:fs/promises";
-import { isAbsolute, join as join2, relative, resolve } from "node:path";
+import { isAbsolute, join as join3, relative, resolve } from "node:path";
 
 // src/github/io.ts
 import { appendFileSync } from "node:fs";
@@ -268,6 +268,7 @@ function githubPlatform(env, io = new ActionIO(env)) {
     gitUser: () => "x-access-token",
     gitAuthor: { name: "github-actions[bot]", email: "41898282+github-actions[bot]@users.noreply.github.com" },
     pushOptions: [],
+    codeownersPaths: [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"],
     commitUrl: (sha) => `${context.serverUrl}/${context.repository}/commit/${sha}`,
     text: {
       pullRequest: "pull request",
@@ -1341,6 +1342,7 @@ function renderFlakyIssue(key, id, test, stats, result, context) {
     "",
     `- **Test:** ${code(result?.title ?? id)}`,
     `- **Suite:** \`${key}\``,
+    ...owners(result, context),
     `- **Verdict on ${where}:** ${verdict2(stats)}`,
     `- **Runs on ${where}:** failed ${stats.failures} of the last ${plural3(stats.runs, "run")}${retries}`,
     `- **Last failure:** ${lastFailureDay(test) ?? "unknown"}`
@@ -1354,6 +1356,10 @@ function renderFlakyIssue(key, id, test, stats, result, context) {
   if (result?.outcome === "failed" || result?.outcome === "flaky") lines.push("", latestFailure(result, context));
   lines.push("", `Until it is fixed, [quarantine mode](${QUARANTINE_URL}) keeps it from blocking ${context.pullRequest ?? "pull request"}s.`);
   return lines.join("\n");
+}
+function owners(result, context) {
+  const found = result && context.owners ? context.owners(result) : [];
+  return found.length > 0 ? [`- **Owners:** ${found.join(" ")}`] : [];
 }
 function latestFailure(result, context) {
   const run3 = context.runUrl ? `, in [this ${context.runName ?? "workflow run"}](${context.runUrl})` : "";
@@ -1806,6 +1812,74 @@ function sameFile(reference, file, workspace) {
   return relative2 !== void 0 && (relative2 === file || file.endsWith(`/${relative2}`));
 }
 
+// src/codeowners.ts
+import { readFileSync as readFileSync2 } from "node:fs";
+import { join as join2 } from "node:path";
+function parseCodeowners(text) {
+  const rules = [];
+  let section = 0;
+  let defaults = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    const header = /^\^?\[[^\]]+\](?:\[\d+\])?\s*(.*)$/.exec(line);
+    if (header) {
+      section++;
+      defaults = mentions(header[1].split(/\s+/));
+      continue;
+    }
+    const [pattern, ...owners2] = line.split(/\s+/);
+    const listed = mentions(owners2);
+    rules.push({ section, pattern: toRegExp(pattern), owners: owners2.length > 0 ? listed : defaults });
+  }
+  return rules;
+}
+function ownersOf(path, rules) {
+  const bySection = /* @__PURE__ */ new Map();
+  for (const rule of rules) if (rule.pattern.test(path)) bySection.set(rule.section, rule.owners);
+  return [...new Set([...bySection.values()].flat())];
+}
+function readCodeowners(workspace, paths) {
+  for (const path of paths) {
+    try {
+      return { path, rules: parseCodeowners(readFileSync2(join2(workspace, path), "utf8")) };
+    } catch {
+    }
+  }
+  return void 0;
+}
+function mentions(tokens) {
+  return tokens.filter((token) => /^@[\w.\-/]+$/.test(token));
+}
+function toRegExp(pattern) {
+  const anchored = pattern.startsWith("/") || pattern.slice(0, -1).includes("/");
+  const directory = pattern.endsWith("/");
+  let body = pattern.replace(/^\//, "").replace(/\/$/, "");
+  const shallow = /(^|\/)\*$/.test(body);
+  let source = "";
+  for (let i = 0; i < body.length; i++) {
+    const char = body[i];
+    if (char === "*" && body[i + 1] === "*") {
+      if (body[i + 2] === "/") {
+        source += "(?:.*/)?";
+        i += 2;
+      } else {
+        source += ".*";
+        i++;
+      }
+    } else if (char === "*") {
+      source += "[^/]*";
+    } else if (char === "?") {
+      source += "[^/]";
+    } else {
+      source += char.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    }
+  }
+  body = source;
+  const end = directory ? "/" : shallow ? "$" : "(?:$|/)";
+  return new RegExp(`^${anchored ? "" : "(?:.*/)?"}${body}${end}`);
+}
+
 // src/main.ts
 var EVIDENCE_TTL_DAYS = 30;
 var RETENTION_DAYS = 90;
@@ -2009,6 +2083,7 @@ function readSettings(platform) {
     missingTests: io.booleanInput("missing-tests", true),
     ...io.booleanInput("check", false) ? { check: io.input("check-name", "notmyfault") } : {},
     rerunFlaky: io.booleanInput("rerun-flaky", false),
+    mentionOwners: io.booleanInput("mention-owners", false),
     record: io.booleanInput("record", true),
     window: io.integerInput("window", 50, 5)
   };
@@ -2080,7 +2155,7 @@ async function findFiles(patterns, workspace) {
   return [...found].sort();
 }
 function annotate(failures, context, workspace, io, noticesAlready) {
-  const isFile = (path) => statSync(join2(workspace, path), { throwIfNoEntry: false })?.isFile() ?? false;
+  const isFile = (path) => statSync(join3(workspace, path), { throwIfNoEntry: false })?.isFile() ?? false;
   const emitted = { error: 0, notice: noticesAlready };
   for (const failure of failures) {
     const level = (failure.verdict === "new" || failure.verdict === "suspect") && !failure.quarantined ? "error" : "notice";
@@ -2183,7 +2258,8 @@ async function manageFlakyIssues(suites, platform, settings, now) {
       sha: context.sha,
       ...runUrl ? { runUrl } : {},
       runName: platform.text.runName,
-      pullRequest: platform.text.pullRequest
+      pullRequest: platform.text.pullRequest,
+      ...settings.mentionOwners ? codeOwners(platform) : {}
     });
     if (actions.some((action) => action.kind === "create")) {
       await client.ensureLabel(FLAKY_LABEL.name, FLAKY_LABEL.color, FLAKY_LABEL.description);
@@ -2212,6 +2288,21 @@ async function manageFlakyIssues(suites, platform, settings, now) {
     const hint = error instanceof ApiError && error.denied ? ` ${platform.text.issuesDenied}` : "";
     io.warning(`Could not update flaky test issues.${hint} ${errorMessage(error)}`);
   }
+}
+function codeOwners(platform) {
+  const { context, io } = platform;
+  const codeowners = readCodeowners(context.workspace, platform.codeownersPaths);
+  if (!codeowners) {
+    io.info(`No CODEOWNERS file in ${platform.codeownersPaths.join(", ")}: flaky test issues mention no owners.`);
+    return {};
+  }
+  const isFile = (path) => statSync(join3(context.workspace, path), { throwIfNoEntry: false })?.isFile() ?? false;
+  return {
+    owners: (result) => {
+      const location = locate(result, context.workspace, isFile);
+      return location ? ownersOf(location.file, codeowners.rules) : [];
+    }
+  };
 }
 async function comment(platform, settings, body, create) {
   const { context, io, text } = platform;

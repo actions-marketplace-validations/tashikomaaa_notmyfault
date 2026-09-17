@@ -23,6 +23,7 @@ export function gitlabPlatform(env: NodeJS.ProcessEnv, io: Io = new GitLabIO(env
     gitAuthor: { name: "notmyfault", email: `notmyfault@noreply.${new URL(context.serverUrl).hostname || "gitlab.com"}` },
     // History pushes have no pipeline to run.
     pushOptions: ["ci.skip"],
+    codeownersPaths: ["CODEOWNERS", "docs/CODEOWNERS", ".gitlab/CODEOWNERS"],
     commitUrl: (sha) => `${context.serverUrl}/${context.repository}/-/commit/${sha}`,
     text: {
       pullRequest: "merge request",

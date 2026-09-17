@@ -14,6 +14,7 @@ export function githubPlatform(env: NodeJS.ProcessEnv, io: Io = new ActionIO(env
     gitUser: () => "x-access-token",
     gitAuthor: { name: "github-actions[bot]", email: "41898282+github-actions[bot]@users.noreply.github.com" },
     pushOptions: [],
+    codeownersPaths: [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"],
     commitUrl: (sha) => `${context.serverUrl}/${context.repository}/commit/${sha}`,
     text: {
       pullRequest: "pull request",

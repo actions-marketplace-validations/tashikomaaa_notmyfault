@@ -44,6 +44,9 @@ inputs:
   flaky-issues:
     description: Open an issue for each flaky test, keep it up to date and close it once the test stops failing. Needs the issues write permission.
     default: "false"
+  mention-owners:
+    description: Mention the owners of each flaky test, from CODEOWNERS, in its issue.
+    default: "false"
   missing-tests:
     description: Report tests that ran in the latest run on a tracked branch but are missing from this run.
     default: "true"

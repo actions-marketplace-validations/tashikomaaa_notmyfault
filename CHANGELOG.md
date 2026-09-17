@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 - `check: true` reports each run as a check of its own, named by `check-name`, failing only on failures not covered by `tolerate`: branch protection can require it instead of the job, without quarantine mode or `continue-on-error`. It needs the `checks: write` permission ([#19](https://github.com/tashikomaaa/notmyfault/issues/19)).
 - On GitLab, `NOTMYFAULT_RERUN_FLAKY: "true"` starts a new pipeline for the commit when only flaky tests stand in the way, once per commit, and says so in the comment ([#18](https://github.com/tashikomaaa/notmyfault/issues/18)).
+- `mention-owners: true` mentions the owners of each flaky test, from CODEOWNERS, GitLab sections included, in its issue ([#17](https://github.com/tashikomaaa/notmyfault/issues/17)).
 
 ## [1.6.0] - 2026-09-17
 

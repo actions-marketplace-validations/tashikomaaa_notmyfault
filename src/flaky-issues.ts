@@ -35,6 +35,8 @@ export interface IssueContext {
   runName?: string;
   /** "pull request" by default, "merge request" on GitLab. */
   pullRequest?: string;
+  /** The owners to mention in the issue of a test that ran, from CODEOWNERS. */
+  owners?: (result: TestResult) => string[];
 }
 
 export type IssueAction =
@@ -147,6 +149,7 @@ function renderFlakyIssue(
     "",
     `- **Test:** ${code(result?.title ?? id)}`,
     `- **Suite:** \`${key}\``,
+    ...owners(result, context),
     `- **Verdict on ${where}:** ${verdict(stats)}`,
     `- **Runs on ${where}:** failed ${stats.failures} of the last ${plural(stats.runs, "run")}${retries}`,
     `- **Last failure:** ${lastFailureDay(test) ?? "unknown"}`,
@@ -162,6 +165,11 @@ function renderFlakyIssue(
   if (result?.outcome === "failed" || result?.outcome === "flaky") lines.push("", latestFailure(result, context));
   lines.push("", `Until it is fixed, [quarantine mode](${QUARANTINE_URL}) keeps it from blocking ${context.pullRequest ?? "pull request"}s.`);
   return lines.join("\n");
+}
+
+function owners(result: TestResult | undefined, context: IssueContext): string[] {
+  const found = result && context.owners ? context.owners(result) : [];
+  return found.length > 0 ? [`- **Owners:** ${found.join(" ")}`] : [];
 }
 
 function latestFailure(result: TestResult, context: IssueContext): string {

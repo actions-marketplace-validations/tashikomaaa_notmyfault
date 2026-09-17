@@ -23,6 +23,7 @@ import { applyRenames, detectRenames, type Rename } from "./renames";
 import { emptyHistory, FAIL, parseHistory, recordRun, serializeHistory, type History, type RecordOptions } from "./history";
 import { combineReports, parseJUnit, type TestResult } from "./junit";
 import { locate } from "./locate";
+import { ownersOf, readCodeowners } from "./codeowners";
 import {
   commentMarker,
   duration,
@@ -83,6 +84,7 @@ export interface Settings {
   /** Name of the check to report the run as, if any. */
   check?: string;
   rerunFlaky: boolean;
+  mentionOwners: boolean;
   record: boolean;
   window: number;
 }
@@ -302,6 +304,7 @@ export function readSettings(platform: Platform): Settings {
     missingTests: io.booleanInput("missing-tests", true),
     ...(io.booleanInput("check", false) ? { check: io.input("check-name", "notmyfault") } : {}),
     rerunFlaky: io.booleanInput("rerun-flaky", false),
+    mentionOwners: io.booleanInput("mention-owners", false),
     record: io.booleanInput("record", true),
     window: io.integerInput("window", 50, 5),
   };
@@ -518,6 +521,7 @@ async function manageFlakyIssues(suites: Suite[], platform: Platform, settings: 
       ...(runUrl ? { runUrl } : {}),
       runName: platform.text.runName,
       pullRequest: platform.text.pullRequest,
+      ...(settings.mentionOwners ? codeOwners(platform) : {}),
     });
     if (actions.some((action) => action.kind === "create")) {
       await client.ensureLabel(FLAKY_LABEL.name, FLAKY_LABEL.color, FLAKY_LABEL.description);
@@ -546,6 +550,23 @@ async function manageFlakyIssues(suites: Suite[], platform: Platform, settings: 
     const hint = error instanceof ApiError && error.denied ? ` ${platform.text.issuesDenied}` : "";
     io.warning(`Could not update flaky test issues.${hint} ${errorMessage(error)}`);
   }
+}
+
+/** Who owns the file of a test, from the CODEOWNERS file of the workspace. */
+function codeOwners(platform: Platform): { owners?: (result: TestResult) => string[] } {
+  const { context, io } = platform;
+  const codeowners = readCodeowners(context.workspace, platform.codeownersPaths);
+  if (!codeowners) {
+    io.info(`No CODEOWNERS file in ${platform.codeownersPaths.join(", ")}: flaky test issues mention no owners.`);
+    return {};
+  }
+  const isFile = (path: string) => statSync(join(context.workspace, path), { throwIfNoEntry: false })?.isFile() ?? false;
+  return {
+    owners: (result) => {
+      const location = locate(result, context.workspace, isFile);
+      return location ? ownersOf(location.file, codeowners.rules) : [];
+    },
+  };
 }
 
 async function comment(platform: Platform, settings: Settings, body: string, create: boolean): Promise<void> {

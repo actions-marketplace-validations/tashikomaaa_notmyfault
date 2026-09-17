@@ -24,6 +24,7 @@
 | [`comment`](#comment) | `true` | Comment on pull requests |
 | [`annotations`](#annotations) | `true` | Annotate failed tests next to their code |
 | [`flaky-issues`](#flaky-issues) | `false` | Open an issue for each flaky test |
+| [`mention-owners`](#mention-owners) | `false` | Mention the owners of each flaky test in its issue |
 | [`missing-tests`](#missing-tests) | `true` | Report tests of the latest tracked run missing from this run |
 | [`check`](#check) | `false` | Report the run as a check of its own |
 | [`check-name`](#check-name) | `notmyfault` | Name of that check |
@@ -135,6 +136,16 @@ permissions:
 - After 30 days without a failure on a tracked branch, or when the test leaves the history, the issue is closed with a comment.
 
 Pull request runs never touch issues. Assign, discuss and label the issues as you like: notmyfault only rewrites their description. See [How it works](how-it-works.md#flaky-test-issues).
+
+### `mention-owners`
+
+With [`flaky-issues`](#flaky-issues), when `true`, each flaky test issue mentions the owners of the test file, from the `CODEOWNERS` file of the repository:
+
+> - **Owners:** @acme/payments @ana
+
+The file is looked for where the platform does: `.github/CODEOWNERS`, `CODEOWNERS` and `docs/CODEOWNERS` on GitHub, `CODEOWNERS`, `docs/CODEOWNERS` and `.gitlab/CODEOWNERS` on GitLab, including GitLab sections. The owners of a file are those of the last pattern matching it. Only owners that can be mentioned, starting with `@`, are listed, users and teams alike.
+
+The test file is found the way [annotations](verdicts.md#annotations) find it, from the report. Mentions notify people, which is why it is off by default: owners are notified when the issue is created, not again on each update.
 
 ### `missing-tests`
 

@@ -512,6 +512,24 @@ describe("run", () => {
     ]);
   });
 
+  it("mentions the owners of a flaky test in its issue, from CODEOWNERS", async () => {
+    mkdirSync(join(root, "workspace", ".github"));
+    writeFileSync(join(root, "workspace", ".github", "CODEOWNERS"), "* @acme/everyone\ncheckout.test.ts @acme/payments @ana\n");
+    writeFileSync(join(root, "workspace", "checkout.test.ts"), "");
+    // Proven flaky by a re-run, then failing again: its issue is created from a report telling where the test lives.
+    await simulate({ pays: "fail: at checkout.test.ts:12:5" }, { sha: "c".repeat(40) });
+    await simulate({ pays: "pass" }, { sha: "c".repeat(40) });
+    const inputs = { "flaky-issues": "true", "mention-owners": "true" };
+    await simulate({ pays: "fail: at checkout.test.ts:12:5" }, { inputs });
+    expect(api.issues[0]!.body).toContain("- **Suite:** `ci-test`\n- **Owners:** @acme/payments @ana\n");
+
+    // No CODEOWNERS: no owners, and the log says why.
+    rmSync(join(root, "workspace", ".github"), { recursive: true });
+    const without = await simulate({ pays: "fail: at checkout.test.ts:12:5" }, { inputs });
+    expect(without.logs).toContain("No CODEOWNERS file in .github/CODEOWNERS, CODEOWNERS, docs/CODEOWNERS: flaky test issues mention no owners.");
+    expect(api.issues[0]!.body).not.toContain("Owners");
+  });
+
   it("warns and carries on when issues cannot be written", async () => {
     await simulate({ pays: "fail" }, { sha: "d".repeat(40) });
     api.status = 403;

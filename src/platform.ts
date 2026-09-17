@@ -139,6 +139,8 @@ export interface Platform {
   gitAuthor: { name: string; email: string };
   /** Link to a commit of the repository. */
   commitUrl(sha: string): string;
+  /** Where the platform looks for a CODEOWNERS file, in order. */
+  codeownersPaths: string[];
   /** Options sent with history pushes. */
   pushOptions: string[];
   text: PlatformText;
