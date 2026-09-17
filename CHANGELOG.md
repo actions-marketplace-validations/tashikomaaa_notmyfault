@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-09-17
+
 ### Added
 
 - notmyfault runs in Forgejo and Gitea Actions: the same action detects them, uses their API for comments, flaky test issues and the pull request of a commit, looks for CODEOWNERS where they do, and leaves out checks, which they do not have ([#21](https://github.com/tashikomaaa/notmyfault/issues/21)).
@@ -105,7 +107,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - Pull request comment kept up to date, job summary with the most unreliable tests, and step outputs.
 - Quarantine mode, so that known flaky tests stop blocking merges.
 
-[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.4.0...v1.5.0
