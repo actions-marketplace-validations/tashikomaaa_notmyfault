@@ -129,7 +129,7 @@ export interface PlatformText {
 }
 
 export interface Platform {
-  name: "github" | "gitlab";
+  name: "github" | "gitlab" | "forgejo";
   context: RunContext;
   io: Io;
   forge(token: string): Forge;

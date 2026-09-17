@@ -287,6 +287,109 @@ function githubPlatform(env, io = new ActionIO(env)) {
   };
 }
 
+// src/forgejo/api.ts
+var ForgejoClient = class {
+  constructor(token, apiUrl, repository) {
+    this.token = token;
+    this.apiUrl = apiUrl;
+    this.repository = repository;
+  }
+  token;
+  apiUrl;
+  repository;
+  async upsertComment(issue, marker, body, create) {
+    const comments = await this.list(`/repos/${this.repository}/issues/${issue}/comments?limit=50`);
+    const existing = comments.find((comment2) => comment2.body?.startsWith(marker));
+    if (existing) {
+      await this.request("PATCH", `/repos/${this.repository}/issues/comments/${existing.id}`, { body });
+      return "updated";
+    }
+    if (!create) return "skipped";
+    await this.addComment(issue, body);
+    return "created";
+  }
+  async addComment(issue, body) {
+    await this.request("POST", `/repos/${this.repository}/issues/${issue}/comments`, { body });
+  }
+  async listIssues(label) {
+    const items = await this.list(`/repos/${this.repository}/issues?labels=${encodeURIComponent(label)}&state=all&type=issues&limit=50`);
+    return items.map((item) => ({ number: item.number, state: item.state, body: item.body ?? "" }));
+  }
+  async createIssue(title, body, labels) {
+    const known = await this.labels();
+    const ids = labels.map((name) => known.find((label) => label.name === name)?.id).filter((id) => id !== void 0);
+    const response = await this.request("POST", `/repos/${this.repository}/issues`, { title, body, labels: ids });
+    return (await response.json()).number;
+  }
+  async updateIssue(issue, changes) {
+    await this.request("PATCH", `/repos/${this.repository}/issues/${issue}`, changes);
+  }
+  async ensureLabel(name, color, description) {
+    if ((await this.labels()).some((label) => label.name === name)) return;
+    await this.request("POST", `/repos/${this.repository}/labels`, { name, color: `#${color}`, description });
+  }
+  async changeOf(sha) {
+    try {
+      const response = await this.request("GET", `/repos/${this.repository}/commits/${sha}/pull`);
+      const pull = await response.json();
+      return pull.merged ? { number: pull.number, url: pull.html_url } : void 0;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return void 0;
+      throw error;
+    }
+  }
+  async labels() {
+    return this.list(`/repos/${this.repository}/labels?limit=50`);
+  }
+  async list(path) {
+    const items = [];
+    let next = path;
+    while (next) {
+      const response = await this.request("GET", next);
+      items.push(...await response.json());
+      const link = response.headers.get("link")?.match(/<([^>]+)>;\s*rel="next"/)?.[1];
+      next = link?.startsWith(this.apiUrl) ? link.slice(this.apiUrl.length) : void 0;
+    }
+    return items;
+  }
+  async request(method, path, body) {
+    const response = await fetch(`${this.apiUrl}${path}`, {
+      method,
+      headers: {
+        Accept: "application/json",
+        Authorization: `token ${this.token}`,
+        "User-Agent": "notmyfault",
+        ...body === void 0 ? {} : { "Content-Type": "application/json" }
+      },
+      ...body === void 0 ? {} : { body: JSON.stringify(body) }
+    });
+    if (!response.ok) throw new ApiError(response.status, path, await response.text(), "Forgejo");
+    return response;
+  }
+};
+
+// src/forgejo/platform.ts
+function forgejoPlatform(env, io = new ActionIO(env)) {
+  const github = githubPlatform(env, io);
+  const { context } = github;
+  return {
+    ...github,
+    name: "forgejo",
+    forge: (token) => new ForgejoClient(token, context.apiUrl, context.apiProject),
+    gitAuthor: { name: "notmyfault", email: `notmyfault@noreply.${new URL(context.serverUrl).hostname || "localhost"}` },
+    codeownersPaths: [".forgejo/CODEOWNERS", ".gitea/CODEOWNERS", "docs/CODEOWNERS", "CODEOWNERS"],
+    text: {
+      ...github.text,
+      recordDenied: "Can the token push to the repository? Branch protection rules matching the history branch reject its pushes.",
+      commentDenied: "Can the token comment on pull requests?",
+      commentFromFork: "Tokens are read-only on pull requests from forks; the job summary has the full report.",
+      issuesDenied: "Can the token write issues?"
+    },
+    // No workflow_run event to re-run jobs from.
+    rerunNotice: false
+  };
+}
+
 // src/history.ts
 import { createHash } from "node:crypto";
 var HISTORY_VERSION = 1;
@@ -2349,7 +2452,7 @@ async function rerun(platform, settings) {
   const forge = platform.forge(settings.token);
   if (!forge.rerun) {
     io.warning(
-      `${io.describeInput("rerun-flaky")} is ignored: a job cannot re-run its own workflow run on GitHub. Use a companion workflow instead: https://github.com/tashikomaaa/notmyfault/blob/main/docs/recipes.md#re-run-flaky-failures-automatically`
+      `${io.describeInput("rerun-flaky")} is ignored: only GitLab lets a job start its pipeline again. On GitHub, use a companion workflow instead: https://github.com/tashikomaaa/notmyfault/blob/main/docs/recipes.md#re-run-flaky-failures-automatically`
     );
     return void 0;
   }
@@ -2372,7 +2475,7 @@ async function reportCheck(name, platform, settings, output, success) {
   const { context, io, text } = platform;
   const forge = platform.forge(settings.token);
   if (!forge.createCheck) {
-    io.warning(`${io.describeInput("check")} is ignored: checks only exist on GitHub. The notmyfault job is the check here.`);
+    io.warning(`${io.describeInput("check")} is ignored: checks only exist on GitHub. The notmyfault job or step is the check here.`);
     return;
   }
   if (context.pullRequest?.fromFork) {
@@ -2690,6 +2793,7 @@ function gitlabPlatform(env, io = new GitLabIO(env)) {
 // src/platforms.ts
 function detectPlatform(env) {
   if (env.GITLAB_CI === "true") return gitlabPlatform(env);
+  if (env.FORGEJO_ACTIONS === "true" || env.GITEA_ACTIONS === "true") return forgejoPlatform(env);
   if (env.GITHUB_ACTIONS === "true") return githubPlatform(env);
   throw new Error("notmyfault runs in GitHub Actions or GitLab CI/CD: neither GITHUB_ACTIONS nor GITLAB_CI is set.");
 }

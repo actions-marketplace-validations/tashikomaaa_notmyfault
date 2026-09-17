@@ -44,6 +44,7 @@ npm run check   # typecheck, build dist/ and run all tests
 | `src/report.ts` | Pull request comment and job summary rendering |
 | `src/git-store.ts` | Reading and writing the history branch |
 | `src/github/` | GitHub Actions: environment and event payload, inputs and outputs without `@actions/core`, REST API client |
+| `src/forgejo/` | Forgejo and Gitea Actions: the GitHub Action, with their own API client |
 | `src/gitlab/` | GitLab CI/CD: predefined variables, `NOTMYFAULT_*` variables, dotenv and Code Quality reports, REST API client |
 | `templates/` | The GitLab CI/CD template |
 | `test/` | Unit tests, JUnit fixtures and end-to-end tests |

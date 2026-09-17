@@ -91,7 +91,7 @@ The run was analyzed but not recorded. The end of the message contains the git e
 
 [`check`](configuration.md#check) is on, but the token cannot create checks. Add `checks: write` to the job permissions. If branch protection requires the check, pull requests wait until it reports.
 
-### `Input "rerun-flaky" is ignored: a job cannot re-run its own workflow run on GitHub.`
+### `Input "rerun-flaky" is ignored: only GitLab lets a job start its pipeline again.`
 
 [`rerun-flaky`](configuration.md#rerun-flaky) only works on GitLab. On GitHub, remove it and add the [companion workflow](recipes.md#re-run-flaky-failures-automatically).
 

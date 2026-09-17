@@ -38,7 +38,7 @@ notmyfault is a GitHub Action, also available for [GitLab CI/CD](docs/gitlab.md)
 - **Stop flaky tests from blocking merges.** [Quarantine mode](docs/quarantine.md) fails the check only for failures that look real.
 - **Get them fixed.** An [issue per flaky test](docs/configuration.md#flaky-issues), a [badge](docs/recipes.md#show-a-flaky-tests-badge), a [report you can publish](docs/recipes.md#publish-the-history-with-github-pages), and [automatic re-runs](docs/recipes.md#re-run-flaky-failures-automatically).
 - **Nothing to host.** No server, no account, no SaaS: the history lives on a branch of your own repository.
-- **GitHub or GitLab.** The same verdicts in merge requests, with the Code Quality widget, from a [GitLab CI/CD template](docs/gitlab.md).
+- **GitHub, GitLab, Forgejo or Gitea.** The same verdicts in merge requests, with the Code Quality widget, from a [GitLab CI/CD template](docs/gitlab.md), and in [Forgejo and Gitea Actions](docs/forgejo.md).
 - **Nothing to audit but this repository.** Zero runtime dependencies, one bundled file, rebuilt and verified by CI.
 - **Any test runner.** Everything that writes JUnit XML: Vitest, Jest, pytest, Go, Maven, Gradle, cargo-nextest, Playwright, PHPUnit, RSpec, .NET…
 
@@ -100,7 +100,7 @@ Every rule and threshold is documented in [Reading the report](docs/verdicts.md)
 
 | | |
 |---|---|
-| **Guides** | [Getting started](docs/getting-started.md) · [GitLab CI/CD](docs/gitlab.md) · [Quarantine flaky tests](docs/quarantine.md) · [Test runners](docs/test-runners.md) · [Recipes](docs/recipes.md) |
+| **Guides** | [Getting started](docs/getting-started.md) · [GitLab CI/CD](docs/gitlab.md) · [Forgejo and Gitea](docs/forgejo.md) · [Quarantine flaky tests](docs/quarantine.md) · [Test runners](docs/test-runners.md) · [Recipes](docs/recipes.md) |
 | **Reference** | [Reading the report](docs/verdicts.md) · [Configuration](docs/configuration.md) · [How it works](docs/how-it-works.md) · [Permissions and security](docs/security.md) |
 | **Help** | [Troubleshooting](docs/troubleshooting.md) · [FAQ](docs/faq.md) |
 

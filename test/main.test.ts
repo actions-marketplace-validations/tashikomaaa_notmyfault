@@ -562,7 +562,7 @@ describe("run", () => {
     const result = await simulate({ pays: "fail" }, { event: "pull_request", inputs: { "rerun-flaky": "true" } });
     expect(result.code).toBe(0);
     expect(result.logs).toContain(
-      '::warning::Input "rerun-flaky" is ignored: a job cannot re-run its own workflow run on GitHub. Use a companion workflow instead',
+      '::warning::Input "rerun-flaky" is ignored: only GitLab lets a job start its pipeline again. On GitHub, use a companion workflow instead',
     );
   });
 

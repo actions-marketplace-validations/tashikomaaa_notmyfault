@@ -365,7 +365,7 @@ describe("runOn GitLab", () => {
   it("ignores checks, which GitLab does not have", async () => {
     const result = await simulate({ ok: "pass" }, { variables: { check: "true" } });
     expect(result.code).toBe(0);
-    expect(result.logs).toContain("Warning: Variable NOTMYFAULT_CHECK is ignored: checks only exist on GitHub. The notmyfault job is the check here.");
+    expect(result.logs).toContain("Warning: Variable NOTMYFAULT_CHECK is ignored: checks only exist on GitHub. The notmyfault job or step is the check here.");
   });
 
   it("names variables in errors", async () => {

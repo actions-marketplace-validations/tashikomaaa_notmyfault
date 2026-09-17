@@ -230,7 +230,7 @@ The last failure is `lastFailure`, or the date of the latest proof of flakiness 
 
 ## Limits
 
-- **GitHub Actions and GitLab CI/CD** are supported. On GitLab, a few things work differently, see [Differences with GitHub](gitlab.md#differences-with-github).
+- **GitHub Actions, GitLab CI/CD, Forgejo and Gitea Actions** are supported, see [Forgejo and Gitea Actions](forgejo.md) for the latter. On GitLab, a few things work differently, see [Differences with GitHub](gitlab.md#differences-with-github).
 - **Names are identities**: tests moved to another file or suite start over, renames are only followed when unambiguous, tests with dynamic names are not followed, and two test cases sharing a name inside one suite are read as attempts of the same test.
 - **Retries** are only visible when the runner reports them, see [Test runners](test-runners.md#detecting-retries).
 - **One comment per step.** Jobs sharing a key overwrite each other's comment. Collect their reports in one job instead, with [`suites`](configuration.md#suites) when they need separate histories, see [Recipes](recipes.md#sharded-tests).

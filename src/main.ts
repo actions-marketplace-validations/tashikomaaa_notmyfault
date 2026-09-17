@@ -2,6 +2,7 @@ import { statSync } from "node:fs";
 import { glob, readFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { ActionIO } from "./github/io";
+import { forgejoPlatform } from "./forgejo/platform";
 import { githubPlatform } from "./github/platform";
 import {
   analyze,
@@ -89,11 +90,11 @@ export interface Settings {
   window: number;
 }
 
-/** Runs the GitHub Action and resolves to the process exit code. */
+/** Runs the action, on GitHub, Forgejo or Gitea, and resolves to the process exit code. */
 export async function run(env: NodeJS.ProcessEnv = process.env, io: Io = new ActionIO(env), now = new Date()): Promise<number> {
   let platform: Platform;
   try {
-    platform = githubPlatform(env, io);
+    platform = env.FORGEJO_ACTIONS === "true" || env.GITEA_ACTIONS === "true" ? forgejoPlatform(env, io) : githubPlatform(env, io);
   } catch (error) {
     io.error(errorMessage(error));
     return 1;
@@ -598,7 +599,7 @@ async function rerun(platform: Platform, settings: Settings): Promise<string | u
   const forge = platform.forge(settings.token);
   if (!forge.rerun) {
     io.warning(
-      `${io.describeInput("rerun-flaky")} is ignored: a job cannot re-run its own workflow run on GitHub. Use a companion workflow instead: https://github.com/tashikomaaa/notmyfault/blob/main/docs/recipes.md#re-run-flaky-failures-automatically`,
+      `${io.describeInput("rerun-flaky")} is ignored: only GitLab lets a job start its pipeline again. On GitHub, use a companion workflow instead: https://github.com/tashikomaaa/notmyfault/blob/main/docs/recipes.md#re-run-flaky-failures-automatically`,
     );
     return undefined;
   }
@@ -630,7 +631,7 @@ async function reportCheck(
   const { context, io, text } = platform;
   const forge = platform.forge(settings.token);
   if (!forge.createCheck) {
-    io.warning(`${io.describeInput("check")} is ignored: checks only exist on GitHub. The notmyfault job is the check here.`);
+    io.warning(`${io.describeInput("check")} is ignored: checks only exist on GitHub. The notmyfault job or step is the check here.`);
     return;
   }
   if (context.pullRequest?.fromFork) {
