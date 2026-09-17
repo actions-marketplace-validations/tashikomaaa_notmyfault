@@ -129,16 +129,26 @@ export function renderSuitesSummary(suites: SuiteReport[], context: ReportContex
       );
     }
     if (suite.ranking?.length) {
+      const costs = suite.ranking.some((t) => t.cost !== undefined);
+      const total = suite.ranking.reduce((sum, t) => sum + (t.cost ?? 0), 0);
+      const costing = total > 0 ? `, costing about ${duration(total)} of test time` : "";
       lines.push(
         "",
-        `<details><summary>Most unreliable tests${of} on ${branches(context)}</summary>`,
+        `<details><summary>Most unreliable tests${of} on ${branches(context)}${costing}</summary>`,
         "",
-        "| Test | Failed runs | Passed on retry | Proven flaky |",
-        "|---|--:|--:|:-:|",
+        `| Test | Failed runs | Passed on retry | Proven flaky |${costs ? " Estimated cost |" : ""}`,
+        `|---|--:|--:|:-:|${costs ? "--:|" : ""}`,
         ...suite.ranking.map(
-          (t) => `| ${code(t.id)} | ${t.failures} / ${t.runs} | ${t.retries} | ${t.confirmed ? "yes" : "probably"} |`,
+          (t) =>
+            `| ${code(t.id)} | ${t.failures} / ${t.runs} | ${t.retries} | ${t.confirmed ? "yes" : "probably"} |${costs ? ` ${t.cost === undefined ? "" : duration(t.cost)} |` : ""}`,
         ),
         "",
+        ...(costs
+          ? [
+              `_Each failure counts as a re-run of the suite, each retry as another run of the test, at their median durations. See [Cost of unreliable tests](${PROJECT_URL}/blob/main/docs/verdicts.md#cost-of-unreliable-tests)._`,
+              "",
+            ]
+          : []),
         "</details>",
       );
     }
@@ -399,8 +409,11 @@ function renderSlower(slower: SlowerTest[], context: ReportContext): string[] {
 export function duration(ms: number): string {
   if (ms < 1000) return `${ms} ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
-  const minutes = Math.floor(ms / 60_000);
-  return `${minutes} min ${Math.round((ms - minutes * 60_000) / 1000)} s`;
+  // Rounded first, so that 119.7 s reads 2 min 0 s, not 1 min 60 s.
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
+  const minutes = Math.round(ms / 60_000);
+  return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }
 
 function footer(retried: TestResult[], context: ReportContext): string {

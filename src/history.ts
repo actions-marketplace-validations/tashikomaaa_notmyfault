@@ -55,6 +55,8 @@ export interface History {
   updatedAt: string;
   /** Number of tracked-branch runs recorded so far. */
   runs: number;
+  /** Total duration in milliseconds of the tests of the last runs on tracked branches, oldest first. */
+  runDurations?: number[];
   tests: Record<string, TestHistory>;
 }
 
@@ -111,6 +113,7 @@ export function parseHistory(json: string | undefined): History {
       version: HISTORY_VERSION,
       updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : emptyHistory().updatedAt,
       runs: typeof data.runs === "number" ? data.runs : 0,
+      ...(Array.isArray(data.runDurations) ? { runDurations: data.runDurations.filter((ms) => typeof ms === "number") } : {}),
       tests: data.tests,
     };
   } catch {
@@ -185,7 +188,14 @@ export function recordRun(history: History, results: TestResult[], options: Reco
     }
   }
 
-  if (options.tracked) history.runs += 1;
+  if (options.tracked) {
+    history.runs += 1;
+    const timed = results.filter((result) => result.outcome !== "skipped" && result.duration !== undefined);
+    if (timed.length > 0) {
+      const total = timed.reduce((sum, result) => sum + result.duration!, 0);
+      history.runDurations = [...(history.runDurations ?? []), total].slice(-MAX_DURATIONS);
+    }
+  }
   changed = prune(history, options) || changed;
   if (changed) history.updatedAt = options.now.toISOString();
   return changed;

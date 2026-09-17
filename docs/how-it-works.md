@@ -85,6 +85,7 @@ The branch always holds **a single commit without parent**, authored by `github-
  "version": 1,
  "updatedAt": "2026-09-16T10:04:12.000Z",
  "runs": 128,
+ "runDurations": [81250, 79880, 84120],
  "tests": {
   "unit › checkout › pays": {
    "outcomes": "pppfpppppprpppfppp",
@@ -114,6 +115,7 @@ The branch always holds **a single commit without parent**, authored by `github-
 | Field | Meaning |
 |---|---|
 | `runs` | Runs recorded on tracked branches |
+| `runDurations` | Total test time of the last 10 runs on tracked branches, in milliseconds, when reports give durations, to estimate the [cost of unreliable tests](verdicts.md#cost-of-unreliable-tests) |
 | `outcomes` | One letter per run on a tracked branch, oldest first: `p` passed, `f` failed, `r` passed after a retry. Only the last `window` runs are kept (50 by default). |
 | `failedOn` | The last 20 commits the test failed on, on any branch, as 12-character SHA prefixes |
 | `evidence` | Up to 10 proofs of flakiness: `retry` (passed after a retry in the same run) or `rerun` (passed on a commit it had failed on) |

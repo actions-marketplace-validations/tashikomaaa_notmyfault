@@ -317,6 +317,7 @@ function parseHistory(json) {
       version: HISTORY_VERSION,
       updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : emptyHistory().updatedAt,
       runs: typeof data.runs === "number" ? data.runs : 0,
+      ...Array.isArray(data.runDurations) ? { runDurations: data.runDurations.filter((ms) => typeof ms === "number") } : {},
       tests: data.tests
     };
   } catch {
@@ -377,7 +378,14 @@ function recordRun(history, results, options) {
       changed = true;
     }
   }
-  if (options.tracked) history.runs += 1;
+  if (options.tracked) {
+    history.runs += 1;
+    const timed = results.filter((result) => result.outcome !== "skipped" && result.duration !== void 0);
+    if (timed.length > 0) {
+      const total = timed.reduce((sum, result) => sum + result.duration, 0);
+      history.runDurations = [...history.runDurations ?? [], total].slice(-MAX_DURATIONS);
+    }
+  }
   changed = prune(history, options) || changed;
   if (changed) history.updatedAt = options.now.toISOString();
   return changed;
@@ -541,10 +549,20 @@ function rankFlakyTests(history, now, evidenceTtlDays, limit) {
   const ranked = [];
   for (const [id, test] of Object.entries(history.tests)) {
     const stats = computeStats(test, now, evidenceTtlDays);
-    if (stats.confirmed || stats.isolatedFailures >= LIKELY_FLAKY_ISOLATED_FAILURES) ranked.push({ id, ...stats });
+    if (!stats.confirmed && stats.isolatedFailures < LIKELY_FLAKY_ISOLATED_FAILURES) continue;
+    const cost = estimateCost(test, history);
+    ranked.push(cost === void 0 ? { id, ...stats } : { id, ...stats, cost });
   }
   const score2 = (t) => (t.failures + t.retries) / Math.max(t.runs, 1) + (t.confirmed ? 1 : 0);
-  return ranked.sort((a, b) => score2(b) - score2(a) || a.id.localeCompare(b.id)).slice(0, limit);
+  return ranked.sort((a, b) => (b.cost ?? -1) - (a.cost ?? -1) || score2(b) - score2(a) || a.id.localeCompare(b.id)).slice(0, limit);
+}
+function estimateCost(test, history) {
+  const failures = count(test.outcomes, FAIL);
+  const retries = count(test.outcomes, RETRY);
+  const suite = history.runDurations?.length ? median(history.runDurations) : void 0;
+  const own = test.durations?.length ? median(test.durations) : void 0;
+  if (failures > 0 && suite === void 0 || retries > 0 && own === void 0) return void 0;
+  return failures * (suite ?? 0) + retries * (own ?? 0);
 }
 function brokenStreak(failureRate) {
   let streak = MIN_BROKEN_STREAK;
@@ -834,16 +852,23 @@ function renderSuitesSummary(suites, context) {
       );
     }
     if (suite.ranking?.length) {
+      const costs = suite.ranking.some((t) => t.cost !== void 0);
+      const total = suite.ranking.reduce((sum, t) => sum + (t.cost ?? 0), 0);
+      const costing = total > 0 ? `, costing about ${duration(total)} of test time` : "";
       lines.push(
         "",
-        `<details><summary>Most unreliable tests${of} on ${branches(context)}</summary>`,
+        `<details><summary>Most unreliable tests${of} on ${branches(context)}${costing}</summary>`,
         "",
-        "| Test | Failed runs | Passed on retry | Proven flaky |",
-        "|---|--:|--:|:-:|",
+        `| Test | Failed runs | Passed on retry | Proven flaky |${costs ? " Estimated cost |" : ""}`,
+        `|---|--:|--:|:-:|${costs ? "--:|" : ""}`,
         ...suite.ranking.map(
-          (t) => `| ${code(t.id)} | ${t.failures} / ${t.runs} | ${t.retries} | ${t.confirmed ? "yes" : "probably"} |`
+          (t) => `| ${code(t.id)} | ${t.failures} / ${t.runs} | ${t.retries} | ${t.confirmed ? "yes" : "probably"} |${costs ? ` ${t.cost === void 0 ? "" : duration(t.cost)} |` : ""}`
         ),
         "",
+        ...costs ? [
+          `_Each failure counts as a re-run of the suite, each retry as another run of the test, at their median durations. See [Cost of unreliable tests](${PROJECT_URL}/blob/main/docs/verdicts.md#cost-of-unreliable-tests)._`,
+          ""
+        ] : [],
         "</details>"
       );
     }
@@ -1059,8 +1084,10 @@ function renderSlower(slower, context) {
 function duration(ms) {
   if (ms < 1e3) return `${ms} ms`;
   if (ms < 6e4) return `${(ms / 1e3).toFixed(1)} s`;
-  const minutes = Math.floor(ms / 6e4);
-  return `${minutes} min ${Math.round((ms - minutes * 6e4) / 1e3)} s`;
+  const seconds2 = Math.round(ms / 1e3);
+  if (seconds2 < 3600) return `${Math.floor(seconds2 / 60)} min ${seconds2 % 60} s`;
+  const minutes = Math.round(ms / 6e4);
+  return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }
 function footer(retried, context) {
   const parts = [];
@@ -1115,23 +1142,25 @@ function reportPath(key) {
   return `reports/${key}.html`;
 }
 function renderSuitePage(key, history, context) {
-  const rows = Object.entries(history.tests).map(([id, test]) => ({ id, test, stats: computeStats(test, context.now, context.evidenceTtlDays) })).filter(({ test, stats }) => test.outcomes.includes(FAIL) || test.outcomes.includes(RETRY) || stats.confirmed);
-  rows.sort((a, b) => score(b.stats) - score(a.stats) || a.id.localeCompare(b.id));
+  const rows = Object.entries(history.tests).map(([id, test]) => ({ id, test, stats: computeStats(test, context.now, context.evidenceTtlDays), cost: estimateCost(test, history) })).filter(({ test, stats }) => test.outcomes.includes(FAIL) || test.outcomes.includes(RETRY) || stats.confirmed);
+  rows.sort((a, b) => (b.cost ?? -1) - (a.cost ?? -1) || score(b.stats) - score(a.stats) || a.id.localeCompare(b.id));
+  const total = rows.reduce((sum, row) => sum + (row.cost ?? 0), 0);
+  const costing = total > 0 ? ` Their failures and retries cost about ${duration(total)} of test time.` : "";
   const stable = Object.keys(history.tests).length - rows.length;
   const where = context.trackedBranches.map((branch) => `<code>${escapeHtml(branch)}</code>`).join(", ");
   const body = [
     `<p class="back"><a href="../index.html">All test suites</a></p>`,
     `<h1>${escapeHtml(key)}</h1>`,
-    `<p class="lede">${history.runs} runs recorded on ${where}, last updated ${formatTime(history.updatedAt)}. ${plural2(rows.length, "unreliable test")} listed, ${plural2(stable, "stable test")} not listed.</p>`
+    `<p class="lede">${history.runs} runs recorded on ${where}, last updated ${formatTime(history.updatedAt)}. ${plural2(rows.length, "unreliable test")} listed, ${plural2(stable, "stable test")} not listed.${costing}</p>`
   ];
   if (rows.length === 0) {
     body.push(`<p class="empty">No test failed or needed a retry in the remembered runs.</p>`);
   } else {
     body.push(
       `<div class="scroll"><table>`,
-      `<thead><tr><th>Test</th><th>Verdict</th><th>Remembered runs, oldest first</th><th>Failed</th><th>Retried</th><th>Last failure</th><th>Proof of flakiness</th><th>Median duration</th></tr></thead>`,
+      `<thead><tr><th>Test</th><th>Verdict</th><th>Remembered runs, oldest first</th><th>Failed</th><th>Retried</th><th>Last failure</th><th>Proof of flakiness</th><th>Median duration</th><th>Estimated cost</th></tr></thead>`,
       `<tbody>`,
-      ...rows.map(({ id, test, stats }) => renderRow(id, test, stats)),
+      ...rows.map(({ id, test, stats, cost }) => renderRow(id, test, stats, cost)),
       `</tbody></table></div>`,
       `<p class="legend"><i class="p"></i> passed <i class="r"></i> passed after a retry <i class="f"></i> failed</p>`
     );
@@ -1148,7 +1177,7 @@ function renderIndexPage(keys, context) {
     `</ul>`
   ]);
 }
-function renderRow(id, test, stats) {
+function renderRow(id, test, stats, cost) {
   const [label, tone] = verdict(stats);
   const outcomes = [...test.outcomes];
   const failed = outcomes.filter((outcome) => outcome === FAIL).length;
@@ -1167,6 +1196,7 @@ function renderRow(id, test, stats) {
     `<td>${lastFailure(test) ?? ""}</td>`,
     `<td>${proof}</td>`,
     `<td class="number">${durations.length > 0 ? duration(median2(durations)) : ""}</td>`,
+    `<td class="number">${cost === void 0 ? "" : duration(cost)}</td>`,
     `</tr>`
   ].join("");
 }

@@ -49,6 +49,15 @@ describe("renderSuitePage", () => {
     );
   });
 
+  it("puts the costliest tests first, with the time they cost", () => {
+    const costly = history();
+    costly.runDurations = [30_000];
+    const page = renderSuitePage("ci-test", costly, CONTEXT);
+    expect(page).toContain("Their failures and retries cost about 1 min 31 s of test time.");
+    expect(page).toContain('<td class="number">900 ms</td><td class="number">1 min 1 s</td>');
+    expect(page).toContain('<td class="number"></td><td class="number">30.0 s</td>');
+  });
+
   it("says when no test failed", () => {
     const quiet = emptyHistory();
     quiet.tests = { stable: { outcomes: "ppp", lastSeen: "2026-09-16" } };

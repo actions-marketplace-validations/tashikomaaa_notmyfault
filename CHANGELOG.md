@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- The job summary and the history pages estimate the test time each unreliable test cost over its remembered runs, a re-run of the suite per failure and another run of the test per retry, rank tests by it and add it up. The history records the total test time of the last runs as `runDurations` ([#20](https://github.com/tashikomaaa/notmyfault/issues/20)).
+
 ## [1.7.0] - 2026-09-17
 
 ### Added

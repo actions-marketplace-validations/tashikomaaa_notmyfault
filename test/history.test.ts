@@ -61,6 +61,16 @@ describe("recordRun", () => {
     expect(history.tests.t!.failingSince).toBeUndefined();
   });
 
+  it("remembers the total test time of the last tracked runs", () => {
+    const history = emptyHistory();
+    const timed = (id: string, outcome: Outcome, duration: number): TestResult => ({ ...test(id, outcome), duration });
+    recordRun(history, [timed("a", "passed", 1200), timed("b", "failed", 300), { ...timed("c", "skipped", 99) }], options());
+    recordRun(history, [test("a", "passed")], options());
+    recordRun(history, [timed("a", "passed", 1000)], options({ tracked: false }));
+    expect(history.runDurations).toEqual([1500]);
+    expect(parseHistory(serializeHistory(history)).runDurations).toEqual([1500]);
+  });
+
   it("does not guess where a streak recorded before failingSince started", () => {
     const history = emptyHistory();
     history.tests.t = { outcomes: "pff", lastSeen: "2026-09-16" };

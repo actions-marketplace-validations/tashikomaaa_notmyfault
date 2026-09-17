@@ -171,12 +171,24 @@ The job summary contains the same report, lists the [renamed tests](how-it-works
 
 The **slowest tests**, up to 10, by median duration over their last 10 runs, with their fastest and slowest runs. A wide range often means a test depends on timing.
 
-The **most unreliable tests**, up to 10, known flaky tests first, then by share of failed runs. For the first 3 of them with at least 15 remembered runs, a chart shows how their failure rate evolved: each point is the share of failed runs among the 10 runs ending there, so you can see whether a test is getting worse, or whether a fix worked.
+The **most unreliable tests**, up to 10, the costliest first when reports give durations, see [Cost of unreliable tests](#cost-of-unreliable-tests), otherwise known flaky tests first, then by share of failed runs. For the first 3 of them with at least 15 remembered runs, a chart shows how their failure rate evolved: each point is the share of failed runs among the 10 runs ending there, so you can see whether a test is getting worse, or whether a fix worked.
 
 | Column | Meaning |
 |---|---|
 | Failed runs | Failed runs out of the runs remembered for this test |
 | Passed on retry | Runs that passed only after a retry |
 | Proven flaky | `yes` for known flaky tests, `probably` otherwise |
+| Estimated cost | Test time their failures and retries cost, when reports give durations |
 
 GitHub draws the charts from Mermaid blocks. Where Mermaid is not rendered, the summary shows their source, which still lists the rates.
+
+### Cost of unreliable tests
+
+Flaky tests get tolerated because their cost is invisible. When reports give durations, the job summary and the [history pages](recipes.md#publish-the-history-with-github-pages) estimate what each unreliable test cost over its remembered runs on the tracked branch, rank tests by it, and add up their total:
+
+> Most unreliable tests on `main`, costing about 1 h 12 min of test time
+
+- **Each failure** costs a re-run of the whole suite: someone re-runs the job, or the pipeline fails and is pushed again. It counts as the median total test time of the last 10 runs.
+- **Each retry** costs another run of the test, at its median duration.
+
+It is an estimate of test time, not of CI minutes: installing dependencies and starting the job are not in the reports, and tests running in parallel add up to more than the time they took. It says which tests are worth fixing first, not what to bill.

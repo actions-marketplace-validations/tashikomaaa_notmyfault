@@ -1,4 +1,4 @@
-import { computeStats, verdictFor, type TestStats } from "./analyze";
+import { computeStats, estimateCost, verdictFor, type TestStats } from "./analyze";
 import { FAIL, RETRY, type FailingSince, type History, type TestHistory } from "./history";
 import { duration, escapeHtml } from "./report";
 
@@ -22,25 +22,28 @@ export function reportPath(key: string): string {
  */
 export function renderSuitePage(key: string, history: History, context: PageContext): string {
   const rows = Object.entries(history.tests)
-    .map(([id, test]) => ({ id, test, stats: computeStats(test, context.now, context.evidenceTtlDays) }))
+    .map(([id, test]) => ({ id, test, stats: computeStats(test, context.now, context.evidenceTtlDays), cost: estimateCost(test, history) }))
     .filter(({ test, stats }) => test.outcomes.includes(FAIL) || test.outcomes.includes(RETRY) || stats.confirmed);
-  rows.sort((a, b) => score(b.stats) - score(a.stats) || a.id.localeCompare(b.id));
+  // The costliest first when durations tell, the most unreliable otherwise.
+  rows.sort((a, b) => (b.cost ?? -1) - (a.cost ?? -1) || score(b.stats) - score(a.stats) || a.id.localeCompare(b.id));
+  const total = rows.reduce((sum, row) => sum + (row.cost ?? 0), 0);
+  const costing = total > 0 ? ` Their failures and retries cost about ${duration(total)} of test time.` : "";
   const stable = Object.keys(history.tests).length - rows.length;
   const where = context.trackedBranches.map((branch) => `<code>${escapeHtml(branch)}</code>`).join(", ");
 
   const body = [
     `<p class="back"><a href="../index.html">All test suites</a></p>`,
     `<h1>${escapeHtml(key)}</h1>`,
-    `<p class="lede">${history.runs} runs recorded on ${where}, last updated ${formatTime(history.updatedAt)}. ${plural(rows.length, "unreliable test")} listed, ${plural(stable, "stable test")} not listed.</p>`,
+    `<p class="lede">${history.runs} runs recorded on ${where}, last updated ${formatTime(history.updatedAt)}. ${plural(rows.length, "unreliable test")} listed, ${plural(stable, "stable test")} not listed.${costing}</p>`,
   ];
   if (rows.length === 0) {
     body.push(`<p class="empty">No test failed or needed a retry in the remembered runs.</p>`);
   } else {
     body.push(
       `<div class="scroll"><table>`,
-      `<thead><tr><th>Test</th><th>Verdict</th><th>Remembered runs, oldest first</th><th>Failed</th><th>Retried</th><th>Last failure</th><th>Proof of flakiness</th><th>Median duration</th></tr></thead>`,
+      `<thead><tr><th>Test</th><th>Verdict</th><th>Remembered runs, oldest first</th><th>Failed</th><th>Retried</th><th>Last failure</th><th>Proof of flakiness</th><th>Median duration</th><th>Estimated cost</th></tr></thead>`,
       `<tbody>`,
-      ...rows.map(({ id, test, stats }) => renderRow(id, test, stats)),
+      ...rows.map(({ id, test, stats, cost }) => renderRow(id, test, stats, cost)),
       `</tbody></table></div>`,
       `<p class="legend"><i class="p"></i> passed <i class="r"></i> passed after a retry <i class="f"></i> failed</p>`,
     );
@@ -60,7 +63,7 @@ export function renderIndexPage(keys: string[], context: PageContext): string {
   ]);
 }
 
-function renderRow(id: string, test: TestHistory, stats: TestStats): string {
+function renderRow(id: string, test: TestHistory, stats: TestStats, cost: number | undefined): string {
   const [label, tone] = verdict(stats);
   const outcomes = [...test.outcomes];
   const failed = outcomes.filter((outcome) => outcome === FAIL).length;
@@ -81,6 +84,7 @@ function renderRow(id: string, test: TestHistory, stats: TestStats): string {
     `<td>${lastFailure(test) ?? ""}</td>`,
     `<td>${proof}</td>`,
     `<td class="number">${durations.length > 0 ? duration(median(durations)) : ""}</td>`,
+    `<td class="number">${cost === undefined ? "" : duration(cost)}</td>`,
     `</tr>`,
   ].join("");
 }

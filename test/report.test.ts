@@ -257,7 +257,18 @@ describe("renderComment", () => {
   });
 
   it("formats durations in the unit that reads best", () => {
-    expect([0, 999, 1000, 2450, 59_949, 60_000, 125_400].map(duration)).toEqual(["0 ms", "999 ms", "1.0 s", "2.5 s", "59.9 s", "1 min 0 s", "2 min 5 s"]);
+    expect([0, 999, 1000, 2450, 59_949, 60_000, 119_700, 125_400, 3_599_700, 5_000_000].map(duration)).toEqual([
+      "0 ms",
+      "999 ms",
+      "1.0 s",
+      "2.5 s",
+      "59.9 s",
+      "1 min 0 s",
+      "2 min 0 s",
+      "2 min 5 s",
+      "1 h 0 min",
+      "1 h 23 min",
+    ]);
   });
 
   it("says which failures are quarantined by hand", () => {
@@ -320,6 +331,25 @@ describe("renderSummary", () => {
     expect(summary).toContain("| <code>api › flaky</code> | 2 / 10 | 0 | yes |");
     const slowest = renderSummary(analysis, [], context());
     expect(slowest).not.toContain("Slowest tests");
+  });
+
+  it("ranks unreliable tests by what they cost, when durations tell", () => {
+    const history = emptyHistory();
+    history.runs = 10;
+    history.runDurations = [60_000, 90_000, 120_000];
+    history.tests = {
+      // 2 failures: 2 re-runs of a 90 s suite.
+      rare: { outcomes: "pfppppfppp", lastSeen: "2026-09-16", evidence: [{ at: "2026-09-12T08:00:00Z", sha: "a", kind: "rerun" }] },
+      // 1 failure and 3 retries of a 2 s test.
+      retried: { outcomes: "rprprpfppp", lastSeen: "2026-09-16", durations: [2000, 2000, 2000] },
+    };
+    const ranking = rankFlakyTests(history, NOW, 30, 10);
+    expect(ranking.map((t) => [t.id, t.cost])).toEqual([["rare", 180_000], ["retried", 96_000]]);
+    const summary = renderSummary(analyze([], history, NOW, 30), ranking, context());
+    expect(summary).toContain("<summary>Most unreliable tests on `main`, costing about 4 min 36 s of test time</summary>");
+    expect(summary).toContain("| Test | Failed runs | Passed on retry | Proven flaky | Estimated cost |");
+    expect(summary).toContain("| <code>rare</code> | 2 / 10 | 0 | yes | 3 min 0 s |");
+    expect(summary).toContain("_Each failure counts as a re-run of the suite");
   });
 
   it("charts the failure rate of the most unreliable tests in the summary", () => {

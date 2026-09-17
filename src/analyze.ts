@@ -99,6 +99,8 @@ export interface Analysis {
 
 export interface RankedTest extends TestStats {
   id: string;
+  /** Test time its failures and retries cost over the remembered runs, in milliseconds, when durations are known. */
+  cost?: number;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -260,10 +262,27 @@ export function rankFlakyTests(history: History, now: Date, evidenceTtlDays: num
   const ranked: RankedTest[] = [];
   for (const [id, test] of Object.entries(history.tests)) {
     const stats = computeStats(test, now, evidenceTtlDays);
-    if (stats.confirmed || stats.isolatedFailures >= LIKELY_FLAKY_ISOLATED_FAILURES) ranked.push({ id, ...stats });
+    if (!stats.confirmed && stats.isolatedFailures < LIKELY_FLAKY_ISOLATED_FAILURES) continue;
+    const cost = estimateCost(test, history);
+    ranked.push(cost === undefined ? { id, ...stats } : { id, ...stats, cost });
   }
   const score = (t: RankedTest) => (t.failures + t.retries) / Math.max(t.runs, 1) + (t.confirmed ? 1 : 0);
-  return ranked.sort((a, b) => score(b) - score(a) || a.id.localeCompare(b.id)).slice(0, limit);
+  // The costliest first when durations tell, the most unreliable otherwise.
+  return ranked.sort((a, b) => (b.cost ?? -1) - (a.cost ?? -1) || score(b) - score(a) || a.id.localeCompare(b.id)).slice(0, limit);
+}
+
+/**
+ * Estimated test time lost to the failures and retries of a test over its remembered runs on tracked branches, in
+ * milliseconds: each failure costs a re-run of the whole suite, each retry another run of the test, at their median
+ * durations. Undefined when the reports give no durations to estimate them with.
+ */
+export function estimateCost(test: TestHistory, history: History): number | undefined {
+  const failures = count(test.outcomes, FAIL);
+  const retries = count(test.outcomes, RETRY);
+  const suite = history.runDurations?.length ? median(history.runDurations) : undefined;
+  const own = test.durations?.length ? median(test.durations) : undefined;
+  if ((failures > 0 && suite === undefined) || (retries > 0 && own === undefined)) return undefined;
+  return failures * (suite ?? 0) + retries * (own ?? 0);
 }
 
 /**
