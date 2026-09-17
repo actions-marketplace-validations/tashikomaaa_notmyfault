@@ -115,4 +115,11 @@ describe("templates/notmyfault.gitlab-ci.yml", () => {
     expect(path).toBe("dist/notmyfault.mjs");
     expect(existsSync(join(root, path!))).toBe(true);
   });
+
+  it("checks the checksum when one is set, before running the file", () => {
+    const script = read("templates/notmyfault.gitlab-ci.yml");
+    const check = script.indexOf('echo "$NOTMYFAULT_SHA256  /tmp/notmyfault.mjs" | sha256sum -c -');
+    expect(check).toBeGreaterThan(script.indexOf("wget"));
+    expect(check).toBeLessThan(script.indexOf("node /tmp/notmyfault.mjs"));
+  });
 });

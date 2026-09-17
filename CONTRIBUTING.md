@@ -121,8 +121,10 @@ For maintainers:
    git push origin vX --force
    ```
 
-4. Create a GitHub release from `vX.Y.Z` with `dist/notmyfault.mjs` attached, and publish it to the Marketplace:
+4. Create a GitHub release from `vX.Y.Z`, and publish it to the Marketplace:
 
    ```sh
-   gh release create vX.Y.Z dist/notmyfault.mjs --title "notmyfault X.Y.Z" --notes-file notes.md
+   gh release create vX.Y.Z --title "vX.Y.Z" --notes-file notes.md
    ```
+
+   The `Release assets` workflow then rebuilds the bundles from the tag, checks them against `dist/`, attests their build provenance, attaches `notmyfault.mjs` and `notmyfault.mjs.sha256`, and adds the checksum to the notes. If it fails, fix the cause and run it again with `gh workflow run release.yml --ref vX.Y.Z`.

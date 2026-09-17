@@ -129,6 +129,22 @@ In [quarantine mode](quarantine.md), the notmyfault job fails when a failure is 
 
 If merge requests require a successful pipeline, the requirement now means "no failure that looks real".
 
+## Pin a release
+
+`v1` follows every 1.x release. To run an exact file, pin the release and its checksum, published in the notes of each [GitHub release](https://github.com/tashikomaaa/notmyfault/releases) and in its `notmyfault.mjs.sha256` asset:
+
+```yaml
+notmyfault:
+  extends: .notmyfault
+  needs: [test]
+  variables:
+    NOTMYFAULT_REF: v1.6.0
+    NOTMYFAULT_SHA256: <the SHA-256 of notmyfault.mjs in the v1.6.0 release>
+    NOTMYFAULT_JUNIT: reports/junit.xml
+```
+
+The job then fails before running anything if the downloaded file is different. The build provenance of the file can be checked too, see [Supply chain](security.md#supply-chain). Include the template from the same tag, so that it cannot change either.
+
 ## Without the template
 
 When the test job already runs Node.js 24 and has git, like the `node:24` image, notmyfault can run in the same job:
@@ -169,6 +185,7 @@ Every [input](configuration.md#inputs) of the GitHub Action is a variable: its n
 | `NOTMYFAULT_KEY` | the job name | Name of the test suite in the history |
 | `NOTMYFAULT_TRACK_BRANCHES` | the default branch | Branches whose pipelines build the history |
 | `NOTMYFAULT_REF` | `v1` | Tag or commit of notmyfault downloaded by the template |
+| `NOTMYFAULT_SHA256` | none | SHA-256 of `notmyfault.mjs` at `NOTMYFAULT_REF`: the template fails on any other file |
 | `NOTMYFAULT_SUMMARY_FILE` | `notmyfault-summary.md` | Where the summary is written |
 | `NOTMYFAULT_CODE_QUALITY_FILE` | `gl-code-quality-report.json` | Where the Code Quality report is written |
 | `NOTMYFAULT_OUTPUT_FILE` | `notmyfault.env` | Where the outputs are written, as a dotenv file |

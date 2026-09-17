@@ -1,0 +1,58 @@
+name: Release assets
+
+# Rebuilds the bundles of a release from its tag, checks that they are the
+# committed ones, attests their build provenance and attaches notmyfault.mjs
+# with its checksum. Re-run it on a tag with: gh workflow run release.yml --ref vX.Y.Z
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write       # attach the assets to the release
+  id-token: write       # sign the attestations
+  attestations: write   # store them
+
+jobs:
+  assets:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Check that the bundles are the committed ones
+        run: |
+          if ! git diff --quiet -- dist/; then
+            echo "::error::dist/ at $TAG does not match its sources."
+            exit 1
+          fi
+
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/index.js
+            dist/notmyfault.mjs
+
+      - name: Attach notmyfault.mjs and its checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          sha256sum notmyfault.mjs > notmyfault.mjs.sha256
+          gh release upload "$TAG" notmyfault.mjs notmyfault.mjs.sha256 --clobber
+          checksum=$(cut -d ' ' -f 1 notmyfault.mjs.sha256)
+          notes=$(gh release view "$TAG" --json body --jq .body)
+          if ! grep -q "$checksum" <<< "$notes"; then
+            printf '%s\n\n**SHA-256 of notmyfault.mjs:** `%s`\n' "$notes" "$checksum" > notes.md
+            gh release edit "$TAG" --notes-file notes.md
+          fi

@@ -103,13 +103,20 @@ If a ruleset targets all branches, pushes to `notmyfault-history` are rejected a
 - **No runtime dependencies.** The action is a single bundled file, `dist/index.js`, built from `src/` with no third-party code.
 - **Verifiable build.** CI rebuilds `dist/` and fails if it differs from the committed file, so the code that runs is the code you can read.
 - **Pinning.** Use a full commit SHA for the strictest policies, see [Recipes](recipes.md#pin-to-a-commit).
+- **Build provenance.** For each release, a workflow rebuilds `dist/index.js` and `dist/notmyfault.mjs` from the tag, checks that they are the committed files, and attests their provenance with [GitHub artifact attestations](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations). It attaches `notmyfault.mjs` and `notmyfault.mjs.sha256` to the release, and adds the checksum to its notes. Check that a file was built by this repository:
+
+  ```sh
+  gh attestation verify notmyfault.mjs --repo tashikomaaa/notmyfault
+  ```
+
+  Releases up to 1.5.0 have no attestation.
 
 ## GitLab
 
 - **The token.** `NOTMYFAULT_TOKEN` needs the Developer role, the `write_repository` scope to push the history branch and the `api` scope to comment and manage issues. A project access token is limited to one project and expires: prefer it to a personal access token. See [Create a token](gitlab.md#2-create-a-token).
 - **Who can read it.** Merge request pipelines only get variables that are not protected, and every pipeline of the project can read those, including pipelines of branches any Developer pushes. The token gives nothing a Developer does not already have. If that is still too much, mark it **Protected**: pipelines of protected branches keep building the history, merge requests are still compared with it but get no comment.
 - **Masking.** Mark the variable **Masked**. notmyfault never prints the token and gives it to git through environment variables, like on GitHub.
-- **The downloaded code.** The template downloads `dist/notmyfault.mjs` from GitHub at the tag in `NOTMYFAULT_REF`. Set it to a full commit SHA for the strictest policies, or keep a copy of the file in your repository, see [Without the template](gitlab.md#without-the-template). When the image lacks git, the template also installs it with `apk`.
+- **The downloaded code.** The template downloads `dist/notmyfault.mjs` from GitHub at the tag in `NOTMYFAULT_REF`. For the strictest policies, pin it to a release and set `NOTMYFAULT_SHA256` to the checksum of that release: the job then fails on any other file, see [Pin a release](gitlab.md#pin-a-release). Or keep a copy of the file in your repository, see [Without the template](gitlab.md#without-the-template). When the image lacks git, the template also installs it with `apk`.
 - **Merge requests from forks** are never recorded. Their pipelines run in the fork, without your variables, unless a maintainer runs them in the parent project: review the changes first, as that pipeline gets your token.
 
 ## Reporting a vulnerability
