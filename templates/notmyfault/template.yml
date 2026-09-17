@@ -1,0 +1,59 @@
+spec:
+  description: Tells merge requests which failing tests are new, flaky or already broken, from a history of your default branch.
+  component: [sha]
+  inputs:
+    job-name:
+      description: Name of the job.
+      default: notmyfault
+    stage:
+      description: Stage of the job. It runs even when earlier jobs failed.
+      default: .post
+    needs:
+      description: The jobs writing the JUnit reports, which must keep them in artifacts:paths.
+      type: array
+      default: []
+    junit:
+      description: Glob(s) matching the JUnit XML reports, relative to the project directory.
+      default: "**/junit*.xml"
+    key:
+      description: Name of the test suite in the history. Empty for the name of the job.
+      default: ""
+    mode:
+      description: report never fails the job because of test results, quarantine fails it on failures not tolerated.
+      default: report
+      options: [report, quarantine]
+    tolerate:
+      description: Verdicts that do not fail the job in quarantine mode.
+      default: flaky
+    flaky-issues:
+      description: Keep an issue open for each flaky test.
+      type: boolean
+      default: false
+    image:
+      description: Image with Node.js 24. git is installed with apk when the image lacks it.
+      default: node:24-alpine
+---
+# The other variables of notmyfault, like NOTMYFAULT_QUARANTINE, go in the variables of a job of the same name.
+"$[[ inputs.job-name ]]":
+  image: $[[ inputs.image ]]
+  stage: $[[ inputs.stage ]]
+  when: always
+  needs: $[[ inputs.needs ]]
+  variables:
+    NOTMYFAULT_JUNIT: $[[ inputs.junit ]]
+    NOTMYFAULT_KEY: $[[ inputs.key ]]
+    NOTMYFAULT_MODE: $[[ inputs.mode ]]
+    NOTMYFAULT_TOLERATE: $[[ inputs.tolerate ]]
+    NOTMYFAULT_FLAKY_ISSUES: "$[[ inputs.flaky-issues ]]"
+  script:
+    - command -v git > /dev/null || apk add --no-cache git
+    # The bundle of the commit this version of the component was released from.
+    - wget -q -O /tmp/notmyfault.mjs "https://raw.githubusercontent.com/tashikomaaa/notmyfault/$[[ component.sha ]]/dist/notmyfault.mjs"
+    - node /tmp/notmyfault.mjs
+  artifacts:
+    when: always
+    expose_as: notmyfault report
+    paths: [notmyfault-summary.md]
+    reports:
+      codequality: gl-code-quality-report.json
+      dotenv: notmyfault.env
