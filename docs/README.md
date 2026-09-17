@@ -31,6 +31,7 @@ notmyfault is a GitHub Action, also available for GitLab CI/CD, that remembers h
 - [Quarantine flaky tests](quarantine.md): stop known flaky tests from blocking merges.
 - [Test runners](test-runners.md): produce JUnit XML with Vitest, Jest, pytest, Go, Maven, Gradle, Rust, Playwright and more.
 - [Recipes](recipes.md): several suites, monorepos, sharding, matrices, nightly runs, merge queues.
+- [Dashboard across repositories](dashboard.md): rank the unreliable tests of several repositories in one page.
 
 ## Reference
 

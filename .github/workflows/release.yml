@@ -42,6 +42,7 @@ jobs:
           subject-path: |
             dist/index.js
             dist/notmyfault.mjs
+            dist/dashboard.js
 
       - name: Attach notmyfault.mjs and its checksum
         env:

@@ -49,6 +49,17 @@ export class GitStore {
     return head ? this.readFile(head, path) : undefined;
   }
 
+  /** Every file of the branch whose path starts with `prefix`, by path. Empty when the branch does not exist. */
+  async readAll(prefix: string): Promise<Record<string, string>> {
+    const head = await this.fetchHead();
+    if (!head) return {};
+    const files: Record<string, string> = {};
+    for (const path of await this.listFiles(head)) {
+      if (path.startsWith(prefix)) files[path] = await this.git(["cat-file", "blob", `${head}:${path}`]);
+    }
+    return files;
+  }
+
   /**
    * Rewrites `path` with the result of `update` (skipped when it returns
    * undefined). `update` may run several times, always on the latest content.

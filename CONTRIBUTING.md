@@ -22,7 +22,7 @@ npm run check   # typecheck, build dist/ and run all tests
 | Script | What it does |
 |---|---|
 | `npm run typecheck` | Type-checks sources, tests and scripts |
-| `npm run build` | Bundles `src/` with esbuild into `dist/index.js`, the GitHub Action, and `dist/notmyfault.mjs`, run in GitLab CI/CD |
+| `npm run build` | Bundles `src/` with esbuild into `dist/index.js`, the GitHub Action, `dist/notmyfault.mjs`, run in GitLab CI/CD, and `dist/dashboard.js`, the dashboard action |
 | `npm test` | Runs the test suite with Vitest |
 
 `dist/index.js` is what GitHub Actions runs and `dist/notmyfault.mjs` what GitLab jobs download, so both are committed. **Run `npm run build` and commit `dist/` with your changes**: CI fails when `dist/` does not match the sources.
@@ -33,6 +33,7 @@ npm run check   # typecheck, build dist/ and run all tests
 |---|---|
 | `src/index.ts` | Entry point of the GitHub Action |
 | `src/cli.ts` | Entry point of `notmyfault.mjs`, which detects the CI system |
+| `src/dashboard.ts`, `src/dashboard-action.ts` | The dashboard action, in `dashboard/action.yml`, built into `dist/dashboard.js` |
 | `src/main.ts` | Orchestration: inputs, reports, history, verdicts, outputs |
 | `src/platform.ts` | What notmyfault needs from a CI system: context, inputs and outputs, API |
 | `src/xml.ts` | Forgiving XML parser |

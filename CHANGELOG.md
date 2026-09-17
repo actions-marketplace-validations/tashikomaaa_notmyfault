@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- A dashboard action, `tashikomaaa/notmyfault/dashboard`, reads the history branches of several repositories and ranks their unreliable tests together, the costliest first, in a static page ready for GitHub Pages ([#25](https://github.com/tashikomaaa/notmyfault/issues/25)).
+
 ## [1.8.0] - 2026-09-17
 
 ### Added

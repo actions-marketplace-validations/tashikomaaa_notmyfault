@@ -21,11 +21,8 @@ export function reportPath(key: string): string {
  * listing thousands of them would bury the ones worth fixing.
  */
 export function renderSuitePage(key: string, history: History, context: PageContext): string {
-  const rows = Object.entries(history.tests)
-    .map(([id, test]) => ({ id, test, stats: computeStats(test, context.now, context.evidenceTtlDays), cost: estimateCost(test, history) }))
-    .filter(({ test, stats }) => test.outcomes.includes(FAIL) || test.outcomes.includes(RETRY) || stats.confirmed);
-  // The costliest first when durations tell, the most unreliable otherwise.
-  rows.sort((a, b) => (b.cost ?? -1) - (a.cost ?? -1) || score(b.stats) - score(a.stats) || a.id.localeCompare(b.id));
+  const rows = unreliableTests(history, context);
+  sortByCost(rows);
   const total = rows.reduce((sum, row) => sum + (row.cost ?? 0), 0);
   const costing = total > 0 ? ` Their failures and retries cost about ${duration(total)} of test time.` : "";
   const stable = Object.keys(history.tests).length - rows.length;
@@ -41,7 +38,7 @@ export function renderSuitePage(key: string, history: History, context: PageCont
   } else {
     body.push(
       `<div class="scroll"><table>`,
-      `<thead><tr><th>Test</th><th>Verdict</th><th>Remembered runs, oldest first</th><th>Failed</th><th>Retried</th><th>Last failure</th><th>Proof of flakiness</th><th>Median duration</th><th>Estimated cost</th></tr></thead>`,
+      tableHeader(),
       `<tbody>`,
       ...rows.map(({ id, test, stats, cost }) => renderRow(id, test, stats, cost)),
       `</tbody></table></div>`,
@@ -49,6 +46,32 @@ export function renderSuitePage(key: string, history: History, context: PageCont
     );
   }
   return page(`notmyfault: ${key}`, body);
+}
+
+export interface UnreliableTest {
+  id: string;
+  test: TestHistory;
+  stats: TestStats;
+  /** Estimated test time lost to its failures and retries, see estimateCost. */
+  cost: number | undefined;
+}
+
+/** The tests of a history that failed or needed a retry in their remembered runs, or are proven flaky. */
+export function unreliableTests(history: History, context: PageContext): UnreliableTest[] {
+  return Object.entries(history.tests)
+    .map(([id, test]) => ({ id, test, stats: computeStats(test, context.now, context.evidenceTtlDays), cost: estimateCost(test, history) }))
+    .filter(({ test, stats }) => test.outcomes.includes(FAIL) || test.outcomes.includes(RETRY) || stats.confirmed);
+}
+
+/** The costliest first when durations tell, the most unreliable otherwise. */
+export function sortByCost<T extends { id: string; stats: TestStats; cost: number | undefined }>(rows: T[]): T[] {
+  return rows.sort((a, b) => (b.cost ?? -1) - (a.cost ?? -1) || score(b.stats) - score(a.stats) || a.id.localeCompare(b.id));
+}
+
+/** The header of the table of unreliable tests, after the columns in `leading`. */
+export function tableHeader(leading: string[] = []): string {
+  const columns = [...leading, "Test", "Verdict", "Remembered runs, oldest first", "Failed", "Retried", "Last failure", "Proof of flakiness", "Median duration", "Estimated cost"];
+  return `<thead><tr>${columns.map((column) => `<th>${column}</th>`).join("")}</tr></thead>`;
 }
 
 /** The home page of the history branch, linking to the page of each key. */
@@ -63,7 +86,8 @@ export function renderIndexPage(keys: string[], context: PageContext): string {
   ]);
 }
 
-function renderRow(id: string, test: TestHistory, stats: TestStats, cost: number | undefined): string {
+/** A row of the table of unreliable tests, after the cells in `leading`, already HTML. */
+export function renderRow(id: string, test: TestHistory, stats: TestStats, cost: number | undefined, leading: string[] = []): string {
   const [label, tone] = verdict(stats);
   const outcomes = [...test.outcomes];
   const failed = outcomes.filter((outcome) => outcome === FAIL).length;
@@ -76,6 +100,7 @@ function renderRow(id: string, test: TestHistory, stats: TestStats, cost: number
   const durations = test.durations ?? [];
   return [
     `<tr>`,
+    ...leading.map((cell) => `<td>${cell}</td>`),
     `<td class="test"><code>${escapeHtml(id)}</code></td>`,
     `<td><span class="verdict ${tone}">${label}</span>${tone === "broken" && stats.failingSince ? since(stats.failingSince) : ""}</td>`,
     `<td><span class="timeline" role="img" aria-label="${summary}">${timeline}</span></td>`,
@@ -126,19 +151,19 @@ function median(values: number[]): number {
   return sorted.length % 2 === 1 ? sorted[middle]! : Math.round((sorted[middle - 1]! + sorted[middle]!) / 2);
 }
 
-function formatTime(iso: string): string {
+export function formatTime(iso: string): string {
   return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
 }
 
-function plural(n: number, word: string): string {
+export function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
-function escapeAttribute(value: string): string {
+export function escapeAttribute(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 }
 
-function page(title: string, body: string[]): string {
+export function page(title: string, body: string[], footer = "rewritten on every update of the history"): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -178,7 +203,7 @@ footer { margin-top: 2rem; font-size: 0.85rem; }
 <body>
 <main>
 ${body.join("\n")}
-<footer>Generated by <a href="${PROJECT_URL}">notmyfault</a>, rewritten on every update of the history.</footer>
+<footer>Generated by <a href="${PROJECT_URL}">notmyfault</a>, ${footer}.</footer>
 </main>
 </body>
 </html>

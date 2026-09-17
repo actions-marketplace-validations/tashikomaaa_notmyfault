@@ -1,0 +1,35 @@
+name: notmyfault dashboard
+description: Ranks the unreliable tests of several repositories together, from their notmyfault history, in a static page.
+author: Aldwin Moutarlier
+
+branding:
+  icon: bar-chart-2
+  color: yellow
+
+inputs:
+  repositories:
+    description: Repositories to read, one per line or separated by commas, as owner/repo on this server or as git URLs.
+    required: true
+  token:
+    description: Token that can read the repositories on this server. The default token only reads the repository of the workflow and public ones. Repositories given as URLs of other servers are read without it.
+    default: ${{ github.token }}
+  history-branch:
+    description: Branch holding the history in each repository.
+    default: notmyfault-history
+  output:
+    description: Directory where the page is written, relative to the workspace.
+    default: notmyfault-dashboard
+  title:
+    description: Title of the page.
+    default: Unreliable tests
+  limit:
+    description: Unreliable tests listed on the page, the costliest first.
+    default: "100"
+
+outputs:
+  path:
+    description: Absolute path of the directory holding the page.
+
+runs:
+  using: node24
+  main: ../dist/dashboard.js

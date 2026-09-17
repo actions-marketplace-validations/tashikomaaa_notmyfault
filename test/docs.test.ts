@@ -108,6 +108,22 @@ describe("action.yml", () => {
   });
 });
 
+describe("dashboard/action.yml", () => {
+  const action = read("dashboard/action.yml");
+  const inputs = action.slice(action.indexOf("\ninputs:\n"), action.indexOf("\noutputs:\n"));
+  const names = [...inputs.matchAll(/^ {2}([\w-]+):$/gm)].map((match) => match[1]!);
+
+  it.each(names)("reads and documents the %s input", (input) => {
+    expect(read("src/dashboard-action.ts")).toMatch(new RegExp(`(input|integerInput)\\("${input}"`));
+    expect(read("docs/dashboard.md")).toContain(`| \`${input}\` |`);
+  });
+
+  it("runs the bundle built for it", () => {
+    expect(action).toContain("main: ../dist/dashboard.js");
+    expect(existsSync(join(root, "dist", "dashboard.js"))).toBe(true);
+  });
+});
+
 describe("templates/notmyfault.gitlab-ci.yml", () => {
   it("downloads the bundle committed in dist/", () => {
     const template = read("templates/notmyfault.gitlab-ci.yml");

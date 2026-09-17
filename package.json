@@ -10,7 +10,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "esbuild src/index.ts --bundle --platform=node --target=node24 --format=esm --legal-comments=none --outfile=dist/index.js && esbuild src/cli.ts --bundle --platform=node --target=node24 --format=esm --legal-comments=none --outfile=dist/notmyfault.mjs",
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node24 --format=esm --legal-comments=none --outfile=dist/index.js && esbuild src/cli.ts --bundle --platform=node --target=node24 --format=esm --legal-comments=none --outfile=dist/notmyfault.mjs && esbuild src/dashboard-index.ts --bundle --platform=node --target=node24 --format=esm --legal-comments=none --outfile=dist/dashboard.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "site": "node scripts/site.ts _site",
