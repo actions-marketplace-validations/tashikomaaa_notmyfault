@@ -107,3 +107,12 @@ describe("action.yml", () => {
     expect(configuration).toContain(`| \`${output}\` |`);
   });
 });
+
+describe("templates/notmyfault.gitlab-ci.yml", () => {
+  it("downloads the bundle committed in dist/", () => {
+    const template = read("templates/notmyfault.gitlab-ci.yml");
+    const path = template.match(/raw\.githubusercontent\.com\/tashikomaaa\/notmyfault\/\$\{NOTMYFAULT_REF\}\/([\w./-]+)"/)?.[1];
+    expect(path).toBe("dist/notmyfault.mjs");
+    expect(existsSync(join(root, path!))).toBe(true);
+  });
+});

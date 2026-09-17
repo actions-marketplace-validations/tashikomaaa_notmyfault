@@ -1,0 +1,29 @@
+# notmyfault in GitLab CI/CD: https://github.com/tashikomaaa/notmyfault/blob/main/docs/gitlab.md
+#
+# include:
+#   - remote: https://raw.githubusercontent.com/tashikomaaa/notmyfault/v1/templates/notmyfault.gitlab-ci.yml
+#
+# notmyfault:
+#   extends: .notmyfault
+#   needs: [test]              # the job writing the JUnit reports, as artifacts:paths
+#   variables:
+#     NOTMYFAULT_JUNIT: reports/*.xml
+
+.notmyfault:
+  image: node:24-alpine
+  stage: .post
+  # Test failures are what notmyfault explains.
+  when: always
+  variables:
+    # The version of notmyfault: v1 follows every 1.x release, v1.5.0 stays on that one.
+    NOTMYFAULT_REF: v1
+  script:
+    - wget -q -O /tmp/notmyfault.mjs "https://raw.githubusercontent.com/tashikomaaa/notmyfault/${NOTMYFAULT_REF}/dist/notmyfault.mjs"
+    - node /tmp/notmyfault.mjs
+  artifacts:
+    when: always
+    expose_as: notmyfault report
+    paths: [notmyfault-summary.md]
+    reports:
+      codequality: gl-code-quality-report.json
+      dotenv: notmyfault.env
