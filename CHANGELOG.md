@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-09-17
+
 ### Added
 
 - `check: true` reports each run as a check of its own, named by `check-name`, failing only on failures not covered by `tolerate`: branch protection can require it instead of the job, without quarantine mode or `continue-on-error`. It needs the `checks: write` permission ([#19](https://github.com/tashikomaaa/notmyfault/issues/19)).
@@ -97,7 +99,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - Pull request comment kept up to date, job summary with the most unreliable tests, and step outputs.
 - Quarantine mode, so that known flaky tests stop blocking merges.
 
-[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.3.0...v1.4.0
