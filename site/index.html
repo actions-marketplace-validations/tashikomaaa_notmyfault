@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>notmyfault: is that failing test your fault?</title>
-  <meta name="description" content="For GitHub Actions and GitLab CI/CD: notmyfault remembers how every test behaves on your main branch, and tells each pull request which failures are new, which tests are flaky and which were already broken.">
+  <meta name="description" content="For GitHub, GitLab, Forgejo and Gitea: notmyfault remembers how every test behaves on your main branch, and tells each pull request which failures are new, which tests are flaky and which were already broken.">
   <meta name="theme-color" content="#F7C65C" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#2B1D10" media="(prefers-color-scheme: dark)">
   <link rel="canonical" href="https://notmyfault.aldwin.fr/">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://notmyfault.aldwin.fr/">
   <meta property="og:title" content="notmyfault: is that failing test your fault?">
-  <meta property="og:description" content="For GitHub Actions and GitLab CI/CD: notmyfault tells each pull request which failures are new, which tests are flaky and which were already broken.">
+  <meta property="og:description" content="For GitHub, GitLab, Forgejo and Gitea: notmyfault tells each pull request which failures are new, which tests are flaky and which were already broken.">
   <meta property="og:image" content="https://notmyfault.aldwin.fr/assets/social-preview.jpg">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" type="image/png" href="favicon.png">
@@ -45,7 +45,7 @@
           <a class="button" href="#quick-start">Add it to your workflow</a>
           <a class="button button-quiet" href="https://github.com/tashikomaaa/notmyfault-demo/pull/1">See a real pull request</a>
         </p>
-        <p class="fineprint">Free, for GitHub Actions and GitLab CI/CD. MIT licensed, nothing to host.</p>
+        <p class="fineprint">Free, for GitHub, GitLab, Forgejo and Gitea. MIT licensed, nothing to host.</p>
       </div>
 
       <figure class="hero-comment">
@@ -216,7 +216,8 @@ jobs:
             <li>The counts become variables for later jobs, and flaky tests can get an issue each.</li>
             <li>A project access token in <code>NOTMYFAULT_TOKEN</code> lets it store the history and comment.</li>
           </ul>
-          <p class="more"><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/gitlab.md">Set it up on GitLab</a> · <a href="https://gitlab.aldwin.fr/notmyfault/notmyfault-demo/-/merge_requests">See merge requests</a></p>
+          <p>On Forgejo and Gitea, whose workflows follow GitHub Actions, the action itself runs as it is.</p>
+          <p class="more"><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/gitlab.md">Set it up on GitLab</a> · <a href="https://gitlab.aldwin.fr/notmyfault/notmyfault-demo/-/merge_requests">See merge requests</a> · <a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/forgejo.md">Forgejo and Gitea</a></p>
         </div>
         <div class="code">
           <button class="copy" type="button" data-copy="gitlab-ci" hidden>Copy</button>
@@ -271,7 +272,7 @@ notmyfault:
           </div>
           <div>
             <dt><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/recipes.md#show-a-flaky-tests-badge">A badge and a report</a></dt>
-            <dd>A badge counting your flaky tests, and <a href="https://tashikomaaa.github.io/notmyfault-demo/">pages listing them</a> with their runs, ready for GitHub Pages.</dd>
+            <dd>A badge counting your flaky tests, and <a href="https://tashikomaaa.github.io/notmyfault-demo/">pages listing them</a> with their runs and the test time they cost, ready for GitHub Pages.</dd>
           </div>
           <div>
             <dt><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/recipes.md#re-run-flaky-failures-automatically">Re-runs on their own</a></dt>
