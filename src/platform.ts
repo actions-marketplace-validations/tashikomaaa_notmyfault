@@ -23,8 +23,8 @@ export interface RunContext {
   defaultBranch: string | undefined;
   /** Key of the history when none is set. */
   defaultKey: string;
-  /** The pull or merge request the run is for. */
-  pullRequest: { number: number; fromFork: boolean } | undefined;
+  /** The pull or merge request the run is for, and the commit at its head when it differs from `sha`. */
+  pullRequest: { number: number; fromFork: boolean; headSha?: string } | undefined;
   /** A token the platform gives every job, used when none is set. */
   defaultToken: string | undefined;
 }
@@ -75,6 +75,17 @@ export interface Forge {
   ensureLabel(name: string, color: string, description: string): Promise<void>;
   /** The merged pull or merge request a commit of a tracked branch came from, if any. */
   changeOf(sha: string): Promise<{ number: number; url: string } | undefined>;
+  /** Reports the run as a completed check of a commit, where the platform has checks. Resolves to its URL. */
+  createCheck?(check: CheckReport): Promise<string>;
+}
+
+export interface CheckReport {
+  name: string;
+  sha: string;
+  success: boolean;
+  title: string;
+  summary: string;
+  detailsUrl?: string;
 }
 
 export class ApiError extends Error {
@@ -108,6 +119,7 @@ export interface PlatformText {
   commentDenied: string;
   commentFromFork: string;
   issuesDenied: string;
+  checkDenied: string;
 }
 
 export interface Platform {

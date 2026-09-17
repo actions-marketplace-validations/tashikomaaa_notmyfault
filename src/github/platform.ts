@@ -24,6 +24,7 @@ export function githubPlatform(env: NodeJS.ProcessEnv, io: Io = new ActionIO(env
       recordDenied: 'Does the job have "contents: write" permission?',
       commentDenied: 'Does the job have "pull-requests: write" permission?',
       commentFromFork: "Tokens are read-only on pull requests from forks; the job summary has the full report.",
+      checkDenied: 'Does the job have "checks: write" permission?',
       issuesDenied: 'Does the job have "issues: write" permission?',
     },
     rerunNotice: true,

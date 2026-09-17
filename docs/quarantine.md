@@ -54,6 +54,30 @@ Until that day, its failures keep their verdict, are marked *quarantined by hand
 
 Unlike skipping the test, it keeps running, so the history keeps learning, and it comes back on its own.
 
+## Require the notmyfault check
+
+Instead of quarantine mode, notmyfault can report its decision as a check of its own, and leave the job alone:
+
+```yaml
+permissions:
+  contents: write
+  pull-requests: write
+  checks: write
+
+# ...
+      - run: npm test
+
+      - uses: tashikomaaa/notmyfault@v1
+        if: ${{ !cancelled() }}
+        with:
+          junit: reports/**/*.xml
+          check: true
+```
+
+The tests fail the job as usual, and the `notmyfault` check fails only when a failure is not tolerated. In the branch protection rule or ruleset, require the `notmyfault` check instead of the job: the job stays red when a flaky test fails, which is the truth, but the merge is only blocked by failures that look real. No `continue-on-error` is needed. See [`check`](configuration.md#check).
+
+A required check that never reports blocks the merge, which fails closed too: when notmyfault finds no report, or an input is invalid, the check is missing and the pull request waits.
+
 ## Safety nets
 
 Quarantine mode is built to fail closed:

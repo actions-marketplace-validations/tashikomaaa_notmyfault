@@ -33,6 +33,9 @@ export interface ReportContext {
   runLink?: string;
 }
 
+/** Longest summary a check run accepts. */
+const MAX_CHECK_SUMMARY = 65_535;
+
 /** The analysis of one test suite, with its own history. */
 export interface SuiteReport {
   name: string;
@@ -81,6 +84,20 @@ export function renderSummary(analysis: Analysis, ranking: RankedTest[], context
 /** One comment for every suite: a headline counting them all, then a section per suite when there are several. */
 export function renderSuitesComment(suites: SuiteReport[], context: ReportContext): string {
   return [commentMarker(context.key), ...renderBody(suites, context)].join("\n");
+}
+
+/**
+ * The report as a check: the headline as its title, and the comment as its summary, ending with whether failures
+ * are tolerated, as in quarantine mode, whatever the mode.
+ */
+export function renderCheck(suites: SuiteReport[], context: ReportContext): { title: string; summary: string } {
+  const lines = renderBody(suites, { ...context, mode: "quarantine" }, "Check");
+  const title = lines[0]!.replace(/^### (<img [^>]*> )?/, "");
+  const summary = lines.slice(2).join("\n");
+  return {
+    title,
+    summary: summary.length > MAX_CHECK_SUMMARY ? `${summary.slice(0, MAX_CHECK_SUMMARY - 30)}\n\n_…report truncated_` : summary,
+  };
 }
 
 export function renderSuitesSummary(suites: SuiteReport[], context: ReportContext): string {
@@ -154,7 +171,7 @@ function renderTrends(trends: FailureTrend[], of: string, context: ReportContext
   return lines;
 }
 
-function renderBody(suites: SuiteReport[], context: ReportContext): string[] {
+function renderBody(suites: SuiteReport[], context: ReportContext, decision = "Quarantine"): string[] {
   const all = combine(suites.map((suite) => suite.analysis));
   const lines = [`### ${headline(all)}`, ""];
 
@@ -175,8 +192,8 @@ function renderBody(suites: SuiteReport[], context: ReportContext): string[] {
     const tolerated = `${verdicts}${byHand}`;
     lines.push(
       context.blocking === 0
-        ? `🛡️ **Quarantine:** every failure is tolerated (${tolerated}), so this check passes.`
-        : `❌ **Quarantine:** ${plural(context.blocking, "failure")} not tolerated (${tolerated}), so this check fails.`,
+        ? `🛡️ **${decision}:** every failure is tolerated (${tolerated}), so this check passes.`
+        : `❌ **${decision}:** ${plural(context.blocking, "failure")} not tolerated (${tolerated}), so this check fails.`,
       "",
     );
   }

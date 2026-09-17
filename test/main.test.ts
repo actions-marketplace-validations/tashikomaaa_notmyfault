@@ -32,6 +32,7 @@ class FakeGitHub {
   labels: string[] = [];
   /** Pull requests associated with each commit. */
   pulls: Record<string, unknown[]> = {};
+  checks: Record<string, unknown>[] = [];
   requests: string[] = [];
   status = 200;
   private server: Server | undefined;
@@ -54,7 +55,10 @@ class FakeGitHub {
         const route = (method: string, pattern: RegExp) => (req.method === method ? pattern.exec(path) : null);
         let match: RegExpExecArray | null;
 
-        if ((match = route("GET", /^\/commits\/(\w+)\/pulls$/))) {
+        if (route("POST", /^\/check-runs$/)) {
+          this.checks.push(body);
+          reply(201, { html_url: `https://github.com/acme/shop/runs/${this.checks.length}` });
+        } else if ((match = route("GET", /^\/commits\/(\w+)\/pulls$/))) {
           reply(200, this.pulls[match[1]!] ?? []);
         } else if ((match = route("GET", /^\/issues\/(\d+)\/comments$/))) {
           reply(200, Number(match[1]) === PULL_REQUEST ? this.comments : []);
@@ -165,7 +169,7 @@ async function simulate(outcomes: Outcomes, options: RunOptions = {}) {
           repository: { default_branch: "main" },
           pull_request: {
             number: PULL_REQUEST,
-            head: { repo: { full_name: options.fork ? "someone/shop" : "acme/shop" } },
+            head: { sha: "f".repeat(40), repo: { full_name: options.fork ? "someone/shop" : "acme/shop" } },
             base: { repo: { full_name: "acme/shop" } },
           },
         }
@@ -365,6 +369,42 @@ describe("run", () => {
     const quiet = await simulate({}, { event: "pull_request", reports: reports({ totals: "pass" }), inputs: { "missing-tests": "false" } });
     expect(quiet.outputs).toMatchObject({ missing: "0" });
     expect(api.comments[0]!.body).not.toContain("Missing");
+  });
+
+  it("reports the run as a check of its own, failing only on failures not tolerated", async () => {
+    for (const pays of ["pass", "fail", "pass", "fail", "pass", "pass", "fail", "pass"] as const) await simulate({ pays, totals: "pass" });
+    const inputs = { check: "true" };
+
+    const flaky = await simulate({ pays: "fail", totals: "pass" }, { event: "pull_request", inputs });
+    expect(flaky.code).toBe(0);
+    expect(flaky.logs).toContain('Check "notmyfault" passed: https://github.com/acme/shop/runs/1');
+    expect(api.checks[0]).toMatchObject({
+      name: "notmyfault",
+      head_sha: "f".repeat(40),
+      status: "completed",
+      conclusion: "success",
+      details_url: expect.stringMatching(/\/actions\/runs\/\d+$/),
+      output: { title: "1 test failed, none of them look like your fault" },
+    });
+    expect((api.checks[0]!.output as { summary: string }).summary).toContain(
+      "🛡️ **Check:** every failure is tolerated (`flaky`), so this check passes.",
+    );
+
+    // Report mode: the step passes, the check fails.
+    const real = await simulate({ pays: "pass", totals: "fail" }, { event: "pull_request", inputs: { ...inputs, "check-name": "no new failure" } });
+    expect(real.code).toBe(0);
+    expect(api.checks[1]).toMatchObject({ name: "no new failure", conclusion: "failure", output: { title: "1 test failed, 1 looks related to this change" } });
+
+    // Runs on the tracked branch get a check on their commit.
+    const sha = "d".repeat(40);
+    await simulate({ pays: "pass", totals: "pass" }, { sha, inputs });
+    expect(api.checks[2]).toMatchObject({ head_sha: sha, conclusion: "success", output: { title: "All 2 tests passed" } });
+
+    api.status = 403;
+    const denied = await simulate({ pays: "pass", totals: "pass" }, { inputs });
+    expect(denied.logs).toContain('::warning::Could not create the check "notmyfault". Does the job have "checks: write" permission?');
+    const fork = await simulate({ pays: "pass", totals: "pass" }, { event: "pull_request", fork: true, inputs });
+    expect(fork.logs).toContain("Pull request from a fork: the token is read-only, no check is created.");
   });
 
   it("stays quiet on green pull requests without a previous comment", async () => {

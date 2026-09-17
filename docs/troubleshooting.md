@@ -87,6 +87,10 @@ The run was analyzed but not recorded. The end of the message contains the git e
 - `protected branch`, `rule violations` or `GH013`: a ruleset protects the history branch. Exclude it, see [Branch protection and rulesets](security.md#branch-protection-and-rulesets).
 - `stale info` or `concurrent writer`: many jobs wrote at the same moment and 6 attempts were not enough. The next run records normally. If it happens often, give jobs distinct keys.
 
+### `Could not create the check "…". Does the job have "checks: write" permission?`
+
+[`check`](configuration.md#check) is on, but the token cannot create checks. Add `checks: write` to the job permissions. If branch protection requires the check, pull requests wait until it reports.
+
 ### `Could not update flaky test issues. Does the job have "issues: write" permission?`
 
 [`flaky-issues`](configuration.md#flaky-issues) is on, but the token cannot write issues. Add `issues: write` to the job permissions, or turn `flaky-issues` off. Issues are never managed from pull requests, so this warning only appears on tracked branches.

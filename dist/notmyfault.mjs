@@ -164,6 +164,18 @@ var GitHubClient = class {
     const pull = merged.find((candidate) => candidate.merge_commit_sha === sha) ?? merged[0];
     return pull && { number: pull.number, url: pull.html_url };
   }
+  async createCheck(check) {
+    const response = await this.request("POST", `/repos/${this.repository}/check-runs`, {
+      name: check.name,
+      head_sha: check.sha,
+      status: "completed",
+      conclusion: check.success ? "success" : "failure",
+      completed_at: (/* @__PURE__ */ new Date()).toISOString(),
+      ...check.detailsUrl ? { details_url: check.detailsUrl } : {},
+      output: { title: check.title, summary: check.summary }
+    });
+    return (await response.json()).html_url;
+  }
   async findComment(issue, marker) {
     let path = `/repos/${this.repository}/issues/${issue}/comments?per_page=100`;
     while (path) {
@@ -222,7 +234,12 @@ function readContext(env) {
     tempDir: env.RUNNER_TEMP,
     defaultBranch: payload.repository?.default_branch,
     defaultKey: `${env.GITHUB_WORKFLOW ?? "workflow"}-${env.GITHUB_JOB ?? "job"}`,
-    pullRequest: typeof pr?.number === "number" ? { number: pr.number, fromFork: pr.head?.repo?.full_name !== (pr.base?.repo?.full_name ?? repository) } : void 0,
+    pullRequest: typeof pr?.number === "number" ? {
+      number: pr.number,
+      fromFork: pr.head?.repo?.full_name !== (pr.base?.repo?.full_name ?? repository),
+      // GITHUB_SHA is the merge commit GitHub creates for the run: checks show on the head of the pull request.
+      ...pr.head?.sha ? { headSha: pr.head.sha } : {}
+    } : void 0,
     defaultToken: void 0
   };
 }
@@ -261,6 +278,7 @@ function githubPlatform(env, io = new ActionIO(env)) {
       recordDenied: 'Does the job have "contents: write" permission?',
       commentDenied: 'Does the job have "pull-requests: write" permission?',
       commentFromFork: "Tokens are read-only on pull requests from forks; the job summary has the full report.",
+      checkDenied: 'Does the job have "checks: write" permission?',
       issuesDenied: 'Does the job have "issues: write" permission?'
     },
     rerunNotice: true
@@ -757,6 +775,7 @@ function renderBadge(history, now, evidenceTtlDays) {
 }
 
 // src/report.ts
+var MAX_CHECK_SUMMARY = 65535;
 var MAX_ROWS = 30;
 var MAX_MESSAGES = 10;
 var MAX_FIXED = 10;
@@ -774,6 +793,17 @@ function commentMarker(key) {
 }
 function renderSuitesComment(suites, context) {
   return [commentMarker(context.key), ...renderBody(suites, context)].join("\n");
+}
+function renderCheck(suites, context) {
+  const lines = renderBody(suites, { ...context, mode: "quarantine" }, "Check");
+  const title = lines[0].replace(/^### (<img [^>]*> )?/, "");
+  const summary = lines.slice(2).join("\n");
+  return {
+    title,
+    summary: summary.length > MAX_CHECK_SUMMARY ? `${summary.slice(0, MAX_CHECK_SUMMARY - 30)}
+
+_\u2026report truncated_` : summary
+  };
 }
 function renderSuitesSummary(suites, context) {
   const lines = renderBody(suites, context);
@@ -841,7 +871,7 @@ function renderTrends(trends, of, context) {
   lines.push("</details>");
   return lines;
 }
-function renderBody(suites, context) {
+function renderBody(suites, context, decision = "Quarantine") {
   const all = combine(suites.map((suite) => suite.analysis));
   const lines = [`### ${headline(all)}`, ""];
   for (const suite of suites) {
@@ -859,7 +889,7 @@ function renderBody(suites, context) {
     const byHand = context.quarantined ? `, and ${plural(context.quarantined, "failure")} quarantined by hand` : "";
     const tolerated = `${verdicts}${byHand}`;
     lines.push(
-      context.blocking === 0 ? `\u{1F6E1}\uFE0F **Quarantine:** every failure is tolerated (${tolerated}), so this check passes.` : `\u274C **Quarantine:** ${plural(context.blocking, "failure")} not tolerated (${tolerated}), so this check fails.`,
+      context.blocking === 0 ? `\u{1F6E1}\uFE0F **${decision}:** every failure is tolerated (${tolerated}), so this check passes.` : `\u274C **${decision}:** ${plural(context.blocking, "failure")} not tolerated (${tolerated}), so this check fails.`,
       ""
     );
   }
@@ -1906,6 +1936,7 @@ async function evaluate(loaded, platform, settings, store, now) {
     const noteworthy = sum((a) => a.failures.length + a.retried.length + a.fixed.length + a.missing.length) > 0;
     await comment(platform, settings, renderSuitesComment(reports, reportContext), noteworthy);
   }
+  if (settings.check) await reportCheck(settings.check, platform, settings, renderCheck(reports, reportContext), blocking.length === 0);
   const count2 = (verdicts) => failures.filter((f) => verdicts.includes(f.verdict)).length;
   io.setOutput("total", sum((a) => a.total));
   io.setOutput("failed", failures.length);
@@ -1955,6 +1986,7 @@ function readSettings(platform) {
     annotations: io.booleanInput("annotations", true),
     flakyIssues: io.booleanInput("flaky-issues", false),
     missingTests: io.booleanInput("missing-tests", true),
+    ...io.booleanInput("check", false) ? { check: io.input("check-name", "notmyfault") } : {},
     record: io.booleanInput("record", true),
     window: io.integerInput("window", 50, 5)
   };
@@ -2169,6 +2201,31 @@ async function comment(platform, settings, body, create) {
   } catch (error) {
     const hint = error instanceof ApiError && error.denied ? ` ${pullRequest.fromFork ? text.commentFromFork : text.commentDenied}` : "";
     io.warning(`Could not comment on the ${text.pullRequest}.${hint} ${errorMessage(error)}`);
+  }
+}
+async function reportCheck(name, platform, settings, output, success) {
+  const { context, io, text } = platform;
+  const forge = platform.forge(settings.token);
+  if (!forge.createCheck) {
+    io.warning(`${io.describeInput("check")} is ignored: checks only exist on GitHub. The notmyfault job is the check here.`);
+    return;
+  }
+  if (context.pullRequest?.fromFork) {
+    io.info(`${capitalize2(text.pullRequest)} from a fork: the token is read-only, no check is created.`);
+    return;
+  }
+  try {
+    const url = await forge.createCheck({
+      name,
+      sha: context.pullRequest?.headSha ?? context.sha,
+      success,
+      ...output,
+      ...context.runUrl ? { detailsUrl: context.runUrl } : {}
+    });
+    io.info(`Check "${name}" ${success ? "passed" : "failed"}: ${url}`);
+  } catch (error) {
+    const hint = error instanceof ApiError && error.denied ? ` ${text.checkDenied}` : "";
+    io.warning(`Could not create the check "${name}".${hint} ${errorMessage(error)}`);
   }
 }
 function capitalize2(value) {
@@ -2441,7 +2498,8 @@ function gitlabPlatform(env, io = new GitLabIO(env)) {
       recordDenied: jobTokenOnly ? 'The job token can only push once "Allow Git push requests to the repository" is on in Settings > CI/CD > Job token permissions. Or set NOTMYFAULT_TOKEN to an access token with the write_repository scope and at least the Developer role.' : "Does NOTMYFAULT_TOKEN have the write_repository scope and at least the Developer role?",
       commentDenied: apiDenied,
       commentFromFork: "Pipelines of merge requests from forks cannot use the variables of the project; the summary file has the full report.",
-      issuesDenied: apiDenied
+      issuesDenied: apiDenied,
+      checkDenied: ""
     },
     rerunNotice: false
   };

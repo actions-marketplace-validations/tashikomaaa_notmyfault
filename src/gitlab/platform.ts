@@ -36,6 +36,7 @@ export function gitlabPlatform(env: NodeJS.ProcessEnv, io: Io = new GitLabIO(env
       commentFromFork:
         "Pipelines of merge requests from forks cannot use the variables of the project; the summary file has the full report.",
       issuesDenied: apiDenied,
+      checkDenied: "",
     },
     rerunNotice: false,
   };

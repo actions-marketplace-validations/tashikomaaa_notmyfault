@@ -5,7 +5,7 @@ interface EventPayload {
   repository?: { default_branch?: string };
   pull_request?: {
     number?: number;
-    head?: { repo?: { full_name?: string } | null };
+    head?: { sha?: string; repo?: { full_name?: string } | null };
     base?: { repo?: { full_name?: string } };
   };
 }
@@ -39,7 +39,12 @@ export function readContext(env: NodeJS.ProcessEnv): RunContext {
     defaultKey: `${env.GITHUB_WORKFLOW ?? "workflow"}-${env.GITHUB_JOB ?? "job"}`,
     pullRequest:
       typeof pr?.number === "number"
-        ? { number: pr.number, fromFork: pr.head?.repo?.full_name !== (pr.base?.repo?.full_name ?? repository) }
+        ? {
+            number: pr.number,
+            fromFork: pr.head?.repo?.full_name !== (pr.base?.repo?.full_name ?? repository),
+            // GITHUB_SHA is the merge commit GitHub creates for the run: checks show on the head of the pull request.
+            ...(pr.head?.sha ? { headSha: pr.head.sha } : {}),
+          }
         : undefined,
     defaultToken: undefined,
   };

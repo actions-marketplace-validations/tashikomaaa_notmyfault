@@ -226,6 +226,7 @@ Without `NOTMYFAULT_TOKEN`, notmyfault uses the job token. It reads the history,
 ## Differences with GitHub
 
 - **No re-run notice.** GitHub workflows can re-run failed jobs when only flaky tests failed. On GitLab, [`retry`](https://docs.gitlab.com/ci/yaml/#retry) on the test job retries every failure.
+- **No separate check.** GitLab has no checks: `NOTMYFAULT_CHECK` is ignored, with a warning. In quarantine mode, the notmyfault job already fails only on failures that are not tolerated.
 - **No annotations next to the code.** The Code Quality widget takes their place. Showing its findings in the diff needs GitLab Ultimate.
 - **Merge requests from forks** are compared with the history of the target project, but never recorded. Their pipelines run in the fork by default, without the variables of your project: the comment is missing and the job log explains why. A maintainer can run the pipeline in the parent project instead.
 - **Retrying the test job** does not retry the notmyfault job, which already ran. Retry it too, or run a new pipeline: a test failing then passing on the same commit is proven flaky either way.

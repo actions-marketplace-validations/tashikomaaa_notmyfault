@@ -47,6 +47,12 @@ inputs:
   missing-tests:
     description: Report tests that ran in the latest run on a tracked branch but are missing from this run.
     default: "true"
+  check:
+    description: Report the run as a check of its own, failing only on failures not covered by tolerate, for branch protection to require. Needs the checks write permission.
+    default: "false"
+  check-name:
+    description: Name of the check.
+    default: notmyfault
   record:
     description: Record this run in the history.
     default: "true"

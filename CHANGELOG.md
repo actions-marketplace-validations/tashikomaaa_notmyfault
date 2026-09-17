@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- `check: true` reports each run as a check of its own, named by `check-name`, failing only on failures not covered by `tolerate`: branch protection can require it instead of the job, without quarantine mode or `continue-on-error`. It needs the `checks: write` permission ([#19](https://github.com/tashikomaaa/notmyfault/issues/19)).
+
 ## [1.6.0] - 2026-09-17
 
 ### Added

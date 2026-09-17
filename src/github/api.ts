@@ -1,4 +1,4 @@
-import { ApiError, type Forge, type Issue } from "../platform";
+import { ApiError, type CheckReport, type Forge, type Issue } from "../platform";
 
 interface IssueComment {
   id: number;
@@ -83,6 +83,19 @@ export class GitHubClient implements Forge {
     const merged = pulls.filter((pull) => pull.merged_at !== null);
     const pull = merged.find((candidate) => candidate.merge_commit_sha === sha) ?? merged[0];
     return pull && { number: pull.number, url: pull.html_url };
+  }
+
+  async createCheck(check: CheckReport): Promise<string> {
+    const response = await this.request("POST", `/repos/${this.repository}/check-runs`, {
+      name: check.name,
+      head_sha: check.sha,
+      status: "completed",
+      conclusion: check.success ? "success" : "failure",
+      completed_at: new Date().toISOString(),
+      ...(check.detailsUrl ? { details_url: check.detailsUrl } : {}),
+      output: { title: check.title, summary: check.summary },
+    });
+    return ((await response.json()) as { html_url: string }).html_url;
   }
 
   private async findComment(issue: number, marker: string): Promise<IssueComment | undefined> {

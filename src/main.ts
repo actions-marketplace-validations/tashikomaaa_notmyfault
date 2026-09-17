@@ -28,6 +28,7 @@ import {
   duration,
   plainExplanation,
   quarantineNote,
+  renderCheck,
   renderSuitesComment,
   renderSuitesSummary,
   type Mode,
@@ -79,6 +80,8 @@ export interface Settings {
   annotations: boolean;
   flakyIssues: boolean;
   missingTests: boolean;
+  /** Name of the check to report the run as, if any. */
+  check?: string;
   record: boolean;
   window: number;
 }
@@ -234,6 +237,7 @@ async function evaluate(loaded: LoadedSuite[], platform: Platform, settings: Set
     const noteworthy = sum((a) => a.failures.length + a.retried.length + a.fixed.length + a.missing.length) > 0;
     await comment(platform, settings, renderSuitesComment(reports, reportContext), noteworthy);
   }
+  if (settings.check) await reportCheck(settings.check, platform, settings, renderCheck(reports, reportContext), blocking.length === 0);
 
   const count = (verdicts: Verdict[]) => failures.filter((f) => verdicts.includes(f.verdict)).length;
   io.setOutput("total", sum((a) => a.total));
@@ -290,6 +294,7 @@ export function readSettings(platform: Platform): Settings {
     annotations: io.booleanInput("annotations", true),
     flakyIssues: io.booleanInput("flaky-issues", false),
     missingTests: io.booleanInput("missing-tests", true),
+    ...(io.booleanInput("check", false) ? { check: io.input("check-name", "notmyfault") } : {}),
     record: io.booleanInput("record", true),
     window: io.integerInput("window", 50, 5),
   };
@@ -547,6 +552,38 @@ async function comment(platform: Platform, settings: Settings, body: string, cre
     const hint =
       error instanceof ApiError && error.denied ? ` ${pullRequest.fromFork ? text.commentFromFork : text.commentDenied}` : "";
     io.warning(`Could not comment on the ${text.pullRequest}.${hint} ${errorMessage(error)}`);
+  }
+}
+
+async function reportCheck(
+  name: string,
+  platform: Platform,
+  settings: Settings,
+  output: { title: string; summary: string },
+  success: boolean,
+): Promise<void> {
+  const { context, io, text } = platform;
+  const forge = platform.forge(settings.token);
+  if (!forge.createCheck) {
+    io.warning(`${io.describeInput("check")} is ignored: checks only exist on GitHub. The notmyfault job is the check here.`);
+    return;
+  }
+  if (context.pullRequest?.fromFork) {
+    io.info(`${capitalize(text.pullRequest)} from a fork: the token is read-only, no check is created.`);
+    return;
+  }
+  try {
+    const url = await forge.createCheck({
+      name,
+      sha: context.pullRequest?.headSha ?? context.sha,
+      success,
+      ...output,
+      ...(context.runUrl ? { detailsUrl: context.runUrl } : {}),
+    });
+    io.info(`Check "${name}" ${success ? "passed" : "failed"}: ${url}`);
+  } catch (error) {
+    const hint = error instanceof ApiError && error.denied ? ` ${text.checkDenied}` : "";
+    io.warning(`Could not create the check "${name}".${hint} ${errorMessage(error)}`);
   }
 }
 
