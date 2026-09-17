@@ -75,8 +75,8 @@ jobs:
           fi
           header="AUTHORIZATION: basic $(printf 'oauth2:%s' "$MIRROR_TOKEN" | base64 -w0)"
           # main without a pipeline, then the tag alone, whose pipeline creates the release.
-          git -c "http.extraheader=$header" push --force -o ci.skip "$MIRROR_URL" origin/main:refs/heads/main
-          git -c "http.extraheader=$header" push --force "$MIRROR_URL" "refs/tags/$TAG:refs/tags/$TAG"
+          git -c "http.extraheader=$header" push -o ci.skip "$MIRROR_URL" origin/main:refs/heads/main
+          git -c "http.extraheader=$header" push "$MIRROR_URL" "refs/tags/$TAG:refs/tags/$TAG"
 
       # npx notmyfault, for CI systems without an integration. Skipped until the NPM_TOKEN secret exists.
       - name: Publish to npm
