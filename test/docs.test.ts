@@ -132,6 +132,13 @@ describe("templates/notmyfault.gitlab-ci.yml", () => {
     expect(existsSync(join(root, path!))).toBe(true);
   });
 
+  it("publishes the pages of the history branch with GitLab Pages", () => {
+    const template = read("templates/notmyfault.gitlab-ci.yml");
+    const pages = template.slice(template.indexOf("\n.notmyfault-pages:"));
+    expect(pages).toContain("git --work-tree=public checkout FETCH_HEAD -- index.html reports badges");
+    expect(pages).toContain("paths: [public]");
+  });
+
   it("checks the checksum when one is set, before running the file", () => {
     const script = read("templates/notmyfault.gitlab-ci.yml");
     const check = script.indexOf('echo "$NOTMYFAULT_SHA256  /tmp/notmyfault.mjs" | sha256sum -c -');

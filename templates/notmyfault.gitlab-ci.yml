@@ -8,6 +8,12 @@
 #   needs: [test]              # the job writing the JUnit reports, as artifacts:paths
 #   variables:
 #     NOTMYFAULT_JUNIT: reports/*.xml
+#
+# pages:                       # publishes the history pages with GitLab Pages
+#   extends: .notmyfault-pages
+#   needs: [notmyfault]
+#   rules:
+#     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
 .notmyfault:
   image: node:24-alpine
@@ -33,3 +39,17 @@
     reports:
       codequality: gl-code-quality-report.json
       dotenv: notmyfault.env
+
+# The pages notmyfault writes on the history branch, as a GitLab Pages site.
+.notmyfault-pages:
+  image: alpine:3
+  stage: .post
+  variables:
+    NOTMYFAULT_HISTORY_BRANCH: notmyfault-history
+  script:
+    - command -v git > /dev/null || apk add --no-cache git
+    - git fetch --quiet --depth 1 origin "$NOTMYFAULT_HISTORY_BRANCH"
+    - mkdir -p public
+    - git --work-tree=public checkout FETCH_HEAD -- index.html reports badges
+  artifacts:
+    paths: [public]
