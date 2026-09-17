@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-09-17
+
 ### Added
 
 - notmyfault is a component of the GitLab CI/CD Catalog, with inputs, published from the repository by a release job when a GitLab mirror gets a release tag. The template gets a `.notmyfault-pages` job, which publishes the history pages with GitLab Pages ([#24](https://github.com/tashikomaaa/notmyfault/issues/24)).
@@ -117,7 +119,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - Pull request comment kept up to date, job summary with the most unreliable tests, and step outputs.
 - Quarantine mode, so that known flaky tests stop blocking merges.
 
-[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.10.0...HEAD
+[1.10.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.6.0...v1.7.0
