@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Added
 
 - Tests already failing on the tracked branch say since when: the commit of the first failed run of the streak and the pull or merge request it came from, both linked, in the comment, the logs, the annotations, the flaky test issues and the history pages. The history records it as `failingSince` ([#15](https://github.com/tashikomaaa/notmyfault/issues/15)).
+- Tests that ran in the latest run on the tracked branch but are missing from a run are listed as missing, a whole file or suite on one line: deleted, renamed or no longer found by the test runner. They make notmyfault comment on pull requests, never fail the step, and are counted by the `missing` output. Turn it off with `missing-tests: false` ([#16](https://github.com/tashikomaaa/notmyfault/issues/16)).
 
 ## [1.5.0] - 2026-09-17
 

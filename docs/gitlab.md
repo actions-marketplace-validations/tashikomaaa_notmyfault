@@ -173,7 +173,7 @@ Every [input](configuration.md#inputs) of the GitHub Action is a variable: its n
 | `NOTMYFAULT_CODE_QUALITY_FILE` | `gl-code-quality-report.json` | Where the Code Quality report is written |
 | `NOTMYFAULT_OUTPUT_FILE` | `notmyfault.env` | Where the outputs are written, as a dotenv file |
 
-The others: `NOTMYFAULT_SUITES`, `NOTMYFAULT_MODE`, `NOTMYFAULT_TOLERATE`, `NOTMYFAULT_QUARANTINE`, `NOTMYFAULT_HISTORY_BRANCH`, `NOTMYFAULT_COMMENT`, `NOTMYFAULT_ANNOTATIONS`, `NOTMYFAULT_FLAKY_ISSUES`, `NOTMYFAULT_RECORD` and `NOTMYFAULT_WINDOW`. Multi-line values, like several suites, work in YAML:
+The others: `NOTMYFAULT_SUITES`, `NOTMYFAULT_MODE`, `NOTMYFAULT_TOLERATE`, `NOTMYFAULT_QUARANTINE`, `NOTMYFAULT_HISTORY_BRANCH`, `NOTMYFAULT_COMMENT`, `NOTMYFAULT_ANNOTATIONS`, `NOTMYFAULT_FLAKY_ISSUES`, `NOTMYFAULT_MISSING_TESTS`, `NOTMYFAULT_RECORD` and `NOTMYFAULT_WINDOW`. Multi-line values, like several suites, work in YAML:
 
 ```yaml
   variables:
@@ -190,7 +190,7 @@ A pipeline is **tracked**, and builds the history, when it runs for a branch lis
 - **The Code Quality widget** of the merge request lists the failed tests notmyfault finds in the repository, with their verdict: *major* for new and suspect failures, *info* for flaky and already failing tests. This replaces the annotations of GitHub.
 - **The summary**, with the rankings and the trend charts, in the *notmyfault report* artifact linked from the merge request.
 - **The job log**, with each verdict in a collapsible section.
-- **Outputs** as variables for later jobs that `needs` the notmyfault job: `NOTMYFAULT_TOTAL`, `NOTMYFAULT_FAILED`, `NOTMYFAULT_NEW_FAILURES`, `NOTMYFAULT_FLAKY_FAILURES`, `NOTMYFAULT_BROKEN_FAILURES`, `NOTMYFAULT_RETRIED`, `NOTMYFAULT_FIXED`, `NOTMYFAULT_SLOWER`, `NOTMYFAULT_QUARANTINED` and `NOTMYFAULT_BLOCKING`. See [Outputs](configuration.md#outputs).
+- **Outputs** as variables for later jobs that `needs` the notmyfault job: `NOTMYFAULT_TOTAL`, `NOTMYFAULT_FAILED`, `NOTMYFAULT_NEW_FAILURES`, `NOTMYFAULT_FLAKY_FAILURES`, `NOTMYFAULT_BROKEN_FAILURES`, `NOTMYFAULT_RETRIED`, `NOTMYFAULT_FIXED`, `NOTMYFAULT_SLOWER`, `NOTMYFAULT_MISSING`, `NOTMYFAULT_QUARANTINED` and `NOTMYFAULT_BLOCKING`. See [Outputs](configuration.md#outputs).
 - **Flaky test issues** with `NOTMYFAULT_FLAKY_ISSUES: "true"`, labeled `flaky-test`, see [`flaky-issues`](configuration.md#flaky-issues).
 
 The history branch is the same as on GitHub, with its badges and pages, see [How it works](how-it-works.md#the-history). A project badge (**Settings > General > Badges**) can show the number of flaky tests of a public project:

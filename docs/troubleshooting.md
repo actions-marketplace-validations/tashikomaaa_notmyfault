@@ -112,7 +112,7 @@ A matched file could not be read. The other reports are still used.
 | Message | Meaning |
 |---|---|
 | `Read N tests from M report(s).` | Reports were parsed. |
-| `new`, `suspect`, `broken`, `flaky`, `retried`, `fixed` followed by a test name | The verdict of each failure, the tests that passed after a retry and the tests the run fixes, in a collapsible group. |
+| `new`, `suspect`, `broken`, `flaky`, `retried`, `fixed`, `slower`, `missing` followed by a test name | The verdict of each failure, the tests that passed after a retry, the tests the run fixes, the slower tests and the [missing tests](verdicts.md#missing-tests), in a collapsible group. |
 | `History updated on branch "…".` | The run was recorded. |
 | `Nothing new to record.` | The run taught nothing new, so nothing was written. |
 | `Pull request from a fork: the token is read-only, history is not recorded.` | Expected for pull requests from forks. |
@@ -120,6 +120,7 @@ A matched file could not be read. The other reports are still used.
 
 ## Verdicts look wrong
 
+- **Tests are reported missing, but they ran.** They ran in another job sharing the same `key`, or the latest run on the tracked branch ran more tests than pull requests do. Give each job its own key, or set [`missing-tests: false`](configuration.md#missing-tests).
 - **Everything is a new failure.** The history is empty or unreadable. Check the warnings above, and that the workflow runs on `push` to a branch listed in `track-branches`.
 - **A test is reported as flaky, but it fails for real.** It had proof of flakiness in the last 30 days, or failed in isolation 3 times. Once it fails too many runs in a row on the tracked branch to be bad luck, from 3 to 10 depending on how often it failed before, it becomes *already failing*. You can also [reset the history](recipes.md#reset-the-history).
 - **A flaky test is reported as a new failure on every run.** Its error was never seen on the tracked branch. If its message contains values that change on every run other than numbers and hexadecimal ids, like random names, every failure looks new: please [open an issue](https://github.com/tashikomaaa/notmyfault/issues) with a few of its messages. See [Errors](how-it-works.md#errors).

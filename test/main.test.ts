@@ -348,6 +348,25 @@ describe("run", () => {
     expect(api.comments[0]!.body).toContain("- <code>checkout › search</code>, failed the last 2 runs there");
   });
 
+  it("warns about tests that ran on main but not in a pull request", async () => {
+    const reports = (unit: Outcomes, e2e?: Outcomes) => ({ "reports/unit.xml": unit, ...(e2e ? { "reports/e2e.xml": e2e } : {}) });
+    await simulate({}, { reports: reports({ totals: "pass", pays: "pass" }, { login: "pass" }) });
+    rmSync(join(root, "workspace", "reports"), { recursive: true, force: true });
+
+    const pr = await simulate({}, { event: "pull_request", reports: reports({ totals: "pass" }) });
+    expect(pr.code).toBe(0);
+    expect(pr.outputs).toMatchObject({ failed: "0", missing: "2" });
+    expect(pr.logs).toContain("missing  unit › checkout › login");
+    expect(pr.logs).toContain("missing  unit › checkout › pays");
+    // Nothing failed, but the comment warns about it.
+    expect(api.comments).toHaveLength(1);
+    expect(api.comments[0]!.body).toContain("👻 **Missing:** 2 tests of the latest run on `main` did not run here.");
+
+    const quiet = await simulate({}, { event: "pull_request", reports: reports({ totals: "pass" }), inputs: { "missing-tests": "false" } });
+    expect(quiet.outputs).toMatchObject({ missing: "0" });
+    expect(api.comments[0]!.body).not.toContain("Missing");
+  });
+
   it("stays quiet on green pull requests without a previous comment", async () => {
     const result = await simulate({ ok: "pass" }, { event: "pull_request" });
     expect(result.code).toBe(0);

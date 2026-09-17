@@ -118,6 +118,19 @@ A test that passes, but takes much longer than usual, is listed as **slower**:
 
 A test getting slower is often a test about to time out, or a change that made the code slower. It does not make notmyfault comment on its own, and it never fails the step: the `slower` output counts them if you want to act on it.
 
+## Missing tests
+
+A test that ran in the latest run on the tracked branch, but is not in the reports of this run, is listed as **missing**:
+
+> 👻 **Missing:** 3 tests of the latest run on `main` did not run here. Deleted or renamed on purpose? Nothing to do. Otherwise, check that the test runner still finds them.
+>
+> - `test/search.test.ts`: all 2 tests
+> - `test/cart.test.ts › checkout > applies percentage discount codes`
+
+A pull request that deletes a test file, skips a suite by mistake or breaks test discovery turns green: fewer tests, no failure. This makes it visible. A whole file or suite missing reads as one line, and tests skipped on purpose are not missing: they are in the reports.
+
+Missing tests never fail the step, but they make notmyfault comment on a pull request, and the `missing` output counts them. Turn them off with [`missing-tests: false`](configuration.md#missing-tests) when runs only cover part of the tests.
+
 ## Annotations
 
 When the report tells where a failed test lives, notmyfault annotates it with its verdict and the first line of its failure message. Annotations appear in the workflow run and, on pull requests, next to the code in the **Files changed** tab when the annotated file is part of the change.

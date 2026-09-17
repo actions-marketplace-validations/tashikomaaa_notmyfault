@@ -391,6 +391,7 @@ function prune(history, options) {
 
 // src/analyze.ts
 var DAY_MS2 = 24 * 60 * 60 * 1e3;
+var SEPARATOR = " \u203A ";
 var LIKELY_FLAKY_ISOLATED_FAILURES = 3;
 var UNLIKELY_STREAK_CHANCE = 0.01;
 var MIN_BROKEN_STREAK = 3;
@@ -400,7 +401,16 @@ var SLOWER_MIN_DIFFERENCE_MS = 500;
 var SLOWER_MIN_RUNS = 5;
 var VERDICT_ORDER = { new: 0, suspect: 1, broken: 2, flaky: 3 };
 function analyze(results, history, now, evidenceTtlDays) {
-  const analysis = { total: results.length, passed: 0, skipped: 0, failures: [], retried: [], fixed: [], slower: [] };
+  const analysis = {
+    total: results.length,
+    passed: 0,
+    skipped: 0,
+    failures: [],
+    retried: [],
+    fixed: [],
+    slower: [],
+    missing: missingTests(results, history)
+  };
   const checkFixed = (test) => {
     const tested = history.tests[test.id];
     if (!tested?.outcomes.endsWith(FAIL)) return;
@@ -451,6 +461,20 @@ function analyze(results, history, now, evidenceTtlDays) {
   analysis.fixed.sort((a, b) => a.test.title.localeCompare(b.test.title));
   analysis.slower.sort((a, b) => b.duration / b.usual - a.duration / a.usual || a.test.title.localeCompare(b.test.title));
   return analysis;
+}
+function missingTests(results, history) {
+  const present = new Set(results.map((result) => result.id));
+  const groups = /* @__PURE__ */ new Map();
+  for (const [id, test] of Object.entries(history.tests)) {
+    if (history.runs === 0 || test.lastRun !== history.runs) continue;
+    const index = id.lastIndexOf(SEPARATOR);
+    const name = index === -1 ? "" : id.slice(0, index);
+    const group = groups.get(name) ?? { ids: [], latest: 0 };
+    group.latest++;
+    if (!present.has(id)) group.ids.push(id);
+    groups.set(name, group);
+  }
+  return [...groups].filter(([, group]) => group.ids.length > 0).map(([name, group]) => ({ group: name, ids: group.ids.sort(), whole: group.ids.length === group.latest })).sort((a, b) => a.group.localeCompare(b.group));
 }
 function computeStats(history, now, evidenceTtlDays) {
   const outcomes = history?.outcomes ?? "";
@@ -737,6 +761,7 @@ var MAX_ROWS = 30;
 var MAX_MESSAGES = 10;
 var MAX_FIXED = 10;
 var MAX_SLOWER = 10;
+var MAX_MISSING = 10;
 var MAX_CHART_TITLE = 60;
 var PROJECT_URL = "https://github.com/tashikomaaa/notmyfault";
 var BADGES_URL = "https://raw.githubusercontent.com/tashikomaaa/notmyfault/main/docs/assets";
@@ -857,7 +882,8 @@ function combine(analyses) {
     failures: analyses.flatMap((a) => a.failures),
     retried: analyses.flatMap((a) => a.retried),
     fixed: analyses.flatMap((a) => a.fixed),
-    slower: analyses.flatMap((a) => a.slower)
+    slower: analyses.flatMap((a) => a.slower),
+    missing: analyses.flatMap((a) => a.missing)
   };
 }
 function renderSuite(analysis, context) {
@@ -877,6 +903,21 @@ function renderSuite(analysis, context) {
   }
   if (analysis.fixed.length > 0) lines.push(...renderFixed(analysis.fixed, context));
   if (analysis.slower.length > 0) lines.push(...renderSlower(analysis.slower, context));
+  if (analysis.missing.length > 0) lines.push(...renderMissing(analysis.missing, context));
+  return lines;
+}
+function renderMissing(missing, context) {
+  const count2 = missing.reduce((sum, group) => sum + group.ids.length, 0);
+  const items = missing.flatMap(
+    (group) => group.whole && group.group && group.ids.length > 1 ? [`- ${code(group.group)}: all ${group.ids.length} tests`] : group.ids.map((id) => `- ${code(id)}`)
+  );
+  const lines = [
+    `\u{1F47B} **Missing:** ${plural(count2, "test")} of the latest run on ${branches(context)} did not run here. Deleted or renamed on purpose? Nothing to do. Otherwise, check that the test runner still finds ${count2 === 1 ? "it" : "them"}.`,
+    "",
+    ...items.slice(0, MAX_MISSING)
+  ];
+  if (items.length > MAX_MISSING) lines.push(`- _\u2026and ${items.length - MAX_MISSING} more_`);
+  lines.push("");
   return lines;
 }
 function headline(analysis) {
@@ -1355,7 +1396,7 @@ function applyQuarantine(analysis, entries, now) {
 
 // src/renames.ts
 var MIN_SIMILARITY = 0.6;
-var SEPARATOR = " \u203A ";
+var SEPARATOR2 = " \u203A ";
 function detectRenames(history, results) {
   const previousRun = history.runs;
   if (previousRun === 0) return [];
@@ -1399,12 +1440,12 @@ function applyRenames(history, renames) {
   }
 }
 function prefix(id) {
-  const index = id.lastIndexOf(SEPARATOR);
+  const index = id.lastIndexOf(SEPARATOR2);
   return index === -1 ? "" : id.slice(0, index);
 }
 function lastPart(id) {
-  const index = id.lastIndexOf(SEPARATOR);
-  return index === -1 ? id : id.slice(index + SEPARATOR.length);
+  const index = id.lastIndexOf(SEPARATOR2);
+  return index === -1 ? id : id.slice(index + SEPARATOR2.length);
 }
 function similarity(a, b) {
   if (a === b) return 1;
@@ -1787,7 +1828,9 @@ async function evaluate(loaded, platform, settings, store, now) {
     const history = await loadHistory(store, historyPath(suite.key), settings, io);
     const renames = tracked ? detectRenames(history, suite.results) : [];
     applyRenames(history, renames);
-    suites.push({ ...suite, history, renames, analysis: analyze(suite.results, history, now, EVIDENCE_TTL_DAYS) });
+    const analysis = analyze(suite.results, history, now, EVIDENCE_TTL_DAYS);
+    if (!settings.missingTests) analysis.missing = [];
+    suites.push({ ...suite, history, renames, analysis });
   }
   const named = suites.length > 1;
   for (const entry of settings.quarantine.filter((candidate) => !isActive(candidate, now))) {
@@ -1823,6 +1866,10 @@ async function evaluate(loaded, platform, settings, store, now) {
     for (const test of analysis.retried) io.info(`retried  ${test.title}`);
     for (const fixed of analysis.fixed) io.info(`fixed    ${fixed.test.title}`);
     for (const slow of analysis.slower) io.info(`slower   ${slow.test.title} (${duration(slow.duration)}, usually ${duration(slow.usual)})`);
+    for (const group of analysis.missing) {
+      if (group.whole && group.group && group.ids.length > 1) io.info(`missing  ${group.group} (all ${group.ids.length} tests)`);
+      else for (const id of group.ids) io.info(`missing  ${id}`);
+    }
     io.endGroup();
   }
   const onlyFlaky = platform.rerunNotice && failures.length > 0 && failures.every((failure) => failure.verdict === "flaky");
@@ -1856,7 +1903,7 @@ async function evaluate(loaded, platform, settings, store, now) {
   });
   io.appendSummary(renderSuitesSummary(reports, reportContext));
   if (settings.comment && context.pullRequest) {
-    const noteworthy = sum((a) => a.failures.length + a.retried.length + a.fixed.length) > 0;
+    const noteworthy = sum((a) => a.failures.length + a.retried.length + a.fixed.length + a.missing.length) > 0;
     await comment(platform, settings, renderSuitesComment(reports, reportContext), noteworthy);
   }
   const count2 = (verdicts) => failures.filter((f) => verdicts.includes(f.verdict)).length;
@@ -1868,6 +1915,7 @@ async function evaluate(loaded, platform, settings, store, now) {
   io.setOutput("retried", sum((a) => a.retried.length));
   io.setOutput("fixed", sum((a) => a.fixed.length));
   io.setOutput("slower", sum((a) => a.slower.length));
+  io.setOutput("missing", sum((a) => a.missing.reduce((total, group) => total + group.ids.length, 0)));
   io.setOutput("quarantined", quarantined);
   io.setOutput("blocking", blocking.length);
   if (settings.mode === "quarantine" && blocking.length > 0) {
@@ -1906,6 +1954,7 @@ function readSettings(platform) {
     comment: io.booleanInput("comment", true),
     annotations: io.booleanInput("annotations", true),
     flakyIssues: io.booleanInput("flaky-issues", false),
+    missingTests: io.booleanInput("missing-tests", true),
     record: io.booleanInput("record", true),
     window: io.integerInput("window", 50, 5)
   };

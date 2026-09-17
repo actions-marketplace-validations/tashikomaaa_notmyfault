@@ -78,6 +78,7 @@ export interface Settings {
   comment: boolean;
   annotations: boolean;
   flakyIssues: boolean;
+  missingTests: boolean;
   record: boolean;
   window: number;
 }
@@ -150,7 +151,9 @@ async function evaluate(loaded: LoadedSuite[], platform: Platform, settings: Set
     // On tracked branches, a renamed test keeps its history in this very run, or its failure would look new.
     const renames = tracked ? detectRenames(history, suite.results) : [];
     applyRenames(history, renames);
-    suites.push({ ...suite, history, renames, analysis: analyze(suite.results, history, now, EVIDENCE_TTL_DAYS) });
+    const analysis = analyze(suite.results, history, now, EVIDENCE_TTL_DAYS);
+    if (!settings.missingTests) analysis.missing = [];
+    suites.push({ ...suite, history, renames, analysis });
   }
   const named = suites.length > 1;
   for (const entry of settings.quarantine.filter((candidate) => !isActive(candidate, now))) {
@@ -188,6 +191,10 @@ async function evaluate(loaded: LoadedSuite[], platform: Platform, settings: Set
     for (const test of analysis.retried) io.info(`retried  ${test.title}`);
     for (const fixed of analysis.fixed) io.info(`fixed    ${fixed.test.title}`);
     for (const slow of analysis.slower) io.info(`slower   ${slow.test.title} (${duration(slow.duration)}, usually ${duration(slow.usual)})`);
+    for (const group of analysis.missing) {
+      if (group.whole && group.group && group.ids.length > 1) io.info(`missing  ${group.group} (all ${group.ids.length} tests)`);
+      else for (const id of group.ids) io.info(`missing  ${id}`);
+    }
     io.endGroup();
   }
 
@@ -224,7 +231,7 @@ async function evaluate(loaded: LoadedSuite[], platform: Platform, settings: Set
   });
   io.appendSummary(renderSuitesSummary(reports, reportContext));
   if (settings.comment && context.pullRequest) {
-    const noteworthy = sum((a) => a.failures.length + a.retried.length + a.fixed.length) > 0;
+    const noteworthy = sum((a) => a.failures.length + a.retried.length + a.fixed.length + a.missing.length) > 0;
     await comment(platform, settings, renderSuitesComment(reports, reportContext), noteworthy);
   }
 
@@ -237,6 +244,7 @@ async function evaluate(loaded: LoadedSuite[], platform: Platform, settings: Set
   io.setOutput("retried", sum((a) => a.retried.length));
   io.setOutput("fixed", sum((a) => a.fixed.length));
   io.setOutput("slower", sum((a) => a.slower.length));
+  io.setOutput("missing", sum((a) => a.missing.reduce((total, group) => total + group.ids.length, 0)));
   io.setOutput("quarantined", quarantined);
   io.setOutput("blocking", blocking.length);
 
@@ -281,6 +289,7 @@ export function readSettings(platform: Platform): Settings {
     comment: io.booleanInput("comment", true),
     annotations: io.booleanInput("annotations", true),
     flakyIssues: io.booleanInput("flaky-issues", false),
+    missingTests: io.booleanInput("missing-tests", true),
     record: io.booleanInput("record", true),
     window: io.integerInput("window", 50, 5),
   };

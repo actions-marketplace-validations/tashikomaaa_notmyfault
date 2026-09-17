@@ -4,6 +4,7 @@ import {
   type FailureTrend,
   type FailureVerdict,
   type FixedTest,
+  type MissingTests,
   type RankedTest,
   type SlowerTest,
   type SlowTest,
@@ -52,6 +53,7 @@ const MAX_ROWS = 30;
 const MAX_MESSAGES = 10;
 const MAX_FIXED = 10;
 const MAX_SLOWER = 10;
+const MAX_MISSING = 10;
 const MAX_CHART_TITLE = 60;
 const PROJECT_URL = "https://github.com/tashikomaaa/notmyfault";
 // Comments already posted keep pointing at these images: never rename or remove them.
@@ -201,6 +203,7 @@ function combine(analyses: Analysis[]): Analysis {
     retried: analyses.flatMap((a) => a.retried),
     fixed: analyses.flatMap((a) => a.fixed),
     slower: analyses.flatMap((a) => a.slower),
+    missing: analyses.flatMap((a) => a.missing),
   };
 }
 
@@ -223,6 +226,25 @@ function renderSuite(analysis: Analysis, context: ReportContext): string[] {
 
   if (analysis.fixed.length > 0) lines.push(...renderFixed(analysis.fixed, context));
   if (analysis.slower.length > 0) lines.push(...renderSlower(analysis.slower, context));
+  if (analysis.missing.length > 0) lines.push(...renderMissing(analysis.missing, context));
+  return lines;
+}
+
+function renderMissing(missing: MissingTests[], context: ReportContext): string[] {
+  const count = missing.reduce((sum, group) => sum + group.ids.length, 0);
+  // A whole file or suite gone reads as one line.
+  const items = missing.flatMap((group) =>
+    group.whole && group.group && group.ids.length > 1
+      ? [`- ${code(group.group)}: all ${group.ids.length} tests`]
+      : group.ids.map((id) => `- ${code(id)}`),
+  );
+  const lines = [
+    `👻 **Missing:** ${plural(count, "test")} of the latest run on ${branches(context)} did not run here. Deleted or renamed on purpose? Nothing to do. Otherwise, check that the test runner still finds ${count === 1 ? "it" : "them"}.`,
+    "",
+    ...items.slice(0, MAX_MISSING),
+  ];
+  if (items.length > MAX_MISSING) lines.push(`- _…and ${items.length - MAX_MISSING} more_`);
+  lines.push("");
   return lines;
 }
 

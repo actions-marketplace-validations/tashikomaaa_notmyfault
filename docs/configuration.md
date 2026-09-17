@@ -24,6 +24,7 @@
 | [`comment`](#comment) | `true` | Comment on pull requests |
 | [`annotations`](#annotations) | `true` | Annotate failed tests next to their code |
 | [`flaky-issues`](#flaky-issues) | `false` | Open an issue for each flaky test |
+| [`missing-tests`](#missing-tests) | `true` | Report tests of the latest tracked run missing from this run |
 | [`record`](#record) | `true` | Record the run in the history |
 | [`window`](#window) | `50` | Runs remembered per test |
 
@@ -132,6 +133,12 @@ permissions:
 
 Pull request runs never touch issues. Assign, discuss and label the issues as you like: notmyfault only rewrites their description. See [How it works](how-it-works.md#flaky-test-issues).
 
+### `missing-tests`
+
+When `true`, notmyfault compares the tests of the run with the tests of the latest run on a tracked branch, and lists the ones missing from the reports: deleted, renamed, or no longer found by the test runner. A whole file or suite missing reads as one line. Tests skipped on purpose are in the reports, so they are not missing. See [Missing tests](verdicts.md#missing-tests).
+
+Missing tests never fail the step, but they make notmyfault comment on a pull request. Set `missing-tests: false` when runs are expected to cover only part of the tests, like pull requests running only the tests affected by their changes, or when several jobs with different tests share one [`key`](#key).
+
 ### `record`
 
 When `true`, the run is recorded in the history. Pull requests from forks are never recorded, because their token is read-only. Set `record: false` for jobs that should read the history without influencing it, for example experimental runs.
@@ -153,6 +160,7 @@ How many recent runs on tracked branches are remembered for each test. Minimum 5
 | `fixed` | Tests failing on a tracked branch that pass in this run |
 | `quarantined` | Failures of tests quarantined by hand |
 | `slower` | Passing tests that took much longer than usual on a tracked branch |
+| `missing` | Tests of the latest run on a tracked branch missing from this run |
 | `blocking` | Failures not covered by `tolerate` |
 
 Outputs are numbers written as strings. Give the step an `id` to use them:

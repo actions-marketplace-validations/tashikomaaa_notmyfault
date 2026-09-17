@@ -178,6 +178,19 @@ describe("renderComment", () => {
     );
   });
 
+  it("lists missing tests, a whole file on one line", () => {
+    const history = emptyHistory();
+    history.runs = 3;
+    const ids = ["cart.test.ts › adds", "cart.test.ts › removes", "search.test.ts › finds", "search.test.ts › ranks", "pay.test.ts › charges"];
+    for (const id of ids) history.tests[id] = { outcomes: "ppp", lastSeen: "2026-09-16", lastRun: 3 };
+    const analysis = analyze([{ id: "search.test.ts › ranks", title: "ranks", outcome: "passed" }], history, NOW, 30);
+    const body = renderComment(analysis, context());
+    expect(body).toMatch(badge("passed", "✅", "All 1 test passed"));
+    expect(body).toContain(
+      "👻 **Missing:** 4 tests of the latest run on `main` did not run here. Deleted or renamed on purpose? Nothing to do. Otherwise, check that the test runner still finds them.\n\n- <code>cart.test.ts</code>: all 2 tests\n- <code>pay.test.ts › charges</code>\n- <code>search.test.ts › finds</code>\n",
+    );
+  });
+
   it("tells proven flakiness apart from a probable one", () => {
     const history = emptyHistory();
     history.tests = {

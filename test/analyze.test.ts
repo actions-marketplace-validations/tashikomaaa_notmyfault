@@ -98,6 +98,39 @@ describe("slower tests", () => {
   });
 });
 
+describe("missing tests", () => {
+  const passing = (id: string): TestResult => ({ id, title: id, outcome: "passed" });
+
+  it("lists tests of the latest tracked run missing from this one, by file or suite", () => {
+    const history = historyWith({
+      "cart.test.ts › adds": { lastRun: 50 },
+      "cart.test.ts › removes": { lastRun: 50 },
+      "search.test.ts › finds": { lastRun: 50 },
+      "search.test.ts › ranks": { lastRun: 50 },
+      "search.test.ts › skipped on purpose": { lastRun: 50 },
+      // Not in the latest tracked run: removed long ago, or recorded before lastRun existed.
+      "old.test.ts › gone": { lastRun: 42 },
+      "legacy.test.ts › unknown": {},
+    });
+    const results = [passing("cart.test.ts › adds"), { ...passing("search.test.ts › skipped on purpose"), outcome: "skipped" as const }];
+    expect(analyze(results, history, NOW, 30).missing).toEqual([
+      { group: "cart.test.ts", ids: ["cart.test.ts › removes"], whole: false },
+      { group: "search.test.ts", ids: ["search.test.ts › finds", "search.test.ts › ranks"], whole: false },
+    ]);
+    expect(analyze([passing("search.test.ts › skipped on purpose")], history, NOW, 30).missing).toContainEqual({
+      group: "cart.test.ts",
+      ids: ["cart.test.ts › adds", "cart.test.ts › removes"],
+      whole: true,
+    });
+  });
+
+  it("finds nothing without a tracked run", () => {
+    const history = historyWith({ "a › b": { lastRun: 0 } });
+    history.runs = 0;
+    expect(analyze([], history, NOW, 30).missing).toEqual([]);
+  });
+});
+
 describe("failure trends", () => {
   it("give the share of failed runs among the last 10, run after run", () => {
     const history = historyWith({ flaky: { outcomes: "fpppppppppfffppppppp" }, young: { outcomes: "pfpfpfpf" } });

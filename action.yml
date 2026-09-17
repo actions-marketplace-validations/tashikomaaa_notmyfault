@@ -44,6 +44,9 @@ inputs:
   flaky-issues:
     description: Open an issue for each flaky test, keep it up to date and close it once the test stops failing. Needs the issues write permission.
     default: "false"
+  missing-tests:
+    description: Report tests that ran in the latest run on a tracked branch but are missing from this run.
+    default: "true"
   record:
     description: Record this run in the history.
     default: "true"
@@ -68,6 +71,8 @@ outputs:
     description: Tests failing on a tracked branch that pass in this run.
   slower:
     description: Passing tests that took much longer than usual on a tracked branch.
+  missing:
+    description: Tests of the latest run on a tracked branch missing from this run.
   quarantined:
     description: Failures of tests quarantined by hand.
   blocking:

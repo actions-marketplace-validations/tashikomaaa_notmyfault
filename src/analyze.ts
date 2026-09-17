@@ -54,6 +54,16 @@ export interface SlowerTest {
   usual: number;
 }
 
+/** Tests of the latest run on the tracked branch that are not in this run, by file or suite. */
+export interface MissingTests {
+  /** The file or suite: the identity of the tests before their last "›". */
+  group: string;
+  /** Identities of the missing tests. */
+  ids: string[];
+  /** Whether every test of the group in the latest run on the tracked branch is missing. */
+  whole: boolean;
+}
+
 export interface FailureTrend {
   id: string;
   /** Share of failed runs, in percent, among the TREND_WINDOW runs ending at each run, oldest first. */
@@ -83,6 +93,8 @@ export interface Analysis {
   fixed: FixedTest[];
   /** Passing tests that took much longer than usual on the tracked branch. */
   slower: SlowerTest[];
+  /** Tests that ran in the latest run on the tracked branch but are not in this run. */
+  missing: MissingTests[];
 }
 
 export interface RankedTest extends TestStats {
@@ -90,6 +102,7 @@ export interface RankedTest extends TestStats {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const SEPARATOR = " › ";
 /** Isolated failures needed to call a test flaky without direct evidence. */
 const LIKELY_FLAKY_ISOLATED_FAILURES = 3;
 /** A flaky test is broken once its failure streak had less than this chance to happen by bad luck. */
@@ -103,7 +116,16 @@ const SLOWER_MIN_RUNS = 5;
 const VERDICT_ORDER: Record<Verdict, number> = { new: 0, suspect: 1, broken: 2, flaky: 3 };
 
 export function analyze(results: TestResult[], history: History, now: Date, evidenceTtlDays: number): Analysis {
-  const analysis: Analysis = { total: results.length, passed: 0, skipped: 0, failures: [], retried: [], fixed: [], slower: [] };
+  const analysis: Analysis = {
+    total: results.length,
+    passed: 0,
+    skipped: 0,
+    failures: [],
+    retried: [],
+    fixed: [],
+    slower: [],
+    missing: missingTests(results, history),
+  };
   const checkFixed = (test: TestResult) => {
     const tested = history.tests[test.id];
     if (!tested?.outcomes.endsWith(FAIL)) return;
@@ -156,6 +178,28 @@ export function analyze(results: TestResult[], history: History, now: Date, evid
   analysis.fixed.sort((a, b) => a.test.title.localeCompare(b.test.title));
   analysis.slower.sort((a, b) => b.duration / b.usual - a.duration / a.usual || a.test.title.localeCompare(b.test.title));
   return analysis;
+}
+
+/**
+ * Tests that were part of the latest run on the tracked branch and are not in these results, not even skipped:
+ * deleted, renamed, or no longer discovered. Histories written before lastRun existed tell nothing.
+ */
+export function missingTests(results: TestResult[], history: History): MissingTests[] {
+  const present = new Set(results.map((result) => result.id));
+  const groups = new Map<string, { ids: string[]; latest: number }>();
+  for (const [id, test] of Object.entries(history.tests)) {
+    if (history.runs === 0 || test.lastRun !== history.runs) continue;
+    const index = id.lastIndexOf(SEPARATOR);
+    const name = index === -1 ? "" : id.slice(0, index);
+    const group = groups.get(name) ?? { ids: [], latest: 0 };
+    group.latest++;
+    if (!present.has(id)) group.ids.push(id);
+    groups.set(name, group);
+  }
+  return [...groups]
+    .filter(([, group]) => group.ids.length > 0)
+    .map(([name, group]) => ({ group: name, ids: group.ids.sort(), whole: group.ids.length === group.latest }))
+    .sort((a, b) => a.group.localeCompare(b.group));
 }
 
 export function computeStats(history: TestHistory | undefined, now: Date, evidenceTtlDays: number): TestStats {

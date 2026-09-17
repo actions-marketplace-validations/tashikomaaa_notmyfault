@@ -118,7 +118,7 @@ The branch always holds **a single commit without parent**, authored by `github-
 | `failedOn` | The last 20 commits the test failed on, on any branch, as 12-character SHA prefixes |
 | `evidence` | Up to 10 proofs of flakiness: `retry` (passed after a retry in the same run) or `rerun` (passed on a commit it had failed on) |
 | `lastSeen` | Last day the test was recorded |
-| `lastRun` | Number of the last run on a tracked branch the test was part of, to tell [renamed tests](#renamed-tests) |
+| `lastRun` | Number of the last run on a tracked branch the test was part of, to tell [renamed tests](#renamed-tests) and [missing tests](verdicts.md#missing-tests) |
 | `errors` | Fingerprints of the last 10 distinct failure messages seen on tracked branches, see [Errors](#errors) |
 | `lastFailure` | Last day the test failed, or passed only after a retry, on a tracked branch |
 | `durations` | Durations of the last 10 runs on tracked branches, in milliseconds, when reports give them |
