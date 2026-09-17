@@ -45,7 +45,7 @@
           <a class="button" href="#quick-start">Add it to your workflow</a>
           <a class="button button-quiet" href="https://github.com/tashikomaaa/notmyfault-demo/pull/1">See a real pull request</a>
         </p>
-        <p class="fineprint">Free, for GitHub, GitLab, Forgejo and Gitea. MIT licensed, nothing to host.</p>
+        <p class="fineprint">Free, for GitHub, GitLab, Forgejo, Gitea and any CI with Node.js. MIT licensed, nothing to host.</p>
       </div>
 
       <figure class="hero-comment">
@@ -216,8 +216,8 @@ jobs:
             <li>The counts become variables for later jobs, and flaky tests can get an issue each.</li>
             <li>A project access token in <code>NOTMYFAULT_TOKEN</code> lets it store the history and comment.</li>
           </ul>
-          <p>On Forgejo and Gitea, whose workflows follow GitHub Actions, the action itself runs as it is.</p>
-          <p class="more"><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/gitlab.md">Set it up on GitLab</a> · <a href="https://gitlab.aldwin.fr/notmyfault/notmyfault-demo/-/merge_requests">See merge requests</a> · <a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/forgejo.md">Forgejo and Gitea</a></p>
+          <p>On Forgejo and Gitea, whose workflows follow GitHub Actions, the action itself runs as it is. Jenkins, CircleCI, Buildkite and the others run the same file, with the report in the log and a summary file.</p>
+          <p class="more"><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/gitlab.md">Set it up on GitLab</a> · <a href="https://gitlab.aldwin.fr/notmyfault/notmyfault-demo/-/merge_requests">See merge requests</a> · <a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/forgejo.md">Forgejo and Gitea</a> · <a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/any-ci.md">Any CI</a></p>
         </div>
         <div class="code">
           <button class="copy" type="button" data-copy="gitlab-ci" hidden>Copy</button>
@@ -289,6 +289,18 @@ notmyfault:
           <div>
             <dt><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/how-it-works.md#renamed-tests">Renames followed</a></dt>
             <dd>Rename a test on your main branch, and it keeps its history.</dd>
+          </div>
+          <div>
+            <dt><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/verdicts.md#missing-tests">Vanished tests caught</a></dt>
+            <dd>A pull request that deletes or stops running tests gets told, even when everything passes.</dd>
+          </div>
+          <div>
+            <dt><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/dashboard.md">One dashboard for all</a></dt>
+            <dd>The flakiest tests of every repository, ranked together by what they cost.</dd>
+          </div>
+          <div>
+            <dt><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/security.md#supply-chain">Verifiable releases</a></dt>
+            <dd>Every release is rebuilt from its tag, checked and attested, with a checksum to pin.</dd>
           </div>
         </dl>
       </div>
