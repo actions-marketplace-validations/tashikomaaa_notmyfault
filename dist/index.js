@@ -1710,7 +1710,10 @@ function toResult(testcase, suite) {
   if (message) result.message = message;
   const seconds = Number(testcase.attrs.time);
   if (testcase.attrs.time?.trim() && Number.isFinite(seconds) && seconds >= 0) result.duration = Math.round(seconds * 1e3);
-  if (outcome === "failed") result.hints = locationHints(testcase, suite, failures);
+  if (outcome !== "skipped") {
+    const hints = locationHints(testcase, suite, failures);
+    if (hints.file || hints.names.length > 0 || hints.references.length > 0) result.hints = hints;
+  }
   return result;
 }
 function locationHints(testcase, suite, failures) {

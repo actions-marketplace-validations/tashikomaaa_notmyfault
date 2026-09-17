@@ -108,9 +108,9 @@ describe("durations", () => {
 });
 
 describe("location hints", () => {
-  it("are collected for failed tests only", () => {
+  it("are collected for tests that ran, with file references for failures only", () => {
     const results = fixture("vitest.xml");
-    expect(results.find((r) => r.outcome === "passed")!.hints).toBeUndefined();
+    expect(results.find((r) => r.outcome === "passed")!.hints).toEqual({ names: ["test/cart.test.ts"], references: [] });
     expect(results.find((r) => r.outcome === "failed")!.hints).toEqual({
       names: ["test/cart.test.ts"],
       references: [{ file: "test/cart.test.ts", line: 14 }],

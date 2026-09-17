@@ -18,7 +18,7 @@ export interface TestResult {
   message?: string;
   /** Duration in milliseconds, when the report gives it. */
   duration?: number;
-  /** What the report tells about where a failed test lives, to annotate it. */
+  /** What the report tells about where the test lives, to annotate it or find its owners. */
   hints?: LocationHints;
 }
 
@@ -132,7 +132,10 @@ function toResult(testcase: XmlElement, suite: Suite): TestResult | undefined {
   if (message) result.message = message;
   const seconds = Number(testcase.attrs.time);
   if (testcase.attrs.time?.trim() && Number.isFinite(seconds) && seconds >= 0) result.duration = Math.round(seconds * 1000);
-  if (outcome === "failed") result.hints = locationHints(testcase, suite, failures);
+  if (outcome !== "skipped") {
+    const hints = locationHints(testcase, suite, failures);
+    if (hints.file || hints.names.length > 0 || hints.references.length > 0) result.hints = hints;
+  }
   return result;
 }
 
