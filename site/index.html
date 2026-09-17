@@ -111,8 +111,8 @@
             <img src="assets/verdict-broken.png" alt="" width="245" height="245" loading="lazy">
             <div>
               <h3>Already failing</h3>
-              <p>The latest runs on main failed too, so the problem predates your pull request. For a flaky test, it takes more failures in a row than bad luck explains.</p>
-              <p class="todo"><strong>What to do:</strong> nothing in your pull request. Update your branch once main is fixed.</p>
+              <p>The latest runs on main failed too, so the problem predates your pull request. For a flaky test, it takes more failures in a row than bad luck explains. The comment names the commit and the pull request the failures started with.</p>
+              <p class="todo"><strong>What to do:</strong> nothing in your pull request. Tell whoever broke it, and update your branch once main is fixed.</p>
             </div>
           </article>
           <article class="verdict">
@@ -127,7 +127,7 @@
             <img src="assets/verdict-passed.png" alt="" width="244" height="244" loading="lazy">
             <div>
               <h3>Fixed</h3>
-              <p>And when a test failing on main passes in your pull request, the comment says so, even if nothing else failed.</p>
+              <p>And when a test failing on main passes in your pull request, the comment says so, even if nothing else failed. Tests that ran on main but no longer run in your pull request are listed too.</p>
             </div>
           </article>
         </div>
