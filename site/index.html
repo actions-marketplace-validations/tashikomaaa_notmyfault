@@ -252,6 +252,7 @@ notmyfault:
   with:
     junit: reports/**/*.xml
     mode: quarantine</code></pre>
+          <p>Or keep your tests failing the job as usual, and have branch protection require the <code>notmyfault</code> check instead, which only fails on failures that look real.</p>
           <p class="more"><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/quarantine.md">Read the quarantine guide</a></p>
         </div>
       </div>
@@ -266,7 +267,7 @@ notmyfault:
         <dl class="facts facts-wide">
           <div>
             <dt><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/configuration.md#flaky-issues">An issue per flaky test</a></dt>
-            <dd>Opened when a test is proven flaky, updated with its latest failure, closed once it stops failing.</dd>
+            <dd>Opened when a test is proven flaky, mentioning its owners from CODEOWNERS, updated with its latest failure, closed once it stops failing.</dd>
           </div>
           <div>
             <dt><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/recipes.md#show-a-flaky-tests-badge">A badge and a report</a></dt>
@@ -274,7 +275,7 @@ notmyfault:
           </div>
           <div>
             <dt><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/recipes.md#re-run-flaky-failures-automatically">Re-runs on their own</a></dt>
-            <dd>When only flaky tests failed, a small companion workflow re-runs the failed jobs, once.</dd>
+            <dd>When only flaky tests stand in the way, the run happens again, once: a small companion workflow on GitHub, notmyfault itself on GitLab.</dd>
           </div>
           <div>
             <dt><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/quarantine.md#quarantine-tests-by-hand">Quarantine by hand</a></dt>
