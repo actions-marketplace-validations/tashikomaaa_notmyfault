@@ -22,17 +22,19 @@ npm run check   # typecheck, build dist/ and run all tests
 | Script | What it does |
 |---|---|
 | `npm run typecheck` | Type-checks sources, tests and scripts |
-| `npm run build` | Bundles `src/` into `dist/index.js` with esbuild |
+| `npm run build` | Bundles `src/` with esbuild into `dist/index.js`, the GitHub Action, and `dist/notmyfault.mjs`, run in GitLab CI/CD |
 | `npm test` | Runs the test suite with Vitest |
 
-`dist/index.js` is what GitHub Actions runs, so it is committed. **Run `npm run build` and commit `dist/` with your changes**: CI fails when `dist/` does not match the sources.
+`dist/index.js` is what GitHub Actions runs and `dist/notmyfault.mjs` what GitLab jobs download, so both are committed. **Run `npm run build` and commit `dist/` with your changes**: CI fails when `dist/` does not match the sources.
 
 ## Project layout
 
 | Path | Role |
 |---|---|
-| `src/index.ts` | Entry point |
+| `src/index.ts` | Entry point of the GitHub Action |
+| `src/cli.ts` | Entry point of `notmyfault.mjs`, which detects the CI system |
 | `src/main.ts` | Orchestration: inputs, reports, history, verdicts, outputs |
+| `src/platform.ts` | What notmyfault needs from a CI system: context, inputs and outputs, API |
 | `src/xml.ts` | Forgiving XML parser |
 | `src/junit.ts` | JUnit report reading, test identity, retries |
 | `src/history.ts` | History format and recording rules |
@@ -41,9 +43,9 @@ npm run check   # typecheck, build dist/ and run all tests
 | `src/flaky-issues.ts` | Deciding which flaky test issues to open, update and close |
 | `src/report.ts` | Pull request comment and job summary rendering |
 | `src/git-store.ts` | Reading and writing the history branch |
-| `src/github.ts` | REST API client for comments |
-| `src/context.ts` | GitHub Actions environment and event payload |
-| `src/actions.ts` | Inputs, outputs, logging and summary, without `@actions/core` |
+| `src/github/` | GitHub Actions: environment and event payload, inputs and outputs without `@actions/core`, REST API client |
+| `src/gitlab/` | GitLab CI/CD: predefined variables, `NOTMYFAULT_*` variables, dotenv and Code Quality reports, REST API client |
+| `templates/` | The GitLab CI/CD template |
 | `test/` | Unit tests, JUnit fixtures and end-to-end tests |
 | `docs/` | Documentation, mirrored to the wiki. Images are in `docs/assets/` |
 | `brand/` | Original artwork: mascot, banner, badges, stickers. See [brand/README.md](brand/README.md) |
@@ -66,8 +68,8 @@ npm run check   # typecheck, build dist/ and run all tests
 - Unit tests sit next to the module they cover: `test/junit.test.ts` for `src/junit.ts`, and so on.
 - JUnit samples live in `test/fixtures/junit/`. Add one for each runner-specific behavior.
 - `test/git-store.test.ts` runs against real git repositories, including concurrent writers.
-- `test/main.test.ts` simulates complete workflow runs, with a local bare repository and a fake GitHub API.
-- `test/dist.test.ts` runs the bundled `dist/index.js` as GitHub Actions would.
+- `test/main.test.ts` simulates complete workflow runs, with a local bare repository and a fake GitHub API. `test/gitlab/run.test.ts` does the same for GitLab pipelines.
+- `test/dist.test.ts` runs the bundled `dist/index.js` as GitHub Actions would, and `dist/notmyfault.mjs` as a GitLab job would.
 - `test/docs.test.ts` checks that documentation links resolve and that every input and output is documented.
 - `test/site.test.ts` builds the website and checks that every file it links to exists.
 
@@ -119,4 +121,8 @@ For maintainers:
    git push origin vX --force
    ```
 
-4. Create a GitHub release from `vX.Y.Z` and publish it to the Marketplace.
+4. Create a GitHub release from `vX.Y.Z` with `dist/notmyfault.mjs` attached, and publish it to the Marketplace:
+
+   ```sh
+   gh release create vX.Y.Z dist/notmyfault.mjs --title "notmyfault X.Y.Z" --notes-file notes.md
+   ```

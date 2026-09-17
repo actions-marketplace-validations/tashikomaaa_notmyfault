@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>notmyfault: is that failing test your fault?</title>
-  <meta name="description" content="A GitHub Action that remembers how every test behaves on your main branch, and tells each pull request which failures are new, which tests are flaky and which were already broken.">
+  <meta name="description" content="For GitHub Actions and GitLab CI/CD: notmyfault remembers how every test behaves on your main branch, and tells each pull request which failures are new, which tests are flaky and which were already broken.">
   <meta name="theme-color" content="#F7C65C" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#2B1D10" media="(prefers-color-scheme: dark)">
   <link rel="canonical" href="https://notmyfault.aldwin.fr/">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://notmyfault.aldwin.fr/">
   <meta property="og:title" content="notmyfault: is that failing test your fault?">
-  <meta property="og:description" content="A GitHub Action that tells each pull request which failures are new, which tests are flaky and which were already broken.">
+  <meta property="og:description" content="For GitHub Actions and GitLab CI/CD: notmyfault tells each pull request which failures are new, which tests are flaky and which were already broken.">
   <meta property="og:image" content="https://notmyfault.aldwin.fr/assets/social-preview.jpg">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" type="image/png" href="favicon.png">
@@ -32,6 +32,7 @@
       <ul>
         <li><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/README.md">Documentation</a></li>
         <li><a href="#demo">Demo</a></li>
+        <li><a href="#gitlab">GitLab</a></li>
         <li><a href="https://github.com/tashikomaaa/notmyfault">GitHub</a></li>
       </ul>
     </nav>
@@ -44,7 +45,7 @@
           <a class="button" href="#quick-start">Add it to your workflow</a>
           <a class="button button-quiet" href="https://github.com/tashikomaaa/notmyfault-demo/pull/1">See a real pull request</a>
         </p>
-        <p class="fineprint">A free GitHub Action. MIT licensed, nothing to host.</p>
+        <p class="fineprint">Free, for GitHub Actions and GitLab CI/CD. MIT licensed, nothing to host.</p>
       </div>
 
       <figure class="hero-comment">
@@ -204,6 +205,40 @@ jobs:
       </div>
     </section>
 
+    <section class="band" id="gitlab" aria-labelledby="gitlab-title">
+      <div class="wrap start gitlab">
+        <div class="start-copy">
+          <h2 id="gitlab-title">On GitLab too</h2>
+          <p>The same history and the same verdicts in GitLab CI/CD, from a job of its own that reads the reports of your tests, whatever their language.</p>
+          <ul class="notes">
+            <li>Merge requests get the same comment, kept up to date on every push.</li>
+            <li>Failed tests show up in the Code Quality widget, with their verdict.</li>
+            <li>The counts become variables for later jobs, and flaky tests can get an issue each.</li>
+            <li>A project access token in <code>NOTMYFAULT_TOKEN</code> lets it store the history and comment.</li>
+          </ul>
+          <p class="more"><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/gitlab.md">Set it up on GitLab</a> · <a href="https://gitlab.aldwin.fr/notmyfault/notmyfault-demo/-/merge_requests">See merge requests</a></p>
+        </div>
+        <div class="code">
+          <button class="copy" type="button" data-copy="gitlab-ci" hidden>Copy</button>
+          <pre id="gitlab-ci"><code>include:
+  - remote: https://raw.githubusercontent.com/tashikomaaa/notmyfault/v1/templates/notmyfault.gitlab-ci.yml
+
+test:
+  script: npm test      # writes JUnit XML to reports/
+  artifacts:
+    when: always
+    paths: [reports/]
+
+notmyfault:
+  extends: .notmyfault
+  needs: [test]
+  variables:
+    NOTMYFAULT_JUNIT: reports/*.xml
+    NOTMYFAULT_KEY: test</code></pre>
+        </div>
+      </div>
+    </section>
+
     <section class="band band-butter" aria-labelledby="quarantine-title">
       <div class="wrap quarantine">
         <img src="assets/sticker-works-on-main.png" alt="The croissant mascot in sunglasses, above the words &quot;Works on main (sometimes)&quot;." width="331" height="283" loading="lazy">
@@ -292,7 +327,7 @@ jobs:
       <div class="wrap host">
         <div class="section-head">
           <h2 id="host-title">Nothing to host</h2>
-          <p>notmyfault runs inside your workflow and keeps everything in your repository.</p>
+          <p>notmyfault runs inside your GitHub workflow or GitLab pipeline, and keeps everything in your repository.</p>
         </div>
         <dl class="facts">
           <div>
@@ -309,7 +344,7 @@ jobs:
           </div>
           <div>
             <dt>Free</dt>
-            <dd>MIT licensed. It runs in your own workflows and calls no paid service.</dd>
+            <dd>MIT licensed. It runs in your own pipelines and calls no paid service.</dd>
           </div>
         </dl>
       </div>

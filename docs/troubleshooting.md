@@ -6,6 +6,8 @@
 
 Messages are listed as they appear in the logs. **Errors** fail the step, **warnings** do not.
 
+On GitLab, messages name variables instead of inputs, `Variable NOTMYFAULT_MODE` instead of `Input "mode"`, and say merge request instead of pull request. The messages only GitLab shows are in [GitLab CI/CD](gitlab.md#troubleshooting).
+
 ## No comment on my pull request
 
 Check, in order:

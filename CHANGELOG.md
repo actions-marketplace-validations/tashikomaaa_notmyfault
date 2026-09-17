@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- notmyfault runs in GitLab CI/CD. `dist/notmyfault.mjs`, the same code bundled in one file, reads `NOTMYFAULT_*` variables, comments on merge requests, lists failed tests in the Code Quality widget, writes its outputs as dotenv variables and its summary as an artifact, and manages flaky test issues. A template runs it in a job of its own, whatever the language of the tests ([#14](https://github.com/tashikomaaa/notmyfault/issues/14)).
+- Each release attaches `notmyfault.mjs`.
+
 ## [1.4.0] - 2026-09-16
 
 ### Added

@@ -12,6 +12,8 @@ This guide adds notmyfault to an existing workflow. It takes about five minutes.
 - A test runner that writes **JUnit XML**. Almost all of them can, see [Test runners](test-runners.md).
 - `git` on the runner. It is preinstalled on GitHub-hosted runners. notmyfault is tested on `ubuntu-latest`.
 
+On GitLab, follow [GitLab CI/CD](gitlab.md) instead.
+
 ## 1. Make your tests write JUnit XML
 
 With Vitest, for example:

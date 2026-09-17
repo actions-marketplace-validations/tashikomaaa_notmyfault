@@ -183,3 +183,5 @@ It never fails because of its own infrastructure. If the history cannot be read 
 ## Environment
 
 notmyfault runs on the `node24` runtime and needs `git` on the runner. It uses the default variables set by GitHub Actions, notably `GITHUB_SERVER_URL`, `GITHUB_API_URL`, `GITHUB_SHA` and `RUNNER_TEMP`, and needs no other configuration.
+
+On GitLab CI/CD, every input is a `NOTMYFAULT_*` variable and the outputs are dotenv variables, see [GitLab CI/CD](gitlab.md#variables).

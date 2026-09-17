@@ -76,7 +76,7 @@ notmyfault-history
 
 Badges and pages are written in the same commit as the history they describe. Each badge is a [shields.io endpoint](https://shields.io/badges/endpoint-badge) counting the known and probably flaky tests, see [Recipes](recipes.md#show-a-flaky-tests-badge). Each page lists the tests that failed or needed a retry in the remembered runs, with their verdict, a timeline of their runs, their last failure, their proof of flakiness and their median duration, see [Recipes](recipes.md#publish-the-history-with-github-pages).
 
-The branch always holds **a single commit without parent**, authored by `github-actions[bot]`. Each update replaces it, so the branch never grows. Deleting the branch resets the history.
+The branch always holds **a single commit without parent**, authored by `github-actions[bot]`, or by `notmyfault` on GitLab. Each update replaces it, so the branch never grows. Deleting the branch resets the history.
 
 ### What a history file contains
 
@@ -212,7 +212,7 @@ The last failure is `lastFailure`, or the date of the latest proof of flakiness 
 
 ## Limits
 
-- **Only GitHub Actions** is supported.
+- **GitHub Actions and GitLab CI/CD** are supported. On GitLab, a few things work differently, see [Differences with GitHub](gitlab.md#differences-with-github).
 - **Names are identities**: tests moved to another file or suite start over, renames are only followed when unambiguous, tests with dynamic names are not followed, and two test cases sharing a name inside one suite are read as attempts of the same test.
 - **Retries** are only visible when the runner reports them, see [Test runners](test-runners.md#detecting-retries).
 - **One comment per step.** Jobs sharing a key overwrite each other's comment. Collect their reports in one job instead, with [`suites`](configuration.md#suites) when they need separate histories, see [Recipes](recipes.md#sharded-tests).

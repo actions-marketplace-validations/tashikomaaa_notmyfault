@@ -36,7 +36,7 @@ notmyfault only needs `git`, the `node24` Actions runtime and the default GitHub
 
 ### Does it work with GitLab CI, Jenkins or CircleCI?
 
-No. notmyfault is a GitHub Action.
+GitLab CI/CD, yes: see [GitLab CI/CD](gitlab.md). Jenkins, CircleCI and others, not yet. Only the inputs, the outputs and the API calls depend on the CI system, so adding one is mostly a matter of implementing `src/platform.ts`: contributions are welcome.
 
 ### Can several workflows share one history?
 

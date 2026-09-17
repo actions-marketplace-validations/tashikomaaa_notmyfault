@@ -4,7 +4,7 @@
   <img alt="notmyfault: it's not your fault. The croissant mascot holds a verdict sheet reading &quot;Not your fault&quot;." src="assets/banner.jpg">
 </p>
 
-notmyfault is a GitHub Action that remembers how every test behaves on your default branch, then tells each pull request whether a failing test is **new**, **known to be flaky** or **already broken**.
+notmyfault is a GitHub Action, also available for GitLab CI/CD, that remembers how every test behaves on your default branch, then tells each pull request whether a failing test is **new**, **known to be flaky** or **already broken**.
 
 <p align="center">
   <img alt="Three-panel comic. A developer panics in front of a red build. The croissant mascot rushes in with the test's history in a notebook. The croissant points out &quot;flaky&quot; and the developer relaxes with a coffee." src="assets/comic-strip.jpg">
@@ -14,6 +14,7 @@ notmyfault is a GitHub Action that remembers how every test behaves on your defa
 
 - [Live demo](https://github.com/tashikomaaa/notmyfault-demo/pulls): real pull requests showing every verdict, see [Live examples](verdicts.md#live-examples).
 - [Getting started](getting-started.md): add notmyfault to a workflow in five minutes.
+- [GitLab CI/CD](gitlab.md): the same on GitLab, with merge request comments and the Code Quality widget.
 - [Reading the report](verdicts.md): what each verdict means and what to do about it.
 
 <p align="center">
