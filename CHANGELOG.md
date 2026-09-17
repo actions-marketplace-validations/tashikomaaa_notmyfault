@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-09-17
+
 ### Added
 
 - Tests already failing on the tracked branch say since when: the commit of the first failed run of the streak and the pull or merge request it came from, both linked, in the comment, the logs, the annotations, the flaky test issues and the history pages. The history records it as `failingSince` ([#15](https://github.com/tashikomaaa/notmyfault/issues/15)).
@@ -89,7 +91,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - Pull request comment kept up to date, job summary with the most unreliable tests, and step outputs.
 - Quarantine mode, so that known flaky tests stop blocking merges.
 
-[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.2.0...v1.3.0

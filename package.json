@@ -1,6 +1,6 @@
 {
   "name": "notmyfault",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Tells you whether a failing test is your fault or a known flaky test, in GitHub Actions and GitLab CI/CD. No server, no runtime dependencies.",
   "type": "module",
   "private": true,
