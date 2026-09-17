@@ -4,10 +4,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-09-17
+
 ### Added
 
 - `notmyfault.mjs` runs in any other CI system, like Jenkins, CircleCI or Buildkite: it reads its configuration from `NOTMYFAULT_*` variables, the variables of common CI systems and git, pushes the history over HTTPS with a token or over SSH, and reports in the log, a Markdown summary, a dotenv file and its exit code. Outside CI systems, it records nothing unless told to ([#22](https://github.com/tashikomaaa/notmyfault/issues/22)).
-
 - A dashboard action, `tashikomaaa/notmyfault/dashboard`, reads the history branches of several repositories and ranks their unreliable tests together, the costliest first, in a static page ready for GitHub Pages ([#25](https://github.com/tashikomaaa/notmyfault/issues/25)).
 
 ## [1.8.0] - 2026-09-17
@@ -112,7 +113,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - Pull request comment kept up to date, job summary with the most unreliable tests, and step outputs.
 - Quarantine mode, so that known flaky tests stop blocking merges.
 
-[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.5.0...v1.6.0
