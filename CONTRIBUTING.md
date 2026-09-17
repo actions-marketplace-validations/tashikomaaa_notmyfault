@@ -45,6 +45,8 @@ npm run check   # typecheck, build dist/ and run all tests
 | `src/report.ts` | Pull request comment and job summary rendering |
 | `src/git-store.ts` | Reading and writing the history branch |
 | `src/github/` | GitHub Actions: environment and event payload, inputs and outputs without `@actions/core`, REST API client |
+| `src/generic/` | Any other CI system: context from `NOTMYFAULT_*` variables, common CI variables and git |
+| `src/variables-io.ts` | Inputs as `NOTMYFAULT_*` variables, outputs and summary as files, for GitLab and other CI systems |
 | `src/forgejo/` | Forgejo and Gitea Actions: the GitHub Action, with their own API client |
 | `src/gitlab/` | GitLab CI/CD: predefined variables, `NOTMYFAULT_*` variables, dotenv and Code Quality reports, REST API client |
 | `templates/` | The GitLab CI/CD template |
@@ -129,4 +131,4 @@ For maintainers:
    gh release create vX.Y.Z --title "vX.Y.Z" --notes-file notes.md
    ```
 
-   The `Release assets` workflow then rebuilds the bundles from the tag, checks them against `dist/`, attests their build provenance, attaches `notmyfault.mjs` and `notmyfault.mjs.sha256`, and adds the checksum to the notes. If it fails, fix the cause and run it again with `gh workflow run release.yml --ref vX.Y.Z`.
+   The `Release assets` workflow then rebuilds the bundles from the tag, checks them against `dist/`, attests their build provenance, attaches `notmyfault.mjs` and `notmyfault.mjs.sha256`, adds the checksum to the notes, and publishes the package to npm with provenance when the `NPM_TOKEN` secret exists. If it fails, fix the cause and run it again with `gh workflow run release.yml --ref vX.Y.Z`.

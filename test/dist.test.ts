@@ -101,9 +101,34 @@ describe.skipIf(!existsSync(cli))("dist/notmyfault.mjs", () => {
     expect(readFileSync(join(root, "workspace", "notmyfault-summary.md"), "utf8")).toContain("1 test failed");
   });
 
-  it("refuses to run outside of a CI system it knows", () => {
-    const result = spawnSync(process.execPath, [cli], { encoding: "utf8", env: { PATH: process.env.PATH } });
+  it("runs in any other CI system, from git and NOTMYFAULT_ variables", () => {
+    const bare = join(root, "remote", "shop.git");
+    mkdirSync(join(root, "remote"));
+    execFileSync("git", ["init", "--quiet", "--bare", bare]);
+    const workspace = join(root, "workspace");
+    execFileSync("git", ["init", "--quiet", "--initial-branch=main", workspace]);
+    execFileSync("git", ["-C", workspace, "remote", "add", "origin", `file://${bare}`]);
+    execFileSync("git", ["-C", workspace, "-c", "user.name=a", "-c", "user.email=a@b", "commit", "--quiet", "--allow-empty", "-m", "start"]);
+    writeFileSync(join(workspace, "junit.xml"), `<testsuite name="s"><testcase name="a"><failure message="boom"/></testcase></testsuite>`);
+
+    const env = { PATH: process.env.PATH, TMPDIR: root, JENKINS_URL: "https://ci.acme.test/", BRANCH_NAME: "main", NOTMYFAULT_JUNIT: "*.xml" };
+    const result = spawnSync(process.execPath, [cli], { encoding: "utf8", cwd: workspace, env });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('History updated on branch "notmyfault-history".');
+    expect(readFileSync(join(workspace, "notmyfault.env"), "utf8")).toContain("NOTMYFAULT_NEW_FAILURES=1\n");
+    expect(execFileSync("git", ["-C", bare, "show", "notmyfault-history:history/tests.json"], { encoding: "utf8" })).toContain('"s › a"');
+
+    // On a developer's machine, nothing is recorded unless asked.
+    const local = spawnSync(process.execPath, [cli], { encoding: "utf8", cwd: workspace, env: { PATH: process.env.PATH, TMPDIR: root, NOTMYFAULT_JUNIT: "*.xml" } });
+    expect(local.status).toBe(0);
+    expect(local.stdout).not.toContain("History updated");
+    expect(local.stdout).toContain("Not in a CI system: the history is read, not recorded. Set NOTMYFAULT_RECORD=true to record this run.");
+  });
+
+  it("explains what it needs outside of a git clone", () => {
+    const result = spawnSync(process.execPath, [cli], { encoding: "utf8", cwd: root, env: { PATH: process.env.PATH } });
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain("neither GITHUB_ACTIONS nor GITLAB_CI is set");
+    expect(result.stderr).toContain("No repository to store the history in: set NOTMYFAULT_REPOSITORY_URL");
   });
 });

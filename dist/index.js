@@ -2071,6 +2071,9 @@ async function runOn(platform, now = /* @__PURE__ */ new Date()) {
   try {
     const settings = readSettings(platform);
     io.mask(settings.token);
+    if (context.local && !settings.record) {
+      io.info(`Not in a CI system: the history is read, not recorded. Set ${io.inputName("record")}=true to record this run.`);
+    }
     const loaded = [];
     for (const suite of settings.suites) {
       const results = await loadResults(suite, settings.suites.length > 1, context.workspace, io);
@@ -2078,7 +2081,7 @@ async function runOn(platform, now = /* @__PURE__ */ new Date()) {
       loaded.push({ ...suite, results });
     }
     const store = new GitStore({
-      remoteUrl: `${context.serverUrl}/${context.repository}.git`,
+      remoteUrl: context.remoteUrl ?? `${context.serverUrl}/${context.repository}.git`,
       branch: settings.branch,
       token: settings.token,
       username: platform.gitUser(settings.token),
@@ -2223,8 +2226,9 @@ function readSettings(platform) {
     tolerated.add(value);
   }
   const quarantine = parseQuarantine(io.input("quarantine"), io.describeInput("quarantine"));
-  const token = io.input("token") || context.defaultToken;
-  if (!token) throw new Error(platform.text.tokenMissing);
+  const token = io.input("token") || context.defaultToken || "";
+  const needsToken = /^https?:\/\//.test(context.remoteUrl ?? `${context.serverUrl}/`);
+  if (!token && needsToken) throw new Error(platform.text.tokenMissing);
   return {
     suites,
     mode,
@@ -2241,7 +2245,7 @@ function readSettings(platform) {
     ...io.booleanInput("check", false) ? { check: io.input("check-name", "notmyfault") } : {},
     rerunFlaky: io.booleanInput("rerun-flaky", false),
     mentionOwners: io.booleanInput("mention-owners", false),
-    record: io.booleanInput("record", true),
+    record: io.booleanInput("record", !context.local),
     window: io.integerInput("window", 50, 5)
   };
 }

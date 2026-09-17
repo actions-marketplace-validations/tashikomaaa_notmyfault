@@ -1,16 +1,27 @@
 {
   "name": "notmyfault",
   "version": "1.8.0",
-  "description": "Tells you whether a failing test is your fault or a known flaky test, in GitHub Actions and GitLab CI/CD. No server, no runtime dependencies.",
+  "description": "Tells you whether a failing test is your fault or a known flaky test, in GitHub Actions, GitLab CI/CD, Forgejo, Gitea and any CI system. No server, no runtime dependencies.",
   "type": "module",
-  "private": true,
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tashikomaaa/notmyfault.git"
+  },
+  "homepage": "https://notmyfault.aldwin.fr",
+  "bugs": "https://github.com/tashikomaaa/notmyfault/issues",
   "author": "Aldwin Moutarlier",
+  "bin": {
+    "notmyfault": "dist/notmyfault.mjs"
+  },
+  "files": [
+    "dist/notmyfault.mjs"
+  ],
   "engines": {
     "node": ">=24"
   },
   "scripts": {
-    "build": "esbuild src/index.ts --bundle --platform=node --target=node24 --format=esm --legal-comments=none --outfile=dist/index.js && esbuild src/cli.ts --bundle --platform=node --target=node24 --format=esm --legal-comments=none --outfile=dist/notmyfault.mjs && esbuild src/dashboard-index.ts --bundle --platform=node --target=node24 --format=esm --legal-comments=none --outfile=dist/dashboard.js",
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node24 --format=esm --legal-comments=none --outfile=dist/index.js && esbuild src/cli.ts --bundle --platform=node --target=node24 --format=esm --legal-comments=none --banner:js=\"#!/usr/bin/env node\" --outfile=dist/notmyfault.mjs && esbuild src/dashboard-index.ts --bundle --platform=node --target=node24 --format=esm --legal-comments=none --outfile=dist/dashboard.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "site": "node scripts/site.ts _site",

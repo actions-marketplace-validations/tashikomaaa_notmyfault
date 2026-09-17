@@ -8,6 +8,8 @@
 export interface RunContext {
   /** `owner/repo` on GitHub, `group/project` on GitLab. */
   repository: string;
+  /** The git URL of the repository, when it is not `serverUrl/repository.git`. */
+  remoteUrl?: string;
   /** How the API names the repository: `owner/repo` on GitHub, the project id on GitLab. */
   apiProject: string;
   serverUrl: string;
@@ -27,6 +29,8 @@ export interface RunContext {
   pullRequest: { number: number; fromFork: boolean; headSha?: string } | undefined;
   /** A token the platform gives every job, used when none is set. */
   defaultToken: string | undefined;
+  /** Whether the run is not in a CI system, like a developer running tests: it records nothing unless told to. */
+  local?: boolean;
 }
 
 export type AnnotationLevel = "error" | "warning" | "notice";
@@ -129,7 +133,7 @@ export interface PlatformText {
 }
 
 export interface Platform {
-  name: "github" | "gitlab" | "forgejo";
+  name: "github" | "gitlab" | "forgejo" | "generic";
   context: RunContext;
   io: Io;
   forge(token: string): Forge;

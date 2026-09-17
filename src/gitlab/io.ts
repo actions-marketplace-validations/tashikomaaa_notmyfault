@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { appendFileSync, writeFileSync } from "node:fs";
-import { EOL } from "node:os";
-import { isAbsolute, join } from "node:path";
-import type { AnnotationLevel, Io } from "../platform";
+import { writeFileSync } from "node:fs";
+import type { AnnotationLevel } from "../platform";
+import { ESC, VariablesIO } from "../variables-io";
+
+export { variable } from "../variables-io";
 
 interface CodeQualityIssue {
   description: string;
@@ -13,85 +14,19 @@ interface CodeQualityIssue {
 }
 
 const SEVERITY: Record<AnnotationLevel, CodeQualityIssue["severity"]> = { error: "major", warning: "minor", notice: "info" };
-const ESC = "\u001b";
 
 /**
- * Inputs and outputs in GitLab CI/CD, where jobs have neither step inputs nor
- * outputs: inputs are NOTMYFAULT_* variables, outputs go to a dotenv file,
- * the summary to a Markdown file and annotations to a Code Quality report,
- * which merge requests show.
+ * Inputs and outputs in GitLab CI/CD: NOTMYFAULT_* variables, a dotenv file and
+ * a Markdown summary, plus annotations as a Code Quality report, which merge
+ * requests show, and collapsible sections in the job log.
  */
-export class GitLabIO implements Io {
-  private readonly outputs = new Map<string, string>();
+export class GitLabIO extends VariablesIO {
   private readonly issues: CodeQualityIssue[] = [];
-  private summaryStarted = false;
   private sections = 0;
   private readonly openSections: string[] = [];
 
-  constructor(
-    private readonly env: NodeJS.ProcessEnv = process.env,
-    private readonly write: (line: string) => void = (line) => process.stdout.write(line + EOL),
-  ) {}
-
-  input(name: string, fallback = ""): string {
-    const value = this.env[variable(name)];
-    return value === undefined || value.trim() === "" ? fallback : value.trim();
-  }
-
-  booleanInput(name: string, fallback: boolean): boolean {
-    const value = this.input(name).toLowerCase();
-    if (value === "") return fallback;
-    if (["true", "yes", "on", "1"].includes(value)) return true;
-    if (["false", "no", "off", "0"].includes(value)) return false;
-    throw new Error(`${this.describeInput(name)} must be a boolean, got "${value}"`);
-  }
-
-  integerInput(name: string, fallback: number, min: number): number {
-    const value = this.input(name);
-    if (value === "") return fallback;
-    const parsed = Number(value);
-    if (!Number.isInteger(parsed) || parsed < min) {
-      throw new Error(`${this.describeInput(name)} must be an integer >= ${min}, got "${value}"`);
-    }
-    return parsed;
-  }
-
-  inputName(name: string): string {
-    return variable(name);
-  }
-
-  describeInput(name: string): string {
-    return `Variable ${variable(name)}`;
-  }
-
-  describeInputs(names: string[]): string {
-    return `Variables ${names.map(variable).join(" and ")}`;
-  }
-
-  setOutput(name: string, value: string | number | boolean): void {
-    this.outputs.set(variable(name), String(value));
-  }
-
-  appendSummary(markdown: string): void {
-    const file = this.path("NOTMYFAULT_SUMMARY_FILE", "notmyfault-summary.md");
-    if (this.summaryStarted) appendFileSync(file, markdown + EOL);
-    else writeFileSync(file, markdown + EOL);
-    this.summaryStarted = true;
-  }
-
-  /** GitLab hides variables marked as masked, and has no command to mask a value at runtime. */
-  mask(): void {}
-
-  info(message: string): void {
-    this.write(message);
-  }
-
-  warning(message: string): void {
-    this.write(`${ESC}[33mWarning: ${message}${ESC}[0m`);
-  }
-
-  error(message: string): void {
-    this.write(`${ESC}[31mError: ${message}${ESC}[0m`);
+  constructor(env: NodeJS.ProcessEnv = process.env, write?: (line: string) => void) {
+    super(env, write, env.CI_PROJECT_DIR ?? process.cwd());
   }
 
   /** A collapsed section of the job log. */
@@ -120,22 +55,10 @@ export class GitLabIO implements Io {
     });
   }
 
-  finish(): void {
+  override finish(): void {
     writeFileSync(this.path("NOTMYFAULT_CODE_QUALITY_FILE", "gl-code-quality-report.json"), `${JSON.stringify(this.issues, null, 1)}\n`);
-    if (this.outputs.size === 0) return;
-    const lines = [...this.outputs].map(([name, value]) => `${name}=${value}`);
-    writeFileSync(this.path("NOTMYFAULT_OUTPUT_FILE", "notmyfault.env"), `${lines.join("\n")}\n`);
+    super.finish();
   }
-
-  private path(name: string, fallback: string): string {
-    const file = this.env[name]?.trim() || fallback;
-    return isAbsolute(file) ? file : join(this.env.CI_PROJECT_DIR ?? process.cwd(), file);
-  }
-}
-
-/** The variable holding an input: "history-branch" is read from NOTMYFAULT_HISTORY_BRANCH. */
-export function variable(name: string): string {
-  return `NOTMYFAULT_${name.toUpperCase().replace(/-/g, "_")}`;
 }
 
 function seconds(): number {

@@ -1,4 +1,5 @@
 import { forgejoPlatform } from "./forgejo/platform";
+import { genericPlatform } from "./generic/platform";
 import { githubPlatform } from "./github/platform";
 import { gitlabPlatform } from "./gitlab/platform";
 import type { Platform } from "./platform";
@@ -9,5 +10,6 @@ export function detectPlatform(env: NodeJS.ProcessEnv): Platform {
   // Forgejo and Gitea Actions also set GITHUB_ACTIONS.
   if (env.FORGEJO_ACTIONS === "true" || env.GITEA_ACTIONS === "true") return forgejoPlatform(env);
   if (env.GITHUB_ACTIONS === "true") return githubPlatform(env);
-  throw new Error("notmyfault runs in GitHub Actions or GitLab CI/CD: neither GITHUB_ACTIONS nor GITLAB_CI is set.");
+  // Anywhere else, notmyfault reads its configuration from NOTMYFAULT_* variables and git.
+  return genericPlatform(env);
 }

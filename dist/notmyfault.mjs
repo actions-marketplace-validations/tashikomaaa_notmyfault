@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 // src/main.ts
 import { statSync } from "node:fs";
 import { glob, readFile } from "node:fs/promises";
@@ -2061,6 +2063,9 @@ async function runOn(platform, now = /* @__PURE__ */ new Date()) {
   try {
     const settings = readSettings(platform);
     io.mask(settings.token);
+    if (context.local && !settings.record) {
+      io.info(`Not in a CI system: the history is read, not recorded. Set ${io.inputName("record")}=true to record this run.`);
+    }
     const loaded = [];
     for (const suite of settings.suites) {
       const results = await loadResults(suite, settings.suites.length > 1, context.workspace, io);
@@ -2068,7 +2073,7 @@ async function runOn(platform, now = /* @__PURE__ */ new Date()) {
       loaded.push({ ...suite, results });
     }
     const store = new GitStore({
-      remoteUrl: `${context.serverUrl}/${context.repository}.git`,
+      remoteUrl: context.remoteUrl ?? `${context.serverUrl}/${context.repository}.git`,
       branch: settings.branch,
       token: settings.token,
       username: platform.gitUser(settings.token),
@@ -2213,8 +2218,9 @@ function readSettings(platform) {
     tolerated.add(value);
   }
   const quarantine = parseQuarantine(io.input("quarantine"), io.describeInput("quarantine"));
-  const token = io.input("token") || context.defaultToken;
-  if (!token) throw new Error(platform.text.tokenMissing);
+  const token = io.input("token") || context.defaultToken || "";
+  const needsToken = /^https?:\/\//.test(context.remoteUrl ?? `${context.serverUrl}/`);
+  if (!token && needsToken) throw new Error(platform.text.tokenMissing);
   return {
     suites,
     mode,
@@ -2231,7 +2237,7 @@ function readSettings(platform) {
     ...io.booleanInput("check", false) ? { check: io.input("check-name", "notmyfault") } : {},
     rerunFlaky: io.booleanInput("rerun-flaky", false),
     mentionOwners: io.booleanInput("mention-owners", false),
-    record: io.booleanInput("record", true),
+    record: io.booleanInput("record", !context.local),
     window: io.integerInput("window", 50, 5)
   };
 }
@@ -2527,6 +2533,253 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+// src/generic/context.ts
+import { execFileSync } from "node:child_process";
+function readGenericContext(env, git = gitIn(env.NOTMYFAULT_WORKSPACE ?? process.cwd())) {
+  const first = (...values) => values.map((value) => value?.trim()).find((value) => value) || void 0;
+  const remoteUrl = first(env.NOTMYFAULT_REPOSITORY_URL, git(["remote", "get-url", "origin"]));
+  if (!remoteUrl) throw new Error("No repository to store the history in: set NOTMYFAULT_REPOSITORY_URL, or run in a git clone with an origin remote.");
+  const sha = first(
+    env.NOTMYFAULT_SHA,
+    env.GIT_COMMIT,
+    // Jenkins
+    env.CIRCLE_SHA1,
+    env.BUILDKITE_COMMIT,
+    env.BITBUCKET_COMMIT,
+    env.BUILD_SOURCEVERSION,
+    // Azure Pipelines
+    env.TRAVIS_COMMIT,
+    env.DRONE_COMMIT_SHA,
+    git(["rev-parse", "HEAD"])
+  );
+  if (!sha) throw new Error("No commit: set NOTMYFAULT_SHA, or run in a git clone.");
+  const pullRequest = pullRequestNumber(
+    first(
+      env.NOTMYFAULT_PULL_REQUEST,
+      env.CHANGE_ID,
+      // Jenkins multibranch pipelines
+      env.CIRCLE_PULL_REQUEST?.match(/\/(\d+)$/)?.[1],
+      env.BUILDKITE_PULL_REQUEST,
+      env.BITBUCKET_PR_ID,
+      env.SYSTEM_PULLREQUEST_PULLREQUESTNUMBER,
+      // Azure Pipelines
+      env.TRAVIS_PULL_REQUEST,
+      env.DRONE_PULL_REQUEST
+    )
+  );
+  const branch = first(
+    env.NOTMYFAULT_BRANCH,
+    env.BRANCH_NAME,
+    // Jenkins multibranch pipelines
+    env.GIT_BRANCH?.replace(/^origin\//, ""),
+    // Jenkins
+    env.CIRCLE_BRANCH,
+    env.BUILDKITE_BRANCH,
+    env.BITBUCKET_BRANCH,
+    env.BUILD_SOURCEBRANCH?.replace(/^refs\/heads\//, ""),
+    // Azure Pipelines
+    env.TRAVIS_BRANCH,
+    env.DRONE_BRANCH,
+    git(["rev-parse", "--abbrev-ref", "HEAD"])?.replace(/^HEAD$/, "")
+  );
+  const web = webUrl(remoteUrl);
+  const runId = first(env.BUILD_NUMBER, env.CIRCLE_BUILD_NUM, env.BUILDKITE_BUILD_NUMBER, env.BITBUCKET_BUILD_NUMBER, env.BUILD_BUILDNUMBER, env.TRAVIS_BUILD_NUMBER, env.DRONE_BUILD_NUMBER);
+  const runUrl = first(env.NOTMYFAULT_RUN_URL, env.BUILD_URL, env.CIRCLE_BUILD_URL, env.BUILDKITE_BUILD_URL, env.TRAVIS_BUILD_WEB_URL, env.DRONE_BUILD_LINK);
+  return {
+    repository: web?.path ?? remoteUrl,
+    apiProject: web?.path ?? remoteUrl,
+    serverUrl: web?.origin ?? "",
+    apiUrl: "",
+    remoteUrl,
+    sha,
+    // A pull request run is compared with the history of the tracked branches, whatever the branch it builds.
+    branch: pullRequest ? void 0 : branch,
+    runDescription: runId ? `build ${runId}` : `commit ${sha.slice(0, 7)}`,
+    runUrl,
+    workspace: env.NOTMYFAULT_WORKSPACE ?? process.cwd(),
+    tempDir: void 0,
+    defaultBranch: first(env.NOTMYFAULT_DEFAULT_BRANCH, git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])?.replace(/^origin\//, "")),
+    defaultKey: first(env.JOB_NAME, env.CIRCLE_JOB, env.BUILDKITE_LABEL, env.SYSTEM_JOBNAME, env.DRONE_STEP_NAME) ?? "tests",
+    pullRequest: pullRequest ? { number: pullRequest, fromFork: false } : void 0,
+    defaultToken: void 0,
+    local: !CI_VARIABLES.some((name) => env[name]?.trim() && env[name]?.trim().toLowerCase() !== "false")
+  };
+}
+var CI_VARIABLES = ["CI", "NOTMYFAULT_CI", "JENKINS_URL", "BUILDKITE", "CIRCLECI", "TF_BUILD", "BITBUCKET_BUILD_NUMBER", "TEAMCITY_VERSION", "DRONE", "TRAVIS"];
+function pullRequestNumber(value) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : void 0;
+}
+function webUrl(remoteUrl) {
+  const ssh = /^(?:ssh:\/\/)?[\w.-]+@([\w.-]+)(?::\d+)?[:/](.+?)(?:\.git)?\/?$/.exec(remoteUrl);
+  if (ssh && !remoteUrl.startsWith("http")) return { origin: `https://${ssh[1]}`, path: ssh[2] };
+  try {
+    const url = new URL(remoteUrl);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return void 0;
+    return { origin: url.origin, path: url.pathname.replace(/^\/+/, "").replace(/\.git\/?$/, "") };
+  } catch {
+    return void 0;
+  }
+}
+function gitIn(directory) {
+  return (args) => {
+    try {
+      return execFileSync("git", ["-C", directory, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    } catch {
+      return void 0;
+    }
+  };
+}
+
+// src/variables-io.ts
+import { appendFileSync as appendFileSync2, writeFileSync } from "node:fs";
+import { EOL as EOL2 } from "node:os";
+import { isAbsolute as isAbsolute2, join as join4 } from "node:path";
+var ESC = "\x1B";
+var VariablesIO = class {
+  constructor(env = process.env, write = (line) => process.stdout.write(line + EOL2), directory = process.cwd()) {
+    this.env = env;
+    this.write = write;
+    this.directory = directory;
+  }
+  env;
+  write;
+  directory;
+  outputs = /* @__PURE__ */ new Map();
+  summaryStarted = false;
+  input(name, fallback = "") {
+    const value = this.env[variable(name)];
+    return value === void 0 || value.trim() === "" ? fallback : value.trim();
+  }
+  booleanInput(name, fallback) {
+    const value = this.input(name).toLowerCase();
+    if (value === "") return fallback;
+    if (["true", "yes", "on", "1"].includes(value)) return true;
+    if (["false", "no", "off", "0"].includes(value)) return false;
+    throw new Error(`${this.describeInput(name)} must be a boolean, got "${value}"`);
+  }
+  integerInput(name, fallback, min) {
+    const value = this.input(name);
+    if (value === "") return fallback;
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed < min) {
+      throw new Error(`${this.describeInput(name)} must be an integer >= ${min}, got "${value}"`);
+    }
+    return parsed;
+  }
+  inputName(name) {
+    return variable(name);
+  }
+  describeInput(name) {
+    return `Variable ${variable(name)}`;
+  }
+  describeInputs(names) {
+    return `Variables ${names.map(variable).join(" and ")}`;
+  }
+  setOutput(name, value) {
+    this.outputs.set(variable(name), String(value));
+  }
+  appendSummary(markdown) {
+    const file = this.path("NOTMYFAULT_SUMMARY_FILE", "notmyfault-summary.md");
+    if (this.summaryStarted) appendFileSync2(file, markdown + EOL2);
+    else writeFileSync(file, markdown + EOL2);
+    this.summaryStarted = true;
+  }
+  /** Masked variables are hidden by the CI system, which has no command to mask a value at runtime. */
+  mask() {
+  }
+  info(message) {
+    this.write(message);
+  }
+  warning(message) {
+    this.write(`${ESC}[33mWarning: ${message}${ESC}[0m`);
+  }
+  error(message) {
+    this.write(`${ESC}[31mError: ${message}${ESC}[0m`);
+  }
+  finish() {
+    if (this.outputs.size === 0) return;
+    const lines = [...this.outputs].map(([name, value]) => `${name}=${value}`);
+    writeFileSync(this.path("NOTMYFAULT_OUTPUT_FILE", "notmyfault.env"), `${lines.join("\n")}
+`);
+  }
+  /** The file named by variable `name`, or `fallback`, relative to the directory of the run. */
+  path(name, fallback) {
+    const file = this.env[name]?.trim() || fallback;
+    return isAbsolute2(file) ? file : join4(this.directory, file);
+  }
+};
+function variable(name) {
+  return `NOTMYFAULT_${name.toUpperCase().replace(/-/g, "_")}`;
+}
+
+// src/generic/io.ts
+var GenericIO = class extends VariablesIO {
+  constructor(env = process.env, write) {
+    super(env, write, env.NOTMYFAULT_WORKSPACE ?? process.cwd());
+  }
+  group(title) {
+    this.write(title);
+  }
+  endGroup() {
+  }
+  /** The verdict of each failure is already in the log. */
+  annotation(_level, _message, _properties) {
+  }
+};
+
+// src/generic/platform.ts
+var WITHOUT_API = "needs the API of GitHub, GitLab, Forgejo or Gitea, and is not available in this CI system.";
+var noForge = {
+  upsertComment: async () => "skipped",
+  addComment: async () => {
+    throw new Error(`Commenting ${WITHOUT_API}`);
+  },
+  listIssues: async () => {
+    throw new Error(`Managing flaky test issues ${WITHOUT_API}`);
+  },
+  createIssue: async () => {
+    throw new Error(`Managing flaky test issues ${WITHOUT_API}`);
+  },
+  updateIssue: async () => {
+    throw new Error(`Managing flaky test issues ${WITHOUT_API}`);
+  },
+  ensureLabel: async () => {
+    throw new Error(`Managing flaky test issues ${WITHOUT_API}`);
+  },
+  changeOf: async () => void 0
+};
+function genericPlatform(env, io = new GenericIO(env), git) {
+  const context = readGenericContext(env, git);
+  const host = context.serverUrl ? new URL(context.serverUrl).hostname : "localhost";
+  return {
+    name: "generic",
+    context,
+    io,
+    forge: () => noForge,
+    // GitHub accepts any user name with a token, GitLab wants oauth2 with personal and project tokens.
+    gitUser: () => env.NOTMYFAULT_GIT_USER?.trim() || (/gitlab/.test(host) ? "oauth2" : "x-access-token"),
+    gitAuthor: { name: "notmyfault", email: `notmyfault@noreply.${host}` },
+    pushOptions: [],
+    codeownersPaths: [".github/CODEOWNERS", ".gitlab/CODEOWNERS", "docs/CODEOWNERS", "CODEOWNERS"],
+    commitUrl: (sha) => context.serverUrl ? `${context.serverUrl}/${context.repository}/commit/${sha}` : sha,
+    text: {
+      pullRequest: "pull request",
+      changePrefix: "#",
+      runLink: "Build",
+      runName: "build",
+      tokenMissing: "No token: set NOTMYFAULT_TOKEN to a token that can push to the repository, or use an SSH remote with a key that can.",
+      recordDenied: "Can NOTMYFAULT_TOKEN, or the SSH key of the job, push to the repository? NOTMYFAULT_GIT_USER sets the user name sent with the token.",
+      commentDenied: "",
+      commentFromFork: "",
+      issuesDenied: "",
+      checkDenied: "",
+      rerunDenied: ""
+    },
+    rerunNotice: false
+  };
+}
+
 // src/gitlab/api.ts
 var GitLabClient = class {
   constructor(token, apiUrl, project, jobToken = false) {
@@ -2666,72 +2919,14 @@ function required2(env, name) {
 
 // src/gitlab/io.ts
 import { createHash as createHash3 } from "node:crypto";
-import { appendFileSync as appendFileSync2, writeFileSync } from "node:fs";
-import { EOL as EOL2 } from "node:os";
-import { isAbsolute as isAbsolute2, join as join4 } from "node:path";
+import { writeFileSync as writeFileSync2 } from "node:fs";
 var SEVERITY = { error: "major", warning: "minor", notice: "info" };
-var ESC = "\x1B";
-var GitLabIO = class {
-  constructor(env = process.env, write = (line) => process.stdout.write(line + EOL2)) {
-    this.env = env;
-    this.write = write;
-  }
-  env;
-  write;
-  outputs = /* @__PURE__ */ new Map();
+var GitLabIO = class extends VariablesIO {
   issues = [];
-  summaryStarted = false;
   sections = 0;
   openSections = [];
-  input(name, fallback = "") {
-    const value = this.env[variable(name)];
-    return value === void 0 || value.trim() === "" ? fallback : value.trim();
-  }
-  booleanInput(name, fallback) {
-    const value = this.input(name).toLowerCase();
-    if (value === "") return fallback;
-    if (["true", "yes", "on", "1"].includes(value)) return true;
-    if (["false", "no", "off", "0"].includes(value)) return false;
-    throw new Error(`${this.describeInput(name)} must be a boolean, got "${value}"`);
-  }
-  integerInput(name, fallback, min) {
-    const value = this.input(name);
-    if (value === "") return fallback;
-    const parsed = Number(value);
-    if (!Number.isInteger(parsed) || parsed < min) {
-      throw new Error(`${this.describeInput(name)} must be an integer >= ${min}, got "${value}"`);
-    }
-    return parsed;
-  }
-  inputName(name) {
-    return variable(name);
-  }
-  describeInput(name) {
-    return `Variable ${variable(name)}`;
-  }
-  describeInputs(names) {
-    return `Variables ${names.map(variable).join(" and ")}`;
-  }
-  setOutput(name, value) {
-    this.outputs.set(variable(name), String(value));
-  }
-  appendSummary(markdown) {
-    const file = this.path("NOTMYFAULT_SUMMARY_FILE", "notmyfault-summary.md");
-    if (this.summaryStarted) appendFileSync2(file, markdown + EOL2);
-    else writeFileSync(file, markdown + EOL2);
-    this.summaryStarted = true;
-  }
-  /** GitLab hides variables marked as masked, and has no command to mask a value at runtime. */
-  mask() {
-  }
-  info(message) {
-    this.write(message);
-  }
-  warning(message) {
-    this.write(`${ESC}[33mWarning: ${message}${ESC}[0m`);
-  }
-  error(message) {
-    this.write(`${ESC}[31mError: ${message}${ESC}[0m`);
+  constructor(env = process.env, write) {
+    super(env, write, env.CI_PROJECT_DIR ?? process.cwd());
   }
   /** A collapsed section of the job log. */
   group(title) {
@@ -2757,21 +2952,11 @@ var GitLabIO = class {
     });
   }
   finish() {
-    writeFileSync(this.path("NOTMYFAULT_CODE_QUALITY_FILE", "gl-code-quality-report.json"), `${JSON.stringify(this.issues, null, 1)}
+    writeFileSync2(this.path("NOTMYFAULT_CODE_QUALITY_FILE", "gl-code-quality-report.json"), `${JSON.stringify(this.issues, null, 1)}
 `);
-    if (this.outputs.size === 0) return;
-    const lines = [...this.outputs].map(([name, value]) => `${name}=${value}`);
-    writeFileSync(this.path("NOTMYFAULT_OUTPUT_FILE", "notmyfault.env"), `${lines.join("\n")}
-`);
-  }
-  path(name, fallback) {
-    const file = this.env[name]?.trim() || fallback;
-    return isAbsolute2(file) ? file : join4(this.env.CI_PROJECT_DIR ?? process.cwd(), file);
+    super.finish();
   }
 };
-function variable(name) {
-  return `NOTMYFAULT_${name.toUpperCase().replace(/-/g, "_")}`;
-}
 function seconds() {
   return Math.floor(Date.now() / 1e3);
 }
@@ -2816,7 +3001,7 @@ function detectPlatform(env) {
   if (env.GITLAB_CI === "true") return gitlabPlatform(env);
   if (env.FORGEJO_ACTIONS === "true" || env.GITEA_ACTIONS === "true") return forgejoPlatform(env);
   if (env.GITHUB_ACTIONS === "true") return githubPlatform(env);
-  throw new Error("notmyfault runs in GitHub Actions or GitLab CI/CD: neither GITHUB_ACTIONS nor GITLAB_CI is set.");
+  return genericPlatform(env);
 }
 
 // src/cli.ts

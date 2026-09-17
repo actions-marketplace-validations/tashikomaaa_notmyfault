@@ -67,8 +67,8 @@ describe("readGitLabContext", () => {
 });
 
 describe("detectPlatform", () => {
-  it("recognizes GitLab and GitHub, and nothing else", () => {
+  it("recognizes GitLab, and falls back to any other CI system", () => {
     expect(detectPlatform({ ...base, GITLAB_CI: "true" }).name).toBe("gitlab");
-    expect(() => detectPlatform({})).toThrow("neither GITHUB_ACTIONS nor GITLAB_CI is set");
+    expect(detectPlatform({ NOTMYFAULT_REPOSITORY_URL: "https://git.acme.test/shop.git", NOTMYFAULT_SHA: "a".repeat(40) }).name).toBe("generic");
   });
 });

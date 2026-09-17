@@ -100,7 +100,7 @@ Every rule and threshold is documented in [Reading the report](docs/verdicts.md)
 
 | | |
 |---|---|
-| **Guides** | [Getting started](docs/getting-started.md) · [GitLab CI/CD](docs/gitlab.md) · [Forgejo and Gitea](docs/forgejo.md) · [Quarantine flaky tests](docs/quarantine.md) · [Dashboard](docs/dashboard.md) · [Test runners](docs/test-runners.md) · [Recipes](docs/recipes.md) |
+| **Guides** | [Getting started](docs/getting-started.md) · [GitLab CI/CD](docs/gitlab.md) · [Forgejo and Gitea](docs/forgejo.md) · [Any CI](docs/any-ci.md) · [Quarantine flaky tests](docs/quarantine.md) · [Dashboard](docs/dashboard.md) · [Test runners](docs/test-runners.md) · [Recipes](docs/recipes.md) |
 | **Reference** | [Reading the report](docs/verdicts.md) · [Configuration](docs/configuration.md) · [How it works](docs/how-it-works.md) · [Permissions and security](docs/security.md) |
 | **Help** | [Troubleshooting](docs/troubleshooting.md) · [FAQ](docs/faq.md) |
 

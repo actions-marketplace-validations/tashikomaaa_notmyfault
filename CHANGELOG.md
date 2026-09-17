@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
+- `notmyfault.mjs` runs in any other CI system, like Jenkins, CircleCI or Buildkite: it reads its configuration from `NOTMYFAULT_*` variables, the variables of common CI systems and git, pushes the history over HTTPS with a token or over SSH, and reports in the log, a Markdown summary, a dotenv file and its exit code. Outside CI systems, it records nothing unless told to ([#22](https://github.com/tashikomaaa/notmyfault/issues/22)).
+
 - A dashboard action, `tashikomaaa/notmyfault/dashboard`, reads the history branches of several repositories and ranks their unreliable tests together, the costliest first, in a static page ready for GitHub Pages ([#25](https://github.com/tashikomaaa/notmyfault/issues/25)).
 
 ## [1.8.0] - 2026-09-17

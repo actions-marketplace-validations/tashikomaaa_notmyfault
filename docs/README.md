@@ -16,6 +16,7 @@ notmyfault is a GitHub Action, also available for GitLab CI/CD, that remembers h
 - [Getting started](getting-started.md): add notmyfault to a workflow in five minutes.
 - [GitLab CI/CD](gitlab.md): the same on GitLab, with merge request comments and the Code Quality widget.
 - [Forgejo and Gitea Actions](forgejo.md): the same action, in their GitHub-compatible workflows.
+- [Any other CI system](any-ci.md): Jenkins, CircleCI, Buildkite and others, with Node.js and git.
 - [Reading the report](verdicts.md): what each verdict means and what to do about it.
 
 <p align="center">

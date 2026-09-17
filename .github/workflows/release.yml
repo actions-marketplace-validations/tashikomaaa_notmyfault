@@ -26,6 +26,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
+          registry-url: https://registry.npmjs.org
 
       - run: npm ci
       - run: npm run build
@@ -56,4 +57,23 @@ jobs:
           if ! grep -q "$checksum" <<< "$notes"; then
             printf '%s\n\n**SHA-256 of notmyfault.mjs:** `%s`\n' "$notes" "$checksum" > notes.md
             gh release edit "$TAG" --notes-file notes.md
+          fi
+
+      # npx notmyfault, for CI systems without an integration. Skipped until the NPM_TOKEN secret exists.
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::notice::No NPM_TOKEN secret: notmyfault is not published to npm."
+            exit 0
+          fi
+          if [ "v$(node -p 'require("./package.json").version')" != "$TAG" ]; then
+            echo "::error::package.json is not at version $TAG."
+            exit 1
+          fi
+          if npm view "notmyfault@${TAG#v}" version > /dev/null 2>&1; then
+            echo "notmyfault ${TAG#v} is already on npm."
+          else
+            npm publish --provenance --access public
           fi
