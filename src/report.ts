@@ -27,6 +27,8 @@ export interface ReportContext {
   /** Failures not covered by the tolerated verdicts. */
   blocking: number;
   runUrl?: string;
+  /** Label of the link to the run. Defaults to "Workflow run". */
+  runLink?: string;
 }
 
 /** The analysis of one test suite, with its own history. */
@@ -346,7 +348,7 @@ function footer(retried: TestResult[], context: ReportContext): string {
     const more = retried.length > 5 ? ` and ${retried.length - 5} more` : "";
     parts.push(`🔁 Passed only after a retry: ${names}${more}`);
   }
-  if (context.runUrl) parts.push(`[Workflow run](${context.runUrl})`);
+  if (context.runUrl) parts.push(`[${context.runLink ?? "Workflow run"}](${context.runUrl})`);
   parts.push(`Reported by [notmyfault](${PROJECT_URL})`);
   return `<sub>${parts.join(" · ")}</sub>`;
 }

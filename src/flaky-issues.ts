@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { computeStats, verdictFor, type TestStats } from "./analyze";
-import type { Issue } from "./github";
+import type { Issue } from "./platform";
 import type { History, TestHistory } from "./history";
 import type { TestResult } from "./junit";
 import type { Rename } from "./renames";

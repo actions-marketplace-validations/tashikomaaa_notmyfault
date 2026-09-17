@@ -1,7 +1,8 @@
 import { statSync } from "node:fs";
 import { glob, readFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { ActionIO } from "./actions";
+import { ActionIO } from "./github/io";
+import { githubPlatform } from "./github/platform";
 import {
   analyze,
   blockingFailures,
@@ -12,14 +13,13 @@ import {
   type FailureVerdict,
   type Verdict,
 } from "./analyze";
-import { readContext, runUrl, type RunContext } from "./context";
+import { ApiError, type Io, type Platform, type RunContext } from "./platform";
 import { GitStore } from "./git-store";
 import { badgePath, renderBadge } from "./badge";
 import { renderIndexPage, renderSuitePage, reportPath } from "./html-report";
 import { FLAKY_LABEL, planFlakyIssues } from "./flaky-issues";
 import { applyQuarantine, isActive, parseQuarantine, type QuarantineEntry } from "./quarantine";
 import { applyRenames, detectRenames, type Rename } from "./renames";
-import { GitHubApiError, GitHubClient } from "./github";
 import { emptyHistory, parseHistory, recordRun, serializeHistory, type History } from "./history";
 import { combineReports, parseJUnit, type TestResult } from "./junit";
 import { locate } from "./locate";
@@ -48,12 +48,12 @@ const VERDICTS: readonly Verdict[] = ["new", "suspect", "broken", "flaky"];
 
 const BRANCH_README = `# notmyfault history
 
-This branch is maintained by the [notmyfault](https://github.com/tashikomaaa/notmyfault) GitHub Action.
+This branch is maintained by [notmyfault](https://github.com/tashikomaaa/notmyfault).
 It stores the recent outcome of each test, so failures can be told apart: new, flaky or already broken.
 
 - \`history/<key>.json\`: the history of a test suite.
 - \`badges/<key>.json\`: a [shields.io endpoint](https://shields.io/badges/endpoint-badge) counting its flaky tests.
-- \`reports/<key>.html\` and \`index.html\`: pages listing its unreliable tests, to publish with GitHub Pages.
+- \`reports/<key>.html\` and \`index.html\`: pages listing its unreliable tests, to publish as a static site.
 
 The branch is rewritten as a single commit on every update. Deleting it simply resets the history.
 `;
@@ -82,11 +82,23 @@ export interface Settings {
   window: number;
 }
 
-/** Runs the action and resolves to the process exit code. */
-export async function run(env: NodeJS.ProcessEnv = process.env, io = new ActionIO(env), now = new Date()): Promise<number> {
+/** Runs the GitHub Action and resolves to the process exit code. */
+export async function run(env: NodeJS.ProcessEnv = process.env, io: Io = new ActionIO(env), now = new Date()): Promise<number> {
+  let platform: Platform;
   try {
-    const context = readContext(env);
-    const settings = readSettings(io, context);
+    platform = githubPlatform(env, io);
+  } catch (error) {
+    io.error(errorMessage(error));
+    return 1;
+  }
+  return runOn(platform, now);
+}
+
+/** Runs notmyfault on a platform and resolves to the process exit code. */
+export async function runOn(platform: Platform, now = new Date()): Promise<number> {
+  const { context, io } = platform;
+  try {
+    const settings = readSettings(platform);
     io.mask(settings.token);
 
     const loaded: LoadedSuite[] = [];
@@ -100,16 +112,21 @@ export async function run(env: NodeJS.ProcessEnv = process.env, io = new ActionI
       remoteUrl: `${context.serverUrl}/${context.repository}.git`,
       branch: settings.branch,
       token: settings.token,
-      tempDir: context.tempDir,
+      username: platform.gitUser(settings.token),
+      author: platform.gitAuthor,
+      pushOptions: platform.pushOptions,
+      ...(context.tempDir ? { tempDir: context.tempDir } : {}),
     });
     try {
-      return await evaluate(loaded, context, settings, store, io, now);
+      return await evaluate(loaded, platform, settings, store, now);
     } finally {
       await store.dispose();
     }
   } catch (error) {
     io.error(errorMessage(error));
     return 1;
+  } finally {
+    io.finish();
   }
 }
 
@@ -124,14 +141,8 @@ interface Suite extends LoadedSuite {
   renames: Rename[];
 }
 
-async function evaluate(
-  loaded: LoadedSuite[],
-  context: RunContext,
-  settings: Settings,
-  store: GitStore,
-  io: ActionIO,
-  now: Date,
-): Promise<number> {
+async function evaluate(loaded: LoadedSuite[], platform: Platform, settings: Settings, store: GitStore, now: Date): Promise<number> {
+  const { context, io } = platform;
   const suites: Suite[] = [];
   const tracked = isTracked(context, settings);
   for (const suite of loaded) {
@@ -159,9 +170,9 @@ async function evaluate(
     tolerated: settings.tolerated,
     blocking: blocking.length,
     quarantined,
+    runLink: platform.text.runLink,
+    ...(context.runUrl ? { runUrl: context.runUrl } : {}),
   };
-  const url = runUrl(context);
-  if (url) reportContext.runUrl = url;
 
   for (const { key, analysis } of suites) {
     io.group(
@@ -179,7 +190,7 @@ async function evaluate(
   }
 
   // Emitted first, so that the limit on notices never drops it.
-  const onlyFlaky = failures.length > 0 && failures.every((failure) => failure.verdict === "flaky");
+  const onlyFlaky = platform.rerunNotice && failures.length > 0 && failures.every((failure) => failure.verdict === "flaky");
   if (onlyFlaky) {
     io.annotation(
       "notice",
@@ -189,11 +200,11 @@ async function evaluate(
   }
   if (settings.annotations) annotate(failures, reportContext, context.workspace, io, onlyFlaky ? 1 : 0);
   if (settings.record) {
-    for (const suite of suites) await recordHistory(store, suite.key, suite.results, context, settings, io, now);
+    for (const suite of suites) await recordHistory(store, suite.key, suite.results, platform, settings, now);
   }
   for (const { renames } of suites) for (const { from, to } of renames) io.info(`renamed  ${from} → ${to}`);
   if (settings.flakyIssues && isTracked(context, settings) && !context.pullRequest?.fromFork) {
-    await manageFlakyIssues(suites, context, settings, reportContext.runUrl, io, now);
+    await manageFlakyIssues(suites, platform, settings, now);
   }
 
   const reports: SuiteReport[] = suites.map((suite) => {
@@ -211,7 +222,7 @@ async function evaluate(
   io.appendSummary(renderSuitesSummary(reports, reportContext));
   if (settings.comment && context.pullRequest) {
     const noteworthy = sum((a) => a.failures.length + a.retried.length + a.fixed.length) > 0;
-    await comment(context, settings, renderSuitesComment(reports, reportContext), noteworthy, io);
+    await comment(platform, settings, renderSuitesComment(reports, reportContext), noteworthy);
   }
 
   const count = (verdicts: Verdict[]) => failures.filter((f) => verdicts.includes(f.verdict)).length;
@@ -234,25 +245,26 @@ async function evaluate(
   return 0;
 }
 
-export function readSettings(io: ActionIO, context: RunContext): Settings {
-  const suites = readSuites(io, `${context.workflow}-${context.job}`);
+export function readSettings(platform: Platform): Settings {
+  const { context, io } = platform;
+  const suites = readSuites(io, context.defaultKey);
 
   const mode = io.input("mode", "report");
   if (mode !== "report" && mode !== "quarantine") {
-    throw new Error(`Input "mode" must be "report" or "quarantine", got "${mode}"`);
+    throw new Error(`${io.describeInput("mode")} must be "report" or "quarantine", got "${mode}"`);
   }
 
   const tolerated = new Set<Verdict>();
   for (const value of splitList(io.input("tolerate", "flaky"))) {
     if (!VERDICTS.includes(value as Verdict)) {
-      throw new Error(`Input "tolerate" accepts ${VERDICTS.join(", ")}; got "${value}"`);
+      throw new Error(`${io.describeInput("tolerate")} accepts ${VERDICTS.join(", ")}; got "${value}"`);
     }
     tolerated.add(value as Verdict);
   }
-  const quarantine = parseQuarantine(io.input("quarantine"));
+  const quarantine = parseQuarantine(io.input("quarantine"), io.describeInput("quarantine"));
 
-  const token = io.input("token");
-  if (!token) throw new Error('Input "token" is empty. Pass `token: ${{ github.token }}`.');
+  const token = io.input("token") || context.defaultToken;
+  if (!token) throw new Error(platform.text.tokenMissing);
 
   return {
     suites,
@@ -272,25 +284,29 @@ export function readSettings(io: ActionIO, context: RunContext): Settings {
 }
 
 /** Either one suite from "junit" and "key", or several, one "name: glob" per line of "suites". */
-function readSuites(io: ActionIO, defaultKey: string): SuiteSettings[] {
+function readSuites(io: Io, defaultKey: string): SuiteSettings[] {
   const list = io.input("suites");
   if (!list) {
     const patterns = splitList(io.input("junit"));
     if (patterns.length === 0) {
-      throw new Error('Input "junit" is required: a glob matching your JUnit XML reports. Or list several suites in "suites".');
+      throw new Error(
+        `${io.describeInput("junit")} is required: a glob matching your JUnit XML reports. Or list several suites in ${io.inputName("suites")}.`,
+      );
     }
     return [{ key: sanitizeKey(io.input("key", defaultKey)), patterns }];
   }
   if (io.input("junit") || io.input("key")) {
-    throw new Error('Inputs "junit" and "key" cannot be used with "suites": name each suite and its reports in "suites".');
+    throw new Error(
+      `${io.describeInputs(["junit", "key"])} cannot be used with ${io.inputName("suites")}: name each suite and its reports in ${io.inputName("suites")}.`,
+    );
   }
   const suites: SuiteSettings[] = [];
   for (const line of list.split("\n").map((part) => part.trim()).filter(Boolean)) {
     const match = /^([^:]+):(.*)$/.exec(line);
     const patterns = splitList(match?.[2] ?? "");
-    if (!match || patterns.length === 0) throw new Error(`Input "suites" expects one "name: glob" per line, got "${line}"`);
+    if (!match || patterns.length === 0) throw new Error(`${io.describeInput("suites")} expects one "name: glob" per line, got "${line}"`);
     const key = sanitizeKey(match[1]!);
-    if (suites.some((suite) => suite.key === key)) throw new Error(`Input "suites" names the suite "${key}" twice.`);
+    if (suites.some((suite) => suite.key === key)) throw new Error(`${io.describeInput("suites")} names the suite "${key}" twice.`);
     suites.push({ key, patterns });
   }
   return suites;
@@ -309,7 +325,7 @@ async function loadResults(
   suite: SuiteSettings,
   named: boolean,
   workspace: string,
-  io: ActionIO,
+  io: Io,
 ): Promise<TestResult[] | undefined> {
   const of = named ? ` for ${suite.key}` : "";
   const files = await findFiles(suite.patterns, workspace);
@@ -350,7 +366,7 @@ export async function findFiles(patterns: string[], workspace: string): Promise<
 }
 
 /** Annotates each failed test the report locates in the workspace, most actionable verdicts first. */
-function annotate(failures: FailureVerdict[], context: ReportContext, workspace: string, io: ActionIO, noticesAlready: number): void {
+function annotate(failures: FailureVerdict[], context: ReportContext, workspace: string, io: Io, noticesAlready: number): void {
   const isFile = (path: string) => statSync(join(workspace, path), { throwIfNoEntry: false })?.isFile() ?? false;
   const emitted = { error: 0, notice: noticesAlready };
   for (const failure of failures) {
@@ -365,7 +381,7 @@ function annotate(failures: FailureVerdict[], context: ReportContext, workspace:
   }
 }
 
-async function loadHistory(store: GitStore, path: string, settings: Settings, io: ActionIO): Promise<History> {
+async function loadHistory(store: GitStore, path: string, settings: Settings, io: Io): Promise<History> {
   try {
     return parseHistory(await store.read(path));
   } catch (error) {
@@ -382,13 +398,13 @@ async function recordHistory(
   store: GitStore,
   key: string,
   results: TestResult[],
-  context: RunContext,
+  platform: Platform,
   settings: Settings,
-  io: ActionIO,
   now: Date,
 ): Promise<void> {
+  const { context, io } = platform;
   if (context.pullRequest?.fromFork) {
-    io.info("Pull request from a fork: the token is read-only, history is not recorded.");
+    io.info(`${capitalize(platform.text.pullRequest)} from a fork: the token is read-only, history is not recorded.`);
     return;
   }
   const tracked = isTracked(context, settings);
@@ -411,7 +427,7 @@ async function recordHistory(
         return changed ? serializeHistory(history) : undefined;
       },
       {
-        message: `Record ${key} (run ${context.runId || "local"}, attempt ${context.runAttempt})`,
+        message: `Record ${key} (${context.runDescription})`,
         extraFiles: { "README.md": BRANCH_README, ".nojekyll": "" },
         derivedFiles: (content, existingPaths) => {
           const history = parseHistory(content);
@@ -428,31 +444,20 @@ async function recordHistory(
     );
     io.info(pushed ? `History updated on branch "${settings.branch}".` : "Nothing new to record.");
   } catch (error) {
-    io.warning(
-      `Could not record history on branch "${settings.branch}". Does the job have "contents: write" permission? ${errorMessage(error)}`,
-    );
+    io.warning(`Could not record history on branch "${settings.branch}". ${platform.text.recordDenied} ${errorMessage(error)}`);
   }
 }
 
 /** Whether the run happened on a tracked branch, whose runs build the history. */
 function isTracked(context: RunContext, settings: Settings): boolean {
-  return (
-    !context.eventName.startsWith("pull_request") &&
-    context.ref === `refs/heads/${context.refName}` &&
-    settings.trackedBranches.includes(context.refName)
-  );
+  return context.branch !== undefined && settings.trackedBranches.includes(context.branch);
 }
 
 /** Opens, updates and closes an issue per flaky test, from the history including this run. */
-async function manageFlakyIssues(
-  suites: Suite[],
-  context: RunContext,
-  settings: Settings,
-  runUrl: string | undefined,
-  io: ActionIO,
-  now: Date,
-): Promise<void> {
-  const client = new GitHubClient(settings.token, context.apiUrl, context.repository);
+async function manageFlakyIssues(suites: Suite[], platform: Platform, settings: Settings, now: Date): Promise<void> {
+  const { context, io } = platform;
+  const runUrl = context.runUrl;
+  const client = platform.forge(settings.token);
   try {
     const after = suites.map((suite) => {
       const history = structuredClone(suite.history);
@@ -490,27 +495,27 @@ async function manageFlakyIssues(
     const later = postponed > 0 ? ` ${postponed} more flaky test(s) will get an issue on the next runs.` : "";
     io.info(`Flaky test issues: ${done.created} created, ${done.updated} updated, ${done.closed} closed.${later}`);
   } catch (error) {
-    const hint = error instanceof GitHubApiError && error.status === 403 ? ' Does the job have "issues: write" permission?' : "";
+    const hint = error instanceof ApiError && error.denied ? ` ${platform.text.issuesDenied}` : "";
     io.warning(`Could not update flaky test issues.${hint} ${errorMessage(error)}`);
   }
 }
 
-async function comment(context: RunContext, settings: Settings, body: string, create: boolean, io: ActionIO): Promise<void> {
+async function comment(platform: Platform, settings: Settings, body: string, create: boolean): Promise<void> {
+  const { context, io, text } = platform;
   const pullRequest = context.pullRequest;
   if (!pullRequest) return;
-  const client = new GitHubClient(settings.token, context.apiUrl, context.repository);
   try {
-    const result = await client.upsertComment(pullRequest.number, commentMarker(settings.commentKey), body, create);
-    if (result !== "skipped") io.info(`Pull request comment ${result}.`);
+    const result = await platform.forge(settings.token).upsertComment(pullRequest.number, commentMarker(settings.commentKey), body, create);
+    if (result !== "skipped") io.info(`${capitalize(text.pullRequest)} comment ${result}.`);
   } catch (error) {
     const hint =
-      error instanceof GitHubApiError && error.status === 403
-        ? pullRequest.fromFork
-          ? " Tokens are read-only on pull requests from forks; the job summary has the full report."
-          : ' Does the job have "pull-requests: write" permission?'
-        : "";
-    io.warning(`Could not comment on the pull request.${hint} ${errorMessage(error)}`);
+      error instanceof ApiError && error.denied ? ` ${pullRequest.fromFork ? text.commentFromFork : text.commentDenied}` : "";
+    io.warning(`Could not comment on the ${text.pullRequest}.${hint} ${errorMessage(error)}`);
   }
+}
+
+function capitalize(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function splitList(value: string): string[] {

@@ -1,22 +1,8 @@
-export class GitHubApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly path: string,
-    body: string,
-  ) {
-    super(`GitHub API ${status} on ${path}: ${body.slice(0, 200)}`);
-  }
-}
+import { ApiError, type Forge, type Issue } from "../platform";
 
 interface IssueComment {
   id: number;
   body?: string;
-}
-
-export interface Issue {
-  number: number;
-  state: "open" | "closed";
-  body: string;
 }
 
 interface IssueItem {
@@ -27,7 +13,7 @@ interface IssueItem {
 }
 
 /** Minimal REST client for the few endpoints the action needs. */
-export class GitHubClient {
+export class GitHubClient implements Forge {
   constructor(
     private readonly token: string,
     private readonly apiUrl: string,
@@ -86,7 +72,7 @@ export class GitHubClient {
     try {
       await this.request("GET", `/repos/${this.repository}/labels/${encodeURIComponent(name)}`);
     } catch (error) {
-      if (!(error instanceof GitHubApiError) || error.status !== 404) throw error;
+      if (!(error instanceof ApiError) || error.status !== 404) throw error;
       await this.request("POST", `/repos/${this.repository}/labels`, { name, color, description });
     }
   }
@@ -115,7 +101,7 @@ export class GitHubClient {
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-    if (!response.ok) throw new GitHubApiError(response.status, path, await response.text());
+    if (!response.ok) throw new ApiError(response.status, path, await response.text(), "GitHub");
     return response;
   }
 }

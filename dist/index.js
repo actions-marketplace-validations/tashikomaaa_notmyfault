@@ -3,7 +3,7 @@ import { statSync } from "node:fs";
 import { glob, readFile } from "node:fs/promises";
 import { isAbsolute, join as join2, relative, resolve } from "node:path";
 
-// src/actions.ts
+// src/github/io.ts
 import { appendFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { EOL } from "node:os";
@@ -33,6 +33,15 @@ var ActionIO = class {
       throw new Error(`Input "${name}" must be an integer >= ${min}, got "${value}"`);
     }
     return parsed;
+  }
+  inputName(name) {
+    return `"${name}"`;
+  }
+  describeInput(name) {
+    return `Input "${name}"`;
+  }
+  describeInputs(names) {
+    return `Inputs ${names.map((name) => `"${name}"`).join(" and ")}`;
   }
   setOutput(name, value) {
     const file = this.env.GITHUB_OUTPUT;
@@ -68,11 +77,185 @@ var ActionIO = class {
   endGroup() {
     this.write("::endgroup::");
   }
+  /** Workflow commands are written as they come: nothing to write at the end. */
+  finish() {
+  }
   command(name, message) {
     const escaped = message.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
     this.write(`::${name}::${escaped}`);
   }
 };
+
+// src/platform.ts
+var ApiError = class extends Error {
+  constructor(status, path, body, platform) {
+    super(`${platform} API ${status} on ${path}: ${body.slice(0, 200)}`);
+    this.status = status;
+    this.path = path;
+  }
+  status;
+  path;
+  /** The token is missing a permission, a scope or a role. */
+  get denied() {
+    return this.status === 401 || this.status === 403;
+  }
+};
+
+// src/github/api.ts
+var GitHubClient = class {
+  constructor(token, apiUrl, repository) {
+    this.token = token;
+    this.apiUrl = apiUrl;
+    this.repository = repository;
+  }
+  token;
+  apiUrl;
+  repository;
+  /**
+   * Updates the comment carrying `marker`, or creates one when `create` is true.
+   * Resolves to what happened.
+   */
+  async upsertComment(issue, marker, body, create) {
+    const existing = await this.findComment(issue, marker);
+    if (existing) {
+      await this.request("PATCH", `/repos/${this.repository}/issues/comments/${existing.id}`, { body });
+      return "updated";
+    }
+    if (!create) return "skipped";
+    await this.addComment(issue, body);
+    return "created";
+  }
+  async addComment(issue, body) {
+    await this.request("POST", `/repos/${this.repository}/issues/${issue}/comments`, { body });
+  }
+  /** Issues, open or closed, carrying `label`. Pull requests are left out. */
+  async listIssues(label) {
+    const issues = [];
+    let path = `/repos/${this.repository}/issues?labels=${encodeURIComponent(label)}&state=all&per_page=100`;
+    while (path) {
+      const response = await this.request("GET", path);
+      for (const item of await response.json()) {
+        if (!item.pull_request) issues.push({ number: item.number, state: item.state, body: item.body ?? "" });
+      }
+      path = nextPage(response.headers.get("link"), this.apiUrl);
+    }
+    return issues;
+  }
+  async createIssue(title, body, labels) {
+    const response = await this.request("POST", `/repos/${this.repository}/issues`, { title, body, labels });
+    return (await response.json()).number;
+  }
+  async updateIssue(issue, changes) {
+    await this.request("PATCH", `/repos/${this.repository}/issues/${issue}`, changes);
+  }
+  /** Creates the label unless it exists. */
+  async ensureLabel(name, color, description) {
+    try {
+      await this.request("GET", `/repos/${this.repository}/labels/${encodeURIComponent(name)}`);
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.status !== 404) throw error;
+      await this.request("POST", `/repos/${this.repository}/labels`, { name, color, description });
+    }
+  }
+  async findComment(issue, marker) {
+    let path = `/repos/${this.repository}/issues/${issue}/comments?per_page=100`;
+    while (path) {
+      const response = await this.request("GET", path);
+      const comments = await response.json();
+      const match = comments.find((comment2) => comment2.body?.startsWith(marker));
+      if (match) return match;
+      path = nextPage(response.headers.get("link"), this.apiUrl);
+    }
+    return void 0;
+  }
+  async request(method, path, body) {
+    const response = await fetch(`${this.apiUrl}${path}`, {
+      method,
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${this.token}`,
+        "User-Agent": "notmyfault",
+        "X-GitHub-Api-Version": "2022-11-28",
+        ...body === void 0 ? {} : { "Content-Type": "application/json" }
+      },
+      ...body === void 0 ? {} : { body: JSON.stringify(body) }
+    });
+    if (!response.ok) throw new ApiError(response.status, path, await response.text(), "GitHub");
+    return response;
+  }
+};
+function nextPage(link, apiUrl) {
+  const match = link?.match(/<([^>]+)>;\s*rel="next"/);
+  if (!match?.[1]) return void 0;
+  return match[1].startsWith(apiUrl) ? match[1].slice(apiUrl.length) : void 0;
+}
+
+// src/github/context.ts
+import { readFileSync } from "node:fs";
+function readContext(env) {
+  const repository = required(env, "GITHUB_REPOSITORY");
+  const payload = readPayload(env.GITHUB_EVENT_PATH);
+  const pr = payload.pull_request;
+  const serverUrl = (env.GITHUB_SERVER_URL ?? "https://github.com").replace(/\/+$/, "");
+  const eventName = env.GITHUB_EVENT_NAME ?? "";
+  const refName = env.GITHUB_REF_NAME ?? "";
+  const runId = env.GITHUB_RUN_ID ?? "";
+  const runAttempt = env.GITHUB_RUN_ATTEMPT ?? "1";
+  const onBranch = !eventName.startsWith("pull_request") && env.GITHUB_REF === `refs/heads/${refName}`;
+  return {
+    repository,
+    apiProject: repository,
+    serverUrl,
+    apiUrl: (env.GITHUB_API_URL ?? "https://api.github.com").replace(/\/+$/, ""),
+    sha: required(env, "GITHUB_SHA"),
+    branch: onBranch ? refName : void 0,
+    runDescription: `run ${runId || "local"}, attempt ${runAttempt}`,
+    runUrl: runId ? `${serverUrl}/${repository}/actions/runs/${runId}${runAttempt !== "1" ? `/attempts/${runAttempt}` : ""}` : void 0,
+    workspace: env.GITHUB_WORKSPACE ?? process.cwd(),
+    tempDir: env.RUNNER_TEMP,
+    defaultBranch: payload.repository?.default_branch,
+    defaultKey: `${env.GITHUB_WORKFLOW ?? "workflow"}-${env.GITHUB_JOB ?? "job"}`,
+    pullRequest: typeof pr?.number === "number" ? { number: pr.number, fromFork: pr.head?.repo?.full_name !== (pr.base?.repo?.full_name ?? repository) } : void 0,
+    defaultToken: void 0
+  };
+}
+function required(env, name) {
+  const value = env[name];
+  if (!value) throw new Error(`${name} is not set. notmyfault must run inside GitHub Actions.`);
+  return value;
+}
+function readPayload(path) {
+  if (!path) return {};
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+// src/github/platform.ts
+function githubPlatform(env, io = new ActionIO(env)) {
+  const context = readContext(env);
+  return {
+    name: "github",
+    context,
+    io,
+    forge: (token) => new GitHubClient(token, context.apiUrl, context.apiProject),
+    gitUser: () => "x-access-token",
+    gitAuthor: { name: "github-actions[bot]", email: "41898282+github-actions[bot]@users.noreply.github.com" },
+    pushOptions: [],
+    text: {
+      pullRequest: "pull request",
+      runLink: "Workflow run",
+      tokenMissing: 'Input "token" is empty. Pass `token: ${{ github.token }}`.',
+      recordDenied: 'Does the job have "contents: write" permission?',
+      commentDenied: 'Does the job have "pull-requests: write" permission?',
+      commentFromFork: "Tokens are read-only on pull requests from forks; the job summary has the full report.",
+      issuesDenied: 'Does the job have "issues: write" permission?'
+    },
+    rerunNotice: true
+  };
+}
 
 // src/history.ts
 import { createHash } from "node:crypto";
@@ -350,49 +533,6 @@ function count(value, char) {
   return n;
 }
 
-// src/context.ts
-import { readFileSync } from "node:fs";
-function readContext(env) {
-  const repository = required(env, "GITHUB_REPOSITORY");
-  const payload = readPayload(env.GITHUB_EVENT_PATH);
-  const pr = payload.pull_request;
-  return {
-    repository,
-    serverUrl: (env.GITHUB_SERVER_URL ?? "https://github.com").replace(/\/+$/, ""),
-    apiUrl: (env.GITHUB_API_URL ?? "https://api.github.com").replace(/\/+$/, ""),
-    sha: required(env, "GITHUB_SHA"),
-    ref: env.GITHUB_REF ?? "",
-    refName: env.GITHUB_REF_NAME ?? "",
-    eventName: env.GITHUB_EVENT_NAME ?? "",
-    runId: env.GITHUB_RUN_ID ?? "",
-    runAttempt: env.GITHUB_RUN_ATTEMPT ?? "1",
-    workflow: env.GITHUB_WORKFLOW ?? "workflow",
-    job: env.GITHUB_JOB ?? "job",
-    workspace: env.GITHUB_WORKSPACE ?? process.cwd(),
-    tempDir: env.RUNNER_TEMP,
-    defaultBranch: payload.repository?.default_branch,
-    pullRequest: typeof pr?.number === "number" ? { number: pr.number, fromFork: pr.head?.repo?.full_name !== (pr.base?.repo?.full_name ?? repository) } : void 0
-  };
-}
-function runUrl(context) {
-  if (!context.runId) return void 0;
-  const attempt = context.runAttempt && context.runAttempt !== "1" ? `/attempts/${context.runAttempt}` : "";
-  return `${context.serverUrl}/${context.repository}/actions/runs/${context.runId}${attempt}`;
-}
-function required(env, name) {
-  const value = env[name];
-  if (!value) throw new Error(`${name} is not set. notmyfault must run inside GitHub Actions.`);
-  return value;
-}
-function readPayload(path) {
-  if (!path) return {};
-  try {
-    return JSON.parse(readFileSync(path, "utf8"));
-  } catch {
-    return {};
-  }
-}
-
 // src/git-store.ts
 import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -441,6 +581,7 @@ var GitStore = class {
         const output = await this.git([
           "push",
           "--porcelain",
+          ...(this.options.pushOptions ?? []).map((option) => `--push-option=${option}`),
           `--force-with-lease=refs/heads/${this.options.branch}:${head ?? ""}`,
           this.options.remoteUrl,
           `${commit}:refs/heads/${this.options.branch}`
@@ -494,10 +635,10 @@ var GitStore = class {
     }
     const tree = (await this.git(["write-tree"], env)).trim();
     return (await this.git(["commit-tree", tree, "-m", message], {
-      GIT_AUTHOR_NAME: BOT_NAME,
-      GIT_AUTHOR_EMAIL: BOT_EMAIL,
-      GIT_COMMITTER_NAME: BOT_NAME,
-      GIT_COMMITTER_EMAIL: BOT_EMAIL
+      GIT_AUTHOR_NAME: this.options.author?.name ?? BOT_NAME,
+      GIT_AUTHOR_EMAIL: this.options.author?.email ?? BOT_EMAIL,
+      GIT_COMMITTER_NAME: this.options.author?.name ?? BOT_NAME,
+      GIT_COMMITTER_EMAIL: this.options.author?.email ?? BOT_EMAIL
     })).trim();
   }
   async repository() {
@@ -522,7 +663,7 @@ var GitStore = class {
     const { token, remoteUrl } = this.options;
     if (token && /^https?:\/\//.test(remoteUrl)) {
       const origin = new URL(remoteUrl).origin;
-      const credentials = Buffer.from(`x-access-token:${token}`).toString("base64");
+      const credentials = Buffer.from(`${this.options.username ?? "x-access-token"}:${token}`).toString("base64");
       Object.assign(env, {
         GIT_CONFIG_COUNT: "1",
         GIT_CONFIG_KEY_0: `http.${origin}/.extraheader`,
@@ -817,7 +958,7 @@ function footer(retried, context) {
     const more = retried.length > 5 ? ` and ${retried.length - 5} more` : "";
     parts.push(`\u{1F501} Passed only after a retry: ${names}${more}`);
   }
-  if (context.runUrl) parts.push(`[Workflow run](${context.runUrl})`);
+  if (context.runUrl) parts.push(`[${context.runLink ?? "Workflow run"}](${context.runUrl})`);
   parts.push(`Reported by [notmyfault](${PROJECT_URL})`);
   return `<sub>${parts.join(" \xB7 ")}</sub>`;
 }
@@ -1139,13 +1280,13 @@ function times2(n) {
 
 // src/quarantine.ts
 var LINE = /^(\d{4}-\d{2}-\d{2})\s+(.+?)(?:\s+#\s+(.*))?$/;
-function parseQuarantine(input) {
+function parseQuarantine(input, label = 'Input "quarantine"') {
   const entries = [];
   for (const line of input.split("\n").map((part) => part.trim()).filter(Boolean)) {
     const match = LINE.exec(line);
     const until = match?.[1];
     if (!match || !until || Number.isNaN(Date.parse(`${until}T00:00:00Z`)) || (/* @__PURE__ */ new Date(`${until}T00:00:00Z`)).toISOString().slice(0, 10) !== until) {
-      throw new Error(`Input "quarantine" expects "YYYY-MM-DD test name # reason" per line, got "${line}"`);
+      throw new Error(`${label} expects "YYYY-MM-DD test name # reason" per line, got "${line}"`);
     }
     const entry = { pattern: match[2].trim(), until };
     if (match[3]?.trim()) entry.reason = match[3].trim();
@@ -1237,104 +1378,6 @@ function similarity(a, b) {
     previous = current;
   }
   return 1 - previous[b.length] / Math.max(a.length, b.length);
-}
-
-// src/github.ts
-var GitHubApiError = class extends Error {
-  constructor(status, path, body) {
-    super(`GitHub API ${status} on ${path}: ${body.slice(0, 200)}`);
-    this.status = status;
-    this.path = path;
-  }
-  status;
-  path;
-};
-var GitHubClient = class {
-  constructor(token, apiUrl, repository) {
-    this.token = token;
-    this.apiUrl = apiUrl;
-    this.repository = repository;
-  }
-  token;
-  apiUrl;
-  repository;
-  /**
-   * Updates the comment carrying `marker`, or creates one when `create` is true.
-   * Resolves to what happened.
-   */
-  async upsertComment(issue, marker, body, create) {
-    const existing = await this.findComment(issue, marker);
-    if (existing) {
-      await this.request("PATCH", `/repos/${this.repository}/issues/comments/${existing.id}`, { body });
-      return "updated";
-    }
-    if (!create) return "skipped";
-    await this.addComment(issue, body);
-    return "created";
-  }
-  async addComment(issue, body) {
-    await this.request("POST", `/repos/${this.repository}/issues/${issue}/comments`, { body });
-  }
-  /** Issues, open or closed, carrying `label`. Pull requests are left out. */
-  async listIssues(label) {
-    const issues = [];
-    let path = `/repos/${this.repository}/issues?labels=${encodeURIComponent(label)}&state=all&per_page=100`;
-    while (path) {
-      const response = await this.request("GET", path);
-      for (const item of await response.json()) {
-        if (!item.pull_request) issues.push({ number: item.number, state: item.state, body: item.body ?? "" });
-      }
-      path = nextPage(response.headers.get("link"), this.apiUrl);
-    }
-    return issues;
-  }
-  async createIssue(title, body, labels) {
-    const response = await this.request("POST", `/repos/${this.repository}/issues`, { title, body, labels });
-    return (await response.json()).number;
-  }
-  async updateIssue(issue, changes) {
-    await this.request("PATCH", `/repos/${this.repository}/issues/${issue}`, changes);
-  }
-  /** Creates the label unless it exists. */
-  async ensureLabel(name, color, description) {
-    try {
-      await this.request("GET", `/repos/${this.repository}/labels/${encodeURIComponent(name)}`);
-    } catch (error) {
-      if (!(error instanceof GitHubApiError) || error.status !== 404) throw error;
-      await this.request("POST", `/repos/${this.repository}/labels`, { name, color, description });
-    }
-  }
-  async findComment(issue, marker) {
-    let path = `/repos/${this.repository}/issues/${issue}/comments?per_page=100`;
-    while (path) {
-      const response = await this.request("GET", path);
-      const comments = await response.json();
-      const match = comments.find((comment2) => comment2.body?.startsWith(marker));
-      if (match) return match;
-      path = nextPage(response.headers.get("link"), this.apiUrl);
-    }
-    return void 0;
-  }
-  async request(method, path, body) {
-    const response = await fetch(`${this.apiUrl}${path}`, {
-      method,
-      headers: {
-        Accept: "application/vnd.github+json",
-        Authorization: `Bearer ${this.token}`,
-        "User-Agent": "notmyfault",
-        "X-GitHub-Api-Version": "2022-11-28",
-        ...body === void 0 ? {} : { "Content-Type": "application/json" }
-      },
-      ...body === void 0 ? {} : { body: JSON.stringify(body) }
-    });
-    if (!response.ok) throw new GitHubApiError(response.status, path, await response.text());
-    return response;
-  }
-};
-function nextPage(link, apiUrl) {
-  const match = link?.match(/<([^>]+)>;\s*rel="next"/);
-  if (!match?.[1]) return void 0;
-  return match[1].startsWith(apiUrl) ? match[1].slice(apiUrl.length) : void 0;
 }
 
 // src/xml.ts
@@ -1656,19 +1699,29 @@ var RERUN_MARKER = "notmyfault: only flaky tests failed";
 var VERDICTS = ["new", "suspect", "broken", "flaky"];
 var BRANCH_README = `# notmyfault history
 
-This branch is maintained by the [notmyfault](https://github.com/tashikomaaa/notmyfault) GitHub Action.
+This branch is maintained by [notmyfault](https://github.com/tashikomaaa/notmyfault).
 It stores the recent outcome of each test, so failures can be told apart: new, flaky or already broken.
 
 - \`history/<key>.json\`: the history of a test suite.
 - \`badges/<key>.json\`: a [shields.io endpoint](https://shields.io/badges/endpoint-badge) counting its flaky tests.
-- \`reports/<key>.html\` and \`index.html\`: pages listing its unreliable tests, to publish with GitHub Pages.
+- \`reports/<key>.html\` and \`index.html\`: pages listing its unreliable tests, to publish as a static site.
 
 The branch is rewritten as a single commit on every update. Deleting it simply resets the history.
 `;
 async function run2(env = process.env, io = new ActionIO(env), now = /* @__PURE__ */ new Date()) {
+  let platform;
   try {
-    const context = readContext(env);
-    const settings = readSettings(io, context);
+    platform = githubPlatform(env, io);
+  } catch (error) {
+    io.error(errorMessage(error));
+    return 1;
+  }
+  return runOn(platform, now);
+}
+async function runOn(platform, now = /* @__PURE__ */ new Date()) {
+  const { context, io } = platform;
+  try {
+    const settings = readSettings(platform);
     io.mask(settings.token);
     const loaded = [];
     for (const suite of settings.suites) {
@@ -1680,19 +1733,25 @@ async function run2(env = process.env, io = new ActionIO(env), now = /* @__PURE_
       remoteUrl: `${context.serverUrl}/${context.repository}.git`,
       branch: settings.branch,
       token: settings.token,
-      tempDir: context.tempDir
+      username: platform.gitUser(settings.token),
+      author: platform.gitAuthor,
+      pushOptions: platform.pushOptions,
+      ...context.tempDir ? { tempDir: context.tempDir } : {}
     });
     try {
-      return await evaluate(loaded, context, settings, store, io, now);
+      return await evaluate(loaded, platform, settings, store, now);
     } finally {
       await store.dispose();
     }
   } catch (error) {
     io.error(errorMessage(error));
     return 1;
+  } finally {
+    io.finish();
   }
 }
-async function evaluate(loaded, context, settings, store, io, now) {
+async function evaluate(loaded, platform, settings, store, now) {
+  const { context, io } = platform;
   const suites = [];
   const tracked = isTracked(context, settings);
   for (const suite of loaded) {
@@ -1718,10 +1777,10 @@ async function evaluate(loaded, context, settings, store, io, now) {
     mode: settings.mode,
     tolerated: settings.tolerated,
     blocking: blocking.length,
-    quarantined
+    quarantined,
+    runLink: platform.text.runLink,
+    ...context.runUrl ? { runUrl: context.runUrl } : {}
   };
-  const url = runUrl(context);
-  if (url) reportContext.runUrl = url;
   for (const { key, analysis } of suites) {
     io.group(
       `notmyfault${named ? ` ${key}` : ""}: ${analysis.failures.length} failed, ${analysis.retried.length} retried, ${analysis.fixed.length} fixed, ${analysis.total} total`
@@ -1736,7 +1795,7 @@ async function evaluate(loaded, context, settings, store, io, now) {
     for (const slow of analysis.slower) io.info(`slower   ${slow.test.title} (${duration(slow.duration)}, usually ${duration(slow.usual)})`);
     io.endGroup();
   }
-  const onlyFlaky = failures.length > 0 && failures.every((failure) => failure.verdict === "flaky");
+  const onlyFlaky = platform.rerunNotice && failures.length > 0 && failures.every((failure) => failure.verdict === "flaky");
   if (onlyFlaky) {
     io.annotation(
       "notice",
@@ -1746,11 +1805,11 @@ async function evaluate(loaded, context, settings, store, io, now) {
   }
   if (settings.annotations) annotate(failures, reportContext, context.workspace, io, onlyFlaky ? 1 : 0);
   if (settings.record) {
-    for (const suite of suites) await recordHistory(store, suite.key, suite.results, context, settings, io, now);
+    for (const suite of suites) await recordHistory(store, suite.key, suite.results, platform, settings, now);
   }
   for (const { renames } of suites) for (const { from, to } of renames) io.info(`renamed  ${from} \u2192 ${to}`);
   if (settings.flakyIssues && isTracked(context, settings) && !context.pullRequest?.fromFork) {
-    await manageFlakyIssues(suites, context, settings, reportContext.runUrl, io, now);
+    await manageFlakyIssues(suites, platform, settings, now);
   }
   const reports = suites.map((suite) => {
     const ranking = rankFlakyTests(suite.history, now, EVIDENCE_TTL_DAYS, RANKING_SIZE);
@@ -1767,7 +1826,7 @@ async function evaluate(loaded, context, settings, store, io, now) {
   io.appendSummary(renderSuitesSummary(reports, reportContext));
   if (settings.comment && context.pullRequest) {
     const noteworthy = sum((a) => a.failures.length + a.retried.length + a.fixed.length) > 0;
-    await comment(context, settings, renderSuitesComment(reports, reportContext), noteworthy, io);
+    await comment(platform, settings, renderSuitesComment(reports, reportContext), noteworthy);
   }
   const count2 = (verdicts) => failures.filter((f) => verdicts.includes(f.verdict)).length;
   io.setOutput("total", sum((a) => a.total));
@@ -1787,22 +1846,23 @@ async function evaluate(loaded, context, settings, store, io, now) {
   }
   return 0;
 }
-function readSettings(io, context) {
-  const suites = readSuites(io, `${context.workflow}-${context.job}`);
+function readSettings(platform) {
+  const { context, io } = platform;
+  const suites = readSuites(io, context.defaultKey);
   const mode = io.input("mode", "report");
   if (mode !== "report" && mode !== "quarantine") {
-    throw new Error(`Input "mode" must be "report" or "quarantine", got "${mode}"`);
+    throw new Error(`${io.describeInput("mode")} must be "report" or "quarantine", got "${mode}"`);
   }
   const tolerated = /* @__PURE__ */ new Set();
   for (const value of splitList(io.input("tolerate", "flaky"))) {
     if (!VERDICTS.includes(value)) {
-      throw new Error(`Input "tolerate" accepts ${VERDICTS.join(", ")}; got "${value}"`);
+      throw new Error(`${io.describeInput("tolerate")} accepts ${VERDICTS.join(", ")}; got "${value}"`);
     }
     tolerated.add(value);
   }
-  const quarantine = parseQuarantine(io.input("quarantine"));
-  const token = io.input("token");
-  if (!token) throw new Error('Input "token" is empty. Pass `token: ${{ github.token }}`.');
+  const quarantine = parseQuarantine(io.input("quarantine"), io.describeInput("quarantine"));
+  const token = io.input("token") || context.defaultToken;
+  if (!token) throw new Error(platform.text.tokenMissing);
   return {
     suites,
     mode,
@@ -1824,20 +1884,24 @@ function readSuites(io, defaultKey) {
   if (!list) {
     const patterns = splitList(io.input("junit"));
     if (patterns.length === 0) {
-      throw new Error('Input "junit" is required: a glob matching your JUnit XML reports. Or list several suites in "suites".');
+      throw new Error(
+        `${io.describeInput("junit")} is required: a glob matching your JUnit XML reports. Or list several suites in ${io.inputName("suites")}.`
+      );
     }
     return [{ key: sanitizeKey(io.input("key", defaultKey)), patterns }];
   }
   if (io.input("junit") || io.input("key")) {
-    throw new Error('Inputs "junit" and "key" cannot be used with "suites": name each suite and its reports in "suites".');
+    throw new Error(
+      `${io.describeInputs(["junit", "key"])} cannot be used with ${io.inputName("suites")}: name each suite and its reports in ${io.inputName("suites")}.`
+    );
   }
   const suites = [];
   for (const line of list.split("\n").map((part) => part.trim()).filter(Boolean)) {
     const match = /^([^:]+):(.*)$/.exec(line);
     const patterns = splitList(match?.[2] ?? "");
-    if (!match || patterns.length === 0) throw new Error(`Input "suites" expects one "name: glob" per line, got "${line}"`);
+    if (!match || patterns.length === 0) throw new Error(`${io.describeInput("suites")} expects one "name: glob" per line, got "${line}"`);
     const key = sanitizeKey(match[1]);
-    if (suites.some((suite) => suite.key === key)) throw new Error(`Input "suites" names the suite "${key}" twice.`);
+    if (suites.some((suite) => suite.key === key)) throw new Error(`${io.describeInput("suites")} names the suite "${key}" twice.`);
     suites.push({ key, patterns });
   }
   return suites;
@@ -1906,9 +1970,10 @@ async function loadHistory(store, path, settings, io) {
 function historyPath(key) {
   return `history/${key}.json`;
 }
-async function recordHistory(store, key, results, context, settings, io, now) {
+async function recordHistory(store, key, results, platform, settings, now) {
+  const { context, io } = platform;
   if (context.pullRequest?.fromFork) {
-    io.info("Pull request from a fork: the token is read-only, history is not recorded.");
+    io.info(`${capitalize2(platform.text.pullRequest)} from a fork: the token is read-only, history is not recorded.`);
     return;
   }
   const tracked = isTracked(context, settings);
@@ -1928,7 +1993,7 @@ async function recordHistory(store, key, results, context, settings, io, now) {
         return changed ? serializeHistory(history) : void 0;
       },
       {
-        message: `Record ${key} (run ${context.runId || "local"}, attempt ${context.runAttempt})`,
+        message: `Record ${key} (${context.runDescription})`,
         extraFiles: { "README.md": BRANCH_README, ".nojekyll": "" },
         derivedFiles: (content, existingPaths) => {
           const history = parseHistory(content);
@@ -1945,16 +2010,16 @@ async function recordHistory(store, key, results, context, settings, io, now) {
     );
     io.info(pushed ? `History updated on branch "${settings.branch}".` : "Nothing new to record.");
   } catch (error) {
-    io.warning(
-      `Could not record history on branch "${settings.branch}". Does the job have "contents: write" permission? ${errorMessage(error)}`
-    );
+    io.warning(`Could not record history on branch "${settings.branch}". ${platform.text.recordDenied} ${errorMessage(error)}`);
   }
 }
 function isTracked(context, settings) {
-  return !context.eventName.startsWith("pull_request") && context.ref === `refs/heads/${context.refName}` && settings.trackedBranches.includes(context.refName);
+  return context.branch !== void 0 && settings.trackedBranches.includes(context.branch);
 }
-async function manageFlakyIssues(suites, context, settings, runUrl2, io, now) {
-  const client = new GitHubClient(settings.token, context.apiUrl, context.repository);
+async function manageFlakyIssues(suites, platform, settings, now) {
+  const { context, io } = platform;
+  const runUrl = context.runUrl;
+  const client = platform.forge(settings.token);
   try {
     const after = suites.map((suite) => {
       const history = structuredClone(suite.history);
@@ -1966,7 +2031,7 @@ async function manageFlakyIssues(suites, context, settings, runUrl2, io, now) {
       now,
       evidenceTtlDays: EVIDENCE_TTL_DAYS,
       sha: context.sha,
-      ...runUrl2 ? { runUrl: runUrl2 } : {}
+      ...runUrl ? { runUrl } : {}
     });
     if (actions.some((action) => action.kind === "create")) {
       await client.ensureLabel(FLAKY_LABEL.name, FLAKY_LABEL.color, FLAKY_LABEL.description);
@@ -1992,21 +2057,24 @@ async function manageFlakyIssues(suites, context, settings, runUrl2, io, now) {
     const later = postponed > 0 ? ` ${postponed} more flaky test(s) will get an issue on the next runs.` : "";
     io.info(`Flaky test issues: ${done.created} created, ${done.updated} updated, ${done.closed} closed.${later}`);
   } catch (error) {
-    const hint = error instanceof GitHubApiError && error.status === 403 ? ' Does the job have "issues: write" permission?' : "";
+    const hint = error instanceof ApiError && error.denied ? ` ${platform.text.issuesDenied}` : "";
     io.warning(`Could not update flaky test issues.${hint} ${errorMessage(error)}`);
   }
 }
-async function comment(context, settings, body, create, io) {
+async function comment(platform, settings, body, create) {
+  const { context, io, text } = platform;
   const pullRequest = context.pullRequest;
   if (!pullRequest) return;
-  const client = new GitHubClient(settings.token, context.apiUrl, context.repository);
   try {
-    const result = await client.upsertComment(pullRequest.number, commentMarker(settings.commentKey), body, create);
-    if (result !== "skipped") io.info(`Pull request comment ${result}.`);
+    const result = await platform.forge(settings.token).upsertComment(pullRequest.number, commentMarker(settings.commentKey), body, create);
+    if (result !== "skipped") io.info(`${capitalize2(text.pullRequest)} comment ${result}.`);
   } catch (error) {
-    const hint = error instanceof GitHubApiError && error.status === 403 ? pullRequest.fromFork ? " Tokens are read-only on pull requests from forks; the job summary has the full report." : ' Does the job have "pull-requests: write" permission?' : "";
-    io.warning(`Could not comment on the pull request.${hint} ${errorMessage(error)}`);
+    const hint = error instanceof ApiError && error.denied ? ` ${pullRequest.fromFork ? text.commentFromFork : text.commentDenied}` : "";
+    io.warning(`Could not comment on the ${text.pullRequest}.${hint} ${errorMessage(error)}`);
   }
+}
+function capitalize2(value) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 function splitList(value) {
   return value.split(/[\n,]/).map((part) => part.trim()).filter((part) => part.length > 0);

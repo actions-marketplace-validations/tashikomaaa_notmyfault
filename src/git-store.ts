@@ -11,6 +11,12 @@ export interface GitStoreOptions {
   token?: string;
   /** Where to create the scratch repository. Defaults to the OS temp dir. */
   tempDir?: string;
+  /** User name sent with the token. GitHub accepts any, GitLab wants gitlab-ci-token for job tokens. */
+  username?: string;
+  /** Author of the commits. Defaults to the GitHub Actions bot. */
+  author?: { name: string; email: string };
+  /** Sent with each push, e.g. ci.skip so GitLab starts no pipeline for the branch. */
+  pushOptions?: string[];
 }
 
 export class GitError extends Error {
@@ -74,6 +80,7 @@ export class GitStore {
         const output = await this.git([
           "push",
           "--porcelain",
+          ...(this.options.pushOptions ?? []).map((option) => `--push-option=${option}`),
           `--force-with-lease=refs/heads/${this.options.branch}:${head ?? ""}`,
           this.options.remoteUrl,
           `${commit}:refs/heads/${this.options.branch}`,
@@ -135,10 +142,10 @@ export class GitStore {
     const tree = (await this.git(["write-tree"], env)).trim();
     return (
       await this.git(["commit-tree", tree, "-m", message], {
-        GIT_AUTHOR_NAME: BOT_NAME,
-        GIT_AUTHOR_EMAIL: BOT_EMAIL,
-        GIT_COMMITTER_NAME: BOT_NAME,
-        GIT_COMMITTER_EMAIL: BOT_EMAIL,
+        GIT_AUTHOR_NAME: this.options.author?.name ?? BOT_NAME,
+        GIT_AUTHOR_EMAIL: this.options.author?.email ?? BOT_EMAIL,
+        GIT_COMMITTER_NAME: this.options.author?.name ?? BOT_NAME,
+        GIT_COMMITTER_EMAIL: this.options.author?.email ?? BOT_EMAIL,
       })
     ).trim();
   }
@@ -167,7 +174,7 @@ export class GitStore {
     const { token, remoteUrl } = this.options;
     if (token && /^https?:\/\//.test(remoteUrl)) {
       const origin = new URL(remoteUrl).origin;
-      const credentials = Buffer.from(`x-access-token:${token}`).toString("base64");
+      const credentials = Buffer.from(`${this.options.username ?? "x-access-token"}:${token}`).toString("base64");
       Object.assign(env, {
         GIT_CONFIG_COUNT: "1",
         GIT_CONFIG_KEY_0: `http.${origin}/.extraheader`,

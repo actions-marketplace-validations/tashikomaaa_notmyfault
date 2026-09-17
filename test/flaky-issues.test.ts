@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { flakyMarker, planFlakyIssues, type FlakySuite } from "../src/flaky-issues";
-import type { Issue } from "../src/github";
+import type { Issue } from "../src/platform";
 import { emptyHistory, type TestHistory } from "../src/history";
 import type { TestResult } from "../src/junit";
 

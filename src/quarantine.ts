@@ -12,13 +12,13 @@ export interface QuarantineEntry {
 const LINE = /^(\d{4}-\d{2}-\d{2})\s+(.+?)(?:\s+#\s+(.*))?$/;
 
 /** Reads the quarantine input: one "YYYY-MM-DD test name # reason" per line, the reason being optional. */
-export function parseQuarantine(input: string): QuarantineEntry[] {
+export function parseQuarantine(input: string, label = 'Input "quarantine"'): QuarantineEntry[] {
   const entries: QuarantineEntry[] = [];
   for (const line of input.split("\n").map((part) => part.trim()).filter(Boolean)) {
     const match = LINE.exec(line);
     const until = match?.[1];
     if (!match || !until || Number.isNaN(Date.parse(`${until}T00:00:00Z`)) || new Date(`${until}T00:00:00Z`).toISOString().slice(0, 10) !== until) {
-      throw new Error(`Input "quarantine" expects "YYYY-MM-DD test name # reason" per line, got "${line}"`);
+      throw new Error(`${label} expects "YYYY-MM-DD test name # reason" per line, got "${line}"`);
     }
     const entry: QuarantineEntry = { pattern: match[2]!.trim(), until };
     if (match[3]?.trim()) entry.reason = match[3].trim();

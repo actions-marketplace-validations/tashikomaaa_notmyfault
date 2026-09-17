@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ActionIO } from "../src/actions";
+import { ActionIO } from "../src/github/io";
 import { findFiles, run, sanitizeKey } from "../src/main";
 
 interface Comment {
