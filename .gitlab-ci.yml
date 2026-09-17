@@ -7,6 +7,9 @@ workflow:
 
 release:
   image: registry.gitlab.com/gitlab-org/cli:latest
+  variables:
+    # glab signs in with the job token.
+    GLAB_ENABLE_CI_AUTOLOGIN: "true"
   script:
     # The Catalog wants versions without the v of the tags.
     - version="${CI_COMMIT_TAG#v}"
