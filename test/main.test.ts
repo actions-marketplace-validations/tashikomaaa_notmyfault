@@ -30,6 +30,8 @@ class FakeGitHub {
   comments: Comment[] = [];
   issues: FakeIssue[] = [];
   labels: string[] = [];
+  /** Files the pull request deletes. */
+  deleted: string[] = [];
   /** Pull requests associated with each commit. */
   pulls: Record<string, unknown[]> = {};
   checks: Record<string, unknown>[] = [];
@@ -55,7 +57,9 @@ class FakeGitHub {
         const route = (method: string, pattern: RegExp) => (req.method === method ? pattern.exec(path) : null);
         let match: RegExpExecArray | null;
 
-        if (route("POST", /^\/check-runs$/)) {
+        if ((match = route("GET", /^\/pulls\/(\d+)\/files$/))) {
+          reply(200, Number(match[1]) === PULL_REQUEST ? this.deleted.map((filename) => ({ filename, status: "removed" })) : []);
+        } else if (route("POST", /^\/check-runs$/)) {
           this.checks.push(body);
           reply(201, { html_url: `https://github.com/acme/shop/runs/${this.checks.length}` });
         } else if ((match = route("GET", /^\/commits\/(\w+)\/pulls$/))) {
@@ -405,6 +409,29 @@ describe("run", () => {
     expect(denied.logs).toContain('::warning::Could not create the check "notmyfault". Does the job have "checks: write" permission?');
     const fork = await simulate({ pays: "pass", totals: "pass" }, { event: "pull_request", fork: true, inputs });
     expect(fork.logs).toContain("Pull request from a fork: the token is read-only, no check is created.");
+  });
+
+  it("tells tests deleted with their file from tests that stopped running", async () => {
+    const suite = (name: string, classname: string, cases: string) => `<testsuites><testsuite name="${name}">${cases.split(",").map((test) => `<testcase classname="${classname}" name="${test}"/>`).join("")}</testsuite></testsuites>`;
+    const write = (path: string, xml: string) => writeFileSync(join(root, "workspace", path), xml);
+    const inputs = { junit: "", suites: "unit: reports/unit.xml\ne2e: reports/e2e.xml" };
+
+    write("reports/unit.xml", suite("unit", "checkout", "totals,pays"));
+    write("reports/e2e.xml", suite("e2e", "login", "signs in"));
+    await simulate({}, { inputs });
+
+    // The pull request deletes the file of the e2e test, and stops running "pays" without touching its file.
+    write("reports/unit.xml", suite("unit", "checkout", "totals"));
+    write("reports/e2e.xml", suite("e2e", "checkout", "totals"));
+    api.deleted = ["test/login.e2e.ts"];
+    const pr = await simulate({}, { event: "pull_request", inputs });
+
+    expect(pr.outputs).toMatchObject({ missing: "1" });
+    expect(pr.logs).toContain("missing  unit › checkout › pays");
+    expect(pr.logs).toContain("deleted  e2e › login (1 test(s), with test/login.e2e.ts)");
+    const comment = api.comments[0]!.body;
+    expect(comment).toContain("👻 **Missing:** 1 test of the latest run on `main` did not run here.");
+    expect(comment).toContain("🗑️ **Deleted:** 1 test no longer runs, with the file <code>test/login.e2e.ts</code> this change removes.");
   });
 
   it("stays quiet on green pull requests without a previous comment", async () => {

@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
+- Tests whose file a pull request deletes are listed as deleted rather than missing, from the files the platform reports as removed: they are not counted by the `missing` output and never make notmyfault comment on their own ([#26](https://github.com/tashikomaaa/notmyfault/issues/26)).
+
+### Added
+
 - notmyfault is published on [npm](https://www.npmjs.com/package/notmyfault), with provenance: `npx notmyfault@1` runs it in any CI system ([#22](https://github.com/tashikomaaa/notmyfault/issues/22)).
 
 ## [1.10.0] - 2026-09-17

@@ -120,7 +120,7 @@ A matched file could not be read. The other reports are still used.
 | Message | Meaning |
 |---|---|
 | `Read N tests from M report(s).` | Reports were parsed. |
-| `new`, `suspect`, `broken`, `flaky`, `retried`, `fixed`, `slower`, `missing` followed by a test name | The verdict of each failure, the tests that passed after a retry, the tests the run fixes, the slower tests and the [missing tests](verdicts.md#missing-tests), in a collapsible group. |
+| `new`, `suspect`, `broken`, `flaky`, `retried`, `fixed`, `slower`, `missing`, `deleted` followed by a test name | The verdict of each failure, the tests that passed after a retry, the tests the run fixes, the slower tests and the [missing tests](verdicts.md#missing-tests), in a collapsible group. |
 | `History updated on branch "…".` | The run was recorded. |
 | `Nothing new to record.` | The run taught nothing new, so nothing was written. |
 | `Pull request from a fork: the token is read-only, history is not recorded.` | Expected for pull requests from forks. |

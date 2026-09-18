@@ -166,6 +166,18 @@ var GitHubClient = class {
     const pull = merged.find((candidate) => candidate.merge_commit_sha === sha) ?? merged[0];
     return pull && { number: pull.number, url: pull.html_url };
   }
+  async deletedFiles(pull) {
+    const deleted = [];
+    let path = `/repos/${this.repository}/pulls/${pull}/files?per_page=100`;
+    while (path) {
+      const response = await this.request("GET", path);
+      for (const file of await response.json()) {
+        if (file.status === "removed") deleted.push(file.filename);
+      }
+      path = nextPage(response.headers.get("link"), this.apiUrl);
+    }
+    return deleted;
+  }
   async createCheck(check) {
     const response = await this.request("POST", `/repos/${this.repository}/check-runs`, {
       name: check.name,
@@ -329,6 +341,10 @@ var ForgejoClient = class {
   async ensureLabel(name, color, description) {
     if ((await this.labels()).some((label) => label.name === name)) return;
     await this.request("POST", `/repos/${this.repository}/labels`, { name, color: `#${color}`, description });
+  }
+  async deletedFiles(pull) {
+    const files = await this.list(`/repos/${this.repository}/pulls/${pull}/files?limit=50`);
+    return files.filter((file) => file.status === "deleted" || file.status === "removed").map((file) => file.filename);
   }
   async changeOf(sha) {
     try {
@@ -523,6 +539,26 @@ function prune(history, options) {
 }
 
 // src/analyze.ts
+function markDeleted(missing, deleted) {
+  const candidates = deleted.map((path) => ({ path, name: withoutExtension(path), isTest: TEST_FILE.test(path) }));
+  for (const group of missing) {
+    const parts = group.group.split(SEPARATOR).filter(Boolean);
+    const file = candidates.find(
+      ({ path, name, isTest }) => parts.some((part) => {
+        const asPath = part.replace(/\./g, "/");
+        if (path === part || path.endsWith(`/${part}`)) return true;
+        return isTest && (name === asPath || name.endsWith(`/${asPath}`));
+      })
+    );
+    if (file) group.deletedFile = file.path;
+  }
+}
+function withoutExtension(path) {
+  const slash = path.lastIndexOf("/");
+  const dot = path.indexOf(".", slash + 1);
+  return dot === -1 ? path : path.slice(0, dot);
+}
+var TEST_FILE = /(^|\/)(tests?|specs?|__tests__)\/|(^|\/|\.|_|-)(test|tests|spec|specs)[._-]|[._-](test|tests|spec|specs)\./i;
 var DAY_MS2 = 24 * 60 * 60 * 1e3;
 var SEPARATOR = " \u203A ";
 var LIKELY_FLAKY_ISOLATED_FAILURES = 3;
@@ -1081,8 +1117,19 @@ function renderSuite(analysis, context) {
   }
   if (analysis.fixed.length > 0) lines.push(...renderFixed(analysis.fixed, context));
   if (analysis.slower.length > 0) lines.push(...renderSlower(analysis.slower, context));
-  if (analysis.missing.length > 0) lines.push(...renderMissing(analysis.missing, context));
+  const missing = analysis.missing.filter((group) => !group.deletedFile);
+  const deleted = analysis.missing.filter((group) => group.deletedFile);
+  if (missing.length > 0) lines.push(...renderMissing(missing, context));
+  if (deleted.length > 0) lines.push(...renderDeleted(deleted));
   return lines;
+}
+function renderDeleted(deleted) {
+  const count2 = deleted.reduce((sum, group) => sum + group.ids.length, 0);
+  const files = [...new Set(deleted.map((group) => group.deletedFile))];
+  return [
+    `\u{1F5D1}\uFE0F **Deleted:** ${plural(count2, "test")} ${count2 === 1 ? "no longer runs" : "no longer run"}, with ${files.length === 1 ? "the file" : "the files"} ${files.slice(0, MAX_MISSING).map(code).join(", ")} this change removes.`,
+    ""
+  ];
 }
 function renderMissing(missing, context) {
   const count2 = missing.reduce((sum, group) => sum + group.ids.length, 0);
@@ -2112,6 +2159,10 @@ async function evaluate(loaded, platform, settings, store, now) {
     );
   }
   const quarantined = suites.reduce((total, suite) => total + applyQuarantine(suite.analysis, settings.quarantine, now), 0);
+  if (context.pullRequest && suites.some((suite) => suite.analysis.missing.length > 0)) {
+    const deleted = await deletedFiles(platform, settings);
+    for (const suite of suites) markDeleted(suite.analysis.missing, deleted);
+  }
   const sum = (count3) => suites.reduce((total, suite) => total + count3(suite.analysis), 0);
   const failures = suites.flatMap((suite) => suite.analysis.failures);
   const blocking = suites.flatMap((suite) => blockingFailures(suite.analysis, settings.tolerated));
@@ -2140,7 +2191,8 @@ async function evaluate(loaded, platform, settings, store, now) {
     for (const fixed of analysis.fixed) io.info(`fixed    ${fixed.test.title}`);
     for (const slow of analysis.slower) io.info(`slower   ${slow.test.title} (${duration(slow.duration)}, usually ${duration(slow.usual)})`);
     for (const group of analysis.missing) {
-      if (group.whole && group.group && group.ids.length > 1) io.info(`missing  ${group.group} (all ${group.ids.length} tests)`);
+      if (group.deletedFile) io.info(`deleted  ${group.group} (${group.ids.length} test(s), with ${group.deletedFile})`);
+      else if (group.whole && group.group && group.ids.length > 1) io.info(`missing  ${group.group} (all ${group.ids.length} tests)`);
       else for (const id of group.ids) io.info(`missing  ${id}`);
     }
     io.endGroup();
@@ -2180,7 +2232,7 @@ async function evaluate(loaded, platform, settings, store, now) {
   });
   io.appendSummary(renderSuitesSummary(reports, reportContext));
   if (settings.comment && context.pullRequest) {
-    const noteworthy = sum((a) => a.failures.length + a.retried.length + a.fixed.length + a.missing.length) > 0;
+    const noteworthy = sum((a) => a.failures.length + a.retried.length + a.fixed.length + missingCount(a)) > 0;
     await comment(platform, settings, renderSuitesComment(reports, reportContext), noteworthy);
   }
   if (settings.check) await reportCheck(settings.check, platform, settings, renderCheck(reports, reportContext), blocking.length === 0);
@@ -2193,7 +2245,7 @@ async function evaluate(loaded, platform, settings, store, now) {
   io.setOutput("retried", sum((a) => a.retried.length));
   io.setOutput("fixed", sum((a) => a.fixed.length));
   io.setOutput("slower", sum((a) => a.slower.length));
-  io.setOutput("missing", sum((a) => a.missing.reduce((total, group) => total + group.ids.length, 0)));
+  io.setOutput("missing", sum(missingCount));
   io.setOutput("quarantined", quarantined);
   io.setOutput("blocking", blocking.length);
   if (settings.mode === "quarantine" && blocking.length > 0) {
@@ -2440,6 +2492,20 @@ async function manageFlakyIssues(suites, platform, settings, now) {
   } catch (error) {
     const hint = error instanceof ApiError && error.denied ? ` ${platform.text.issuesDenied}` : "";
     io.warning(`Could not update flaky test issues.${hint} ${errorMessage(error)}`);
+  }
+}
+function missingCount(analysis) {
+  return analysis.missing.filter((group) => !group.deletedFile).reduce((total, group) => total + group.ids.length, 0);
+}
+async function deletedFiles(platform, settings) {
+  const { context, io, text } = platform;
+  const forge = platform.forge(settings.token);
+  if (!forge.deletedFiles || !context.pullRequest) return [];
+  try {
+    return await forge.deletedFiles(context.pullRequest.number);
+  } catch (error) {
+    io.info(`Could not read the files of the ${text.pullRequest}: ${errorMessage(error)}`);
+    return [];
   }
 }
 function codeOwners(platform) {
@@ -2838,6 +2904,12 @@ var GitLabClient = class {
       if (!(error instanceof ApiError) || error.status !== 404) throw error;
       await this.request("POST", `/projects/${this.project}/labels`, { name, color: `#${color}`, description });
     }
+  }
+  async deletedFiles(mergeRequest) {
+    const diffs = await this.list(
+      `/projects/${this.project}/merge_requests/${mergeRequest}/diffs?per_page=100`
+    );
+    return diffs.filter((diff) => diff.deleted_file).map((diff) => diff.old_path);
   }
   async rerun(run2) {
     const project = `/projects/${this.project}`;

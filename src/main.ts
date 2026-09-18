@@ -7,6 +7,7 @@ import { githubPlatform } from "./github/platform";
 import {
   analyze,
   blockingFailures,
+  markDeleted,
   rankFlakyTests,
   rankSlowTests,
   failureTrends,
@@ -172,6 +173,10 @@ async function evaluate(loaded: LoadedSuite[], platform: Platform, settings: Set
     );
   }
   const quarantined = suites.reduce((total, suite) => total + applyQuarantine(suite.analysis, settings.quarantine, now), 0);
+  if (context.pullRequest && suites.some((suite) => suite.analysis.missing.length > 0)) {
+    const deleted = await deletedFiles(platform, settings);
+    for (const suite of suites) markDeleted(suite.analysis.missing, deleted);
+  }
   const sum = (count: (analysis: Analysis) => number) => suites.reduce((total, suite) => total + count(suite.analysis), 0);
   const failures = suites.flatMap((suite) => suite.analysis.failures);
   const blocking = suites.flatMap((suite) => blockingFailures(suite.analysis, settings.tolerated));
@@ -202,7 +207,8 @@ async function evaluate(loaded: LoadedSuite[], platform: Platform, settings: Set
     for (const fixed of analysis.fixed) io.info(`fixed    ${fixed.test.title}`);
     for (const slow of analysis.slower) io.info(`slower   ${slow.test.title} (${duration(slow.duration)}, usually ${duration(slow.usual)})`);
     for (const group of analysis.missing) {
-      if (group.whole && group.group && group.ids.length > 1) io.info(`missing  ${group.group} (all ${group.ids.length} tests)`);
+      if (group.deletedFile) io.info(`deleted  ${group.group} (${group.ids.length} test(s), with ${group.deletedFile})`);
+      else if (group.whole && group.group && group.ids.length > 1) io.info(`missing  ${group.group} (all ${group.ids.length} tests)`);
       else for (const id of group.ids) io.info(`missing  ${id}`);
     }
     io.endGroup();
@@ -246,7 +252,7 @@ async function evaluate(loaded: LoadedSuite[], platform: Platform, settings: Set
   });
   io.appendSummary(renderSuitesSummary(reports, reportContext));
   if (settings.comment && context.pullRequest) {
-    const noteworthy = sum((a) => a.failures.length + a.retried.length + a.fixed.length + a.missing.length) > 0;
+    const noteworthy = sum((a) => a.failures.length + a.retried.length + a.fixed.length + missingCount(a)) > 0;
     await comment(platform, settings, renderSuitesComment(reports, reportContext), noteworthy);
   }
   if (settings.check) await reportCheck(settings.check, platform, settings, renderCheck(reports, reportContext), blocking.length === 0);
@@ -260,7 +266,7 @@ async function evaluate(loaded: LoadedSuite[], platform: Platform, settings: Set
   io.setOutput("retried", sum((a) => a.retried.length));
   io.setOutput("fixed", sum((a) => a.fixed.length));
   io.setOutput("slower", sum((a) => a.slower.length));
-  io.setOutput("missing", sum((a) => a.missing.reduce((total, group) => total + group.ids.length, 0)));
+  io.setOutput("missing", sum(missingCount));
   io.setOutput("quarantined", quarantined);
   io.setOutput("blocking", blocking.length);
 
@@ -555,6 +561,24 @@ async function manageFlakyIssues(suites: Suite[], platform: Platform, settings: 
   } catch (error) {
     const hint = error instanceof ApiError && error.denied ? ` ${platform.text.issuesDenied}` : "";
     io.warning(`Could not update flaky test issues.${hint} ${errorMessage(error)}`);
+  }
+}
+
+/** Tests of the latest tracked run missing from this one, without the ones whose file the change deletes. */
+function missingCount(analysis: Analysis): number {
+  return analysis.missing.filter((group) => !group.deletedFile).reduce((total, group) => total + group.ids.length, 0);
+}
+
+/** Paths the pull or merge request deletes, to tell tests removed on purpose from tests that stopped running. */
+async function deletedFiles(platform: Platform, settings: Settings): Promise<string[]> {
+  const { context, io, text } = platform;
+  const forge = platform.forge(settings.token);
+  if (!forge.deletedFiles || !context.pullRequest) return [];
+  try {
+    return await forge.deletedFiles(context.pullRequest.number);
+  } catch (error) {
+    io.info(`Could not read the files of the ${text.pullRequest}: ${errorMessage(error)}`);
+    return [];
   }
 }
 

@@ -76,6 +76,13 @@ export class GitLabClient implements Forge {
     }
   }
 
+  async deletedFiles(mergeRequest: number): Promise<string[]> {
+    const diffs = await this.list<{ old_path: string; deleted_file?: boolean }>(
+      `/projects/${this.project}/merge_requests/${mergeRequest}/diffs?per_page=100`,
+    );
+    return diffs.filter((diff) => diff.deleted_file).map((diff) => diff.old_path);
+  }
+
   async rerun(run: { sha: string; mergeRequest?: number; branch?: string }): Promise<string | undefined> {
     const project = `/projects/${this.project}`;
     // Once per commit: a commit that already has another pipeline of the same kind is left alone.

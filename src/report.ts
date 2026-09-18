@@ -262,8 +262,20 @@ function renderSuite(analysis: Analysis, context: ReportContext): string[] {
 
   if (analysis.fixed.length > 0) lines.push(...renderFixed(analysis.fixed, context));
   if (analysis.slower.length > 0) lines.push(...renderSlower(analysis.slower, context));
-  if (analysis.missing.length > 0) lines.push(...renderMissing(analysis.missing, context));
+  const missing = analysis.missing.filter((group) => !group.deletedFile);
+  const deleted = analysis.missing.filter((group) => group.deletedFile);
+  if (missing.length > 0) lines.push(...renderMissing(missing, context));
+  if (deleted.length > 0) lines.push(...renderDeleted(deleted));
   return lines;
+}
+
+function renderDeleted(deleted: MissingTests[]): string[] {
+  const count = deleted.reduce((sum, group) => sum + group.ids.length, 0);
+  const files = [...new Set(deleted.map((group) => group.deletedFile!))];
+  return [
+    `🗑️ **Deleted:** ${plural(count, "test")} ${count === 1 ? "no longer runs" : "no longer run"}, with ${files.length === 1 ? "the file" : "the files"} ${files.slice(0, MAX_MISSING).map(code).join(", ")} this change removes.`,
+    "",
+  ];
 }
 
 function renderMissing(missing: MissingTests[], context: ReportContext): string[] {

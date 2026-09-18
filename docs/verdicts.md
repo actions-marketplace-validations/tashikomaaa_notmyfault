@@ -127,7 +127,13 @@ A test that ran in the latest run on the tracked branch, but is not in the repor
 > - `test/search.test.ts`: all 2 tests
 > - `test/cart.test.ts › checkout > applies percentage discount codes`
 
-A pull request that deletes a test file, skips a suite by mistake or breaks test discovery turns green: fewer tests, no failure. This makes it visible. A whole file or suite missing reads as one line, and tests skipped on purpose are not missing: they are in the reports.
+A pull request that skips a suite by mistake or breaks test discovery turns green: fewer tests, no failure. This makes it visible. A whole file or suite missing reads as one line, and tests skipped on purpose are not missing: they are in the reports.
+
+**Tests deleted on purpose are told apart.** notmyfault asks the platform which files the pull request deletes, and the tests that lived in them are listed separately, as a fact rather than a warning:
+
+> 🗑️ **Deleted:** 4 tests no longer run, with the file `test/search.test.ts` this change removes.
+
+They are not counted by the `missing` output, and they never make notmyfault comment on their own. Without the permission to read the files of the pull request, or outside GitHub, GitLab, Forgejo and Gitea, every missing test is reported as missing.
 
 Missing tests never fail the step, but they make notmyfault comment on a pull request, and the `missing` output counts them. Turn them off with [`missing-tests: false`](configuration.md#missing-tests) when runs only cover part of the tests.
 

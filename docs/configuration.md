@@ -151,6 +151,8 @@ The test file is found the way [annotations](verdicts.md#annotations) find it, f
 
 When `true`, notmyfault compares the tests of the run with the tests of the latest run on a tracked branch, and lists the ones missing from the reports: deleted, renamed, or no longer found by the test runner. A whole file or suite missing reads as one line. Tests skipped on purpose are in the reports, so they are not missing. See [Missing tests](verdicts.md#missing-tests).
 
+Tests whose file the pull request deletes are listed as deleted instead, and are not counted, see [Missing tests](verdicts.md#missing-tests).
+
 Missing tests never fail the step, but they make notmyfault comment on a pull request. Set `missing-tests: false` when runs are expected to cover only part of the tests, like pull requests running only the tests affected by their changes, or when several jobs with different tests share one [`key`](#key).
 
 ### `check`

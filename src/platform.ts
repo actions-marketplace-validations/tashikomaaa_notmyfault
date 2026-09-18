@@ -79,6 +79,8 @@ export interface Forge {
   ensureLabel(name: string, color: string, description: string): Promise<void>;
   /** The merged pull or merge request a commit of a tracked branch came from, if any. */
   changeOf(sha: string): Promise<{ number: number; url: string } | undefined>;
+  /** Paths the pull or merge request deletes, where the platform tells. */
+  deletedFiles?(pullRequest: number): Promise<string[]>;
   /** Reports the run as a completed check of a commit, where the platform has checks. Resolves to its URL. */
   createCheck?(check: CheckReport): Promise<string>;
   /**

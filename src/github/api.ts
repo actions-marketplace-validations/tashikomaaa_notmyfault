@@ -85,6 +85,19 @@ export class GitHubClient implements Forge {
     return pull && { number: pull.number, url: pull.html_url };
   }
 
+  async deletedFiles(pull: number): Promise<string[]> {
+    const deleted: string[] = [];
+    let path: string | undefined = `/repos/${this.repository}/pulls/${pull}/files?per_page=100`;
+    while (path) {
+      const response = await this.request("GET", path);
+      for (const file of (await response.json()) as { filename: string; status: string }[]) {
+        if (file.status === "removed") deleted.push(file.filename);
+      }
+      path = nextPage(response.headers.get("link"), this.apiUrl);
+    }
+    return deleted;
+  }
+
   async createCheck(check: CheckReport): Promise<string> {
     const response = await this.request("POST", `/repos/${this.repository}/check-runs`, {
       name: check.name,

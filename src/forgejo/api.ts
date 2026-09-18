@@ -54,6 +54,11 @@ export class ForgejoClient implements Forge {
     await this.request("POST", `/repos/${this.repository}/labels`, { name, color: `#${color}`, description });
   }
 
+  async deletedFiles(pull: number): Promise<string[]> {
+    const files = await this.list<{ filename: string; status: string }>(`/repos/${this.repository}/pulls/${pull}/files?limit=50`);
+    return files.filter((file) => file.status === "deleted" || file.status === "removed").map((file) => file.filename);
+  }
+
   async changeOf(sha: string): Promise<{ number: number; url: string } | undefined> {
     try {
       const response = await this.request("GET", `/repos/${this.repository}/commits/${sha}/pull`);

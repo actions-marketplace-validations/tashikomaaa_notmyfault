@@ -5,7 +5,7 @@
 | Permission | Used for | Without it |
 |---|---|---|
 | `contents: write` | Pushing the `notmyfault-history` branch | The history is never recorded: every failure is reported as new, with a warning |
-| `pull-requests: write` | Creating and updating the pull request comment, and finding the pull request a commit came from when a test starts failing on a tracked branch | No comment, with a warning. The job summary still has the report. Reports name the commit that broke a test, not its pull request |
+| `pull-requests: write` | Creating and updating the pull request comment, finding the pull request a commit came from when a test starts failing on a tracked branch, and reading the files a pull request deletes | No comment, with a warning. The job summary still has the report. Reports name the commit that broke a test, not its pull request |
 | `checks: write` | Only with [`check`](configuration.md#check): creating the `notmyfault` check | No check, with a warning |
 | `issues: write` | Only with [`flaky-issues`](configuration.md#flaky-issues): opening, updating and closing flaky test issues, and creating the `flaky-test` label | No issues, with a warning |
 

@@ -62,7 +62,40 @@ export interface MissingTests {
   ids: string[];
   /** Whether every test of the group in the latest run on the tracked branch is missing. */
   whole: boolean;
+  /** The file the change deletes, when the missing tests lived in it. */
+  deletedFile?: string;
 }
+
+/**
+ * Marks the missing tests whose file the change deletes. Test identities start with the file for most runners, and
+ * with a class or a module name for the others: a deleted path matches when it is one of the parts of the identity,
+ * or ends with it, extensions aside. Names that are not paths only match files that look like test files, so that
+ * deleting `src/cart.ts` does not excuse the tests of a class named `cart`.
+ */
+export function markDeleted(missing: MissingTests[], deleted: string[]): void {
+  const candidates = deleted.map((path) => ({ path, name: withoutExtension(path), isTest: TEST_FILE.test(path) }));
+  for (const group of missing) {
+    const parts = group.group.split(SEPARATOR).filter(Boolean);
+    const file = candidates.find(({ path, name, isTest }) =>
+      parts.some((part) => {
+        // Dotted module and class names map to directories: tests.test_pay is tests/test_pay.
+        const asPath = part.replace(/\./g, "/");
+        if (path === part || path.endsWith(`/${part}`)) return true;
+        return isTest && (name === asPath || name.endsWith(`/${asPath}`));
+      }),
+    );
+    if (file) group.deletedFile = file.path;
+  }
+}
+
+/** Everything after the first dot of the file name: `checkout.e2e.ts` is `checkout`. */
+function withoutExtension(path: string): string {
+  const slash = path.lastIndexOf("/");
+  const dot = path.indexOf(".", slash + 1);
+  return dot === -1 ? path : path.slice(0, dot);
+}
+
+const TEST_FILE = /(^|\/)(tests?|specs?|__tests__)\/|(^|\/|\.|_|-)(test|tests|spec|specs)[._-]|[._-](test|tests|spec|specs)\./i;
 
 export interface FailureTrend {
   id: string;
