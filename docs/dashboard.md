@@ -6,6 +6,8 @@
 
 Each repository keeps its own history. The dashboard action reads the history branches of several repositories and ranks their unreliable tests together, the costliest first, in one static page: an organization's flakiest tests at a glance.
 
+The demos have one, rebuilt every day: [notmyfault.aldwin.fr/dashboard](https://notmyfault.aldwin.fr/dashboard/).
+
 ## Setup
 
 A scheduled workflow builds the page and publishes it with GitHub Pages:
