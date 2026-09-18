@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-09-18
+
 ### Security
 
 A pass over everything notmyfault reads, prints and publishes ([#31](https://github.com/tashikomaaa/notmyfault/issues/31)). See [Permissions and security](docs/security.md).
@@ -143,7 +145,8 @@ A pass over everything notmyfault reads, prints and publishes ([#31](https://git
 - Pull request comment kept up to date, job summary with the most unreliable tests, and step outputs.
 - Quarantine mode, so that known flaky tests stop blocking merges.
 
-[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.11.0...HEAD
+[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.12.0...HEAD
+[1.12.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.8.0...v1.9.0

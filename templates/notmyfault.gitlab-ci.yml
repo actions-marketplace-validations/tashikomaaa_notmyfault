@@ -23,7 +23,7 @@
   variables:
     # The version of notmyfault, pinned to the release this template comes from, with the checksum of its bundle.
     # Changing NOTMYFAULT_REF without its NOTMYFAULT_SHA256 fails the job: set both, or neither.
-    NOTMYFAULT_REF: v1.11.0
+    NOTMYFAULT_REF: v1.12.0
     NOTMYFAULT_SHA256: 655e709014892a3d63f9f09dd54f33c02f51ce42df51dc222285924fe3c4eac9
   script:
     # notmyfault stores its history with git, which node:24-alpine lacks.
