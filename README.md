@@ -40,6 +40,7 @@ notmyfault is a GitHub Action, also available for [GitLab CI/CD](docs/gitlab.md)
 - **Nothing to host.** No server, no account, no SaaS: the history lives on a branch of your own repository.
 - **GitHub, GitLab, Forgejo or Gitea.** The same verdicts in merge requests, with the Code Quality widget, from a [GitLab CI/CD template](docs/gitlab.md), and in [Forgejo and Gitea Actions](docs/forgejo.md).
 - **Nothing to audit but this repository.** Zero runtime dependencies, one bundled file, rebuilt and verified by CI.
+- **Any CI.** `npx notmyfault` runs it in Jenkins, CircleCI, Buildkite and the others, see [Any other CI system](docs/any-ci.md).
 - **Any test runner.** Everything that writes JUnit XML: Vitest, Jest, pytest, Go, Maven, Gradle, cargo-nextest, Playwright, PHPUnit, RSpec, .NET…
 
 ## Quick start

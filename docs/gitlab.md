@@ -228,7 +228,7 @@ test:
 
 This is report mode: the tests decide whether the job fails. For quarantine mode, move the two lines from `after_script` to the end of `script`, and let the tests fail without stopping the script: `npx vitest run … || true`.
 
-Each release also attaches `notmyfault.mjs` to its [GitHub release](https://github.com/tashikomaaa/notmyfault/releases), to download it from there or to keep a copy in your own repository.
+Each release also attaches `notmyfault.mjs` to its [GitHub release](https://github.com/tashikomaaa/notmyfault/releases), to download it from there or to keep a copy in your own repository. `npx notmyfault@1` runs the same bundle from [npm](https://www.npmjs.com/package/notmyfault).
 
 ## Variables
 

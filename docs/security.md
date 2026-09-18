@@ -104,7 +104,7 @@ If a ruleset targets all branches, pushes to `notmyfault-history` are rejected a
 - **No runtime dependencies.** The action is a single bundled file, `dist/index.js`, built from `src/` with no third-party code.
 - **Verifiable build.** CI rebuilds `dist/` and fails if it differs from the committed file, so the code that runs is the code you can read.
 - **Pinning.** Use a full commit SHA for the strictest policies, see [Recipes](recipes.md#pin-to-a-commit).
-- **Build provenance.** For each release, a workflow rebuilds `dist/index.js` and `dist/notmyfault.mjs` from the tag, checks that they are the committed files, and attests their provenance with [GitHub artifact attestations](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations). It attaches `notmyfault.mjs` and `notmyfault.mjs.sha256` to the release, and adds the checksum to its notes. Check that a file was built by this repository:
+- **Build provenance.** For each release, a workflow rebuilds `dist/index.js`, `dist/notmyfault.mjs` and `dist/dashboard.js` from the tag, checks that they are the committed files, and attests their provenance with [GitHub artifact attestations](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations). The npm package is published from the same workflow with `--provenance`, so npm shows where and from which commit it was built. It attaches `notmyfault.mjs` and `notmyfault.mjs.sha256` to the release, and adds the checksum to its notes. Check that a file was built by this repository:
 
   ```sh
   gh attestation verify notmyfault.mjs --repo tashikomaaa/notmyfault

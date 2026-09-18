@@ -10,14 +10,20 @@ What needs the API of a code host is left out: comments on pull requests, flaky 
 
 ## Running it
 
-After the tests, in the same job, run `notmyfault.mjs` from the repository clone, with the JUnit reports:
+After the tests, in the same job, run notmyfault from the repository clone, with the JUnit reports:
 
 ```sh
-curl -fsSL -o /tmp/notmyfault.mjs https://github.com/tashikomaaa/notmyfault/releases/download/v1.9.0/notmyfault.mjs
-NOTMYFAULT_JUNIT="reports/*.xml" node /tmp/notmyfault.mjs
+NOTMYFAULT_JUNIT="reports/*.xml" npx notmyfault@1
 ```
 
-Each [release](https://github.com/tashikomaaa/notmyfault/releases) attaches the file, with its SHA-256 and its build provenance, see [Supply chain](security.md#supply-chain). Keep a copy in your repository to avoid downloading it.
+The [package](https://www.npmjs.com/package/notmyfault) is the same bundle as the action, with no dependencies. Pin a version, `notmyfault@1.10.0`, to keep runs identical.
+
+Without npm, or to avoid downloading anything at run time, take the file attached to each [release](https://github.com/tashikomaaa/notmyfault/releases), with its SHA-256 and its build provenance, see [Supply chain](security.md#supply-chain):
+
+```sh
+curl -fsSL -o /tmp/notmyfault.mjs https://github.com/tashikomaaa/notmyfault/releases/download/v1.10.0/notmyfault.mjs
+NOTMYFAULT_JUNIT="reports/*.xml" node /tmp/notmyfault.mjs
+```
 
 ### Jenkins
 
@@ -33,8 +39,7 @@ pipeline {
       steps {
         sh 'npm ci'
         sh 'npx vitest run --reporter=default --reporter=junit --outputFile.junit=reports/junit.xml || true'
-        sh 'curl -fsSL -o notmyfault.mjs https://github.com/tashikomaaa/notmyfault/releases/download/v1.9.0/notmyfault.mjs'
-        sh 'NOTMYFAULT_MODE=quarantine node notmyfault.mjs'
+        sh 'NOTMYFAULT_MODE=quarantine npx notmyfault@1'
       }
     }
   }
@@ -62,9 +67,7 @@ jobs:
       - run: npx vitest run --reporter=default --reporter=junit --outputFile.junit=reports/junit.xml
       - run:
           when: always
-          command: |
-            curl -fsSL -o /tmp/notmyfault.mjs https://github.com/tashikomaaa/notmyfault/releases/download/v1.9.0/notmyfault.mjs
-            node /tmp/notmyfault.mjs
+          command: npx notmyfault@1
       - store_test_results:
           path: reports
       - store_artifacts:
