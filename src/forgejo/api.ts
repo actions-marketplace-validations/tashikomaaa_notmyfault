@@ -1,3 +1,4 @@
+import { samePage } from "../github/api";
 import { ApiError, type Forge, type Issue } from "../platform";
 
 interface IssueItem {
@@ -85,7 +86,7 @@ export class ForgejoClient implements Forge {
       const response = await this.request("GET", next);
       items.push(...((await response.json()) as T[]));
       const link = response.headers.get("link")?.match(/<([^>]+)>;\s*rel="next"/)?.[1];
-      next = link?.startsWith(this.apiUrl) ? link.slice(this.apiUrl.length) : undefined;
+      next = link ? samePage(link, this.apiUrl) : undefined;
     }
     return items;
   }

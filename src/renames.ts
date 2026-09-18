@@ -11,6 +11,8 @@ export interface Rename {
 /** Names at least this similar, on their last part, can be the same test renamed. */
 const MIN_SIMILARITY = 0.6;
 const SEPARATOR = " › ";
+/** Longest names compared character by character. */
+const MAX_COMPARED = 200;
 
 /**
  * Tests renamed or moved in a run on a tracked branch:
@@ -108,6 +110,8 @@ function lastPart(id: string): string {
 /** 1 for equal strings, 0 for nothing in common: one minus the edit distance over the longest length. */
 export function similarity(a: string, b: string): number {
   if (a === b) return 1;
+  // Comparing two names costs their lengths multiplied: long ones are compared on their beginnings.
+  if (a.length > MAX_COMPARED || b.length > MAX_COMPARED) return similarity(a.slice(0, MAX_COMPARED), b.slice(0, MAX_COMPARED));
   let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
   for (let i = 1; i <= a.length; i++) {
     const current = [i];

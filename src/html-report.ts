@@ -1,6 +1,6 @@
 import { computeStats, estimateCost, verdictFor, type TestStats } from "./analyze";
 import { FAIL, RETRY, type FailingSince, type History, type TestHistory } from "./history";
-import { duration, escapeHtml } from "./report";
+import { duration, escapeHtml, linkable } from "./report";
 
 export interface PageContext {
   trackedBranches: string[];
@@ -9,6 +9,8 @@ export interface PageContext {
 }
 
 const PROJECT_URL = "https://github.com/tashikomaaa/notmyfault";
+/** Rows of one page: past this, the page stops being readable, and a report full of made-up tests stops being a weight. */
+const MAX_ROWS = 500;
 
 /** Where the page of a key lives on the history branch. */
 export function reportPath(key: string): string {
@@ -26,6 +28,8 @@ export function renderSuitePage(key: string, history: History, context: PageCont
   const total = rows.reduce((sum, row) => sum + (row.cost ?? 0), 0);
   const costing = total > 0 ? ` Their failures and retries cost about ${duration(total)} of test time.` : "";
   const stable = Object.keys(history.tests).length - rows.length;
+  const listed = rows.slice(0, MAX_ROWS);
+  const beyond = rows.length - listed.length;
   const where = context.trackedBranches.map((branch) => `<code>${escapeHtml(branch)}</code>`).join(", ");
 
   const body = [
@@ -40,8 +44,9 @@ export function renderSuitePage(key: string, history: History, context: PageCont
       `<div class="scroll"><table>`,
       tableHeader(),
       `<tbody>`,
-      ...rows.map(({ id, test, stats, cost }) => renderRow(id, test, stats, cost)),
+      ...listed.map(({ id, test, stats, cost }) => renderRow(id, test, stats, cost)),
       `</tbody></table></div>`,
+      ...(beyond > 0 ? [`<p class="empty">${plural(beyond, "less unreliable test")} not shown.</p>`] : []),
       `<p class="legend"><i class="p"></i> passed <i class="r"></i> passed after a retry <i class="f"></i> failed</p>`,
     );
   }
@@ -95,7 +100,7 @@ export function renderRow(id: string, test: TestHistory, stats: TestStats, cost:
   const summary = `${outcomes.length - failed - retried} passed, ${retried} passed after a retry, ${failed} failed`;
   const timeline = outcomes.map((outcome) => `<i class="${outcome === FAIL ? "f" : outcome === RETRY ? "r" : "p"}"></i>`).join("");
   const proof = stats.latestEvidence
-    ? `${stats.latestEvidence.kind === "rerun" ? "Passed on re-run" : "Passed after a retry"}, ${stats.latestEvidence.at.slice(0, 10)}`
+    ? `${stats.latestEvidence.kind === "rerun" ? "Passed on re-run" : "Passed after a retry"}, ${escapeHtml(stats.latestEvidence.at.slice(0, 10))}`
     : "";
   const durations = test.durations ?? [];
   return [
@@ -106,7 +111,7 @@ export function renderRow(id: string, test: TestHistory, stats: TestStats, cost:
     `<td><span class="timeline" role="img" aria-label="${summary}">${timeline}</span></td>`,
     `<td class="number">${failed}</td>`,
     `<td class="number">${retried}</td>`,
-    `<td>${lastFailure(test) ?? ""}</td>`,
+    `<td>${escapeHtml(lastFailure(test) ?? "")}</td>`,
     `<td>${proof}</td>`,
     `<td class="number">${durations.length > 0 ? duration(median(durations)) : ""}</td>`,
     `<td class="number">${cost === undefined ? "" : duration(cost)}</td>`,
@@ -115,10 +120,15 @@ export function renderRow(id: string, test: TestHistory, stats: TestStats, cost:
 }
 
 function since(failing: FailingSince): string {
-  const sha = `<code>${escapeHtml(failing.sha.slice(0, 7))}</code>`;
-  const commit = failing.url ? `<a href="${escapeAttribute(failing.url)}">${sha}</a>` : sha;
-  const change = failing.change ? ` from <a href="${escapeAttribute(failing.change.url)}">${escapeHtml(failing.change.ref)}</a>` : "";
-  return `<span class="since">since ${commit}${change}, ${failing.at.slice(0, 10)}</span>`;
+  const commit = link(failing.url, `<code>${escapeHtml(failing.sha.slice(0, 7))}</code>`);
+  const change = failing.change ? ` from ${link(failing.change.url, escapeHtml(failing.change.ref))}` : "";
+  return `<span class="since">since ${commit}${change}, ${escapeHtml(failing.at.slice(0, 10))}</span>`;
+}
+
+/** Links the already escaped text when the address is one a browser opens as a page, and leaves it as text otherwise. */
+export function link(url: string | undefined, text: string): string {
+  const safe = linkable(url);
+  return safe ? `<a href="${escapeAttribute(safe)}">${text}</a>` : text;
 }
 
 function verdict(stats: TestStats): [string, string] {
@@ -152,7 +162,7 @@ function median(values: number[]): number {
 }
 
 export function formatTime(iso: string): string {
-  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+  return escapeHtml(`${iso.slice(0, 10)} ${iso.slice(11, 16)}`) + " UTC";
 }
 
 export function plural(n: number, word: string): string {
@@ -160,7 +170,7 @@ export function plural(n: number, word: string): string {
 }
 
 export function escapeAttribute(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 export function page(title: string, body: string[], footer = "rewritten on every update of the history"): string {

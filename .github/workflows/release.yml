@@ -34,10 +34,14 @@ jobs:
       - run: npm ci
       - run: npm run build
 
-      - name: Check that the bundles are the committed ones
+      - name: Check that the bundles and the pinned template are the committed ones
         run: |
-          if ! git diff --quiet -- dist/; then
-            echo "::error::dist/ at $TAG does not match its sources."
+          if ! git diff --quiet -- dist/ templates/; then
+            echo "::error::dist/ or templates/ at $TAG does not match its sources."
+            exit 1
+          fi
+          if ! grep -q "NOTMYFAULT_REF: $TAG" templates/notmyfault.gitlab-ci.yml; then
+            echo "::error::templates/notmyfault.gitlab-ci.yml does not pin $TAG."
             exit 1
           fi
 
@@ -73,10 +77,15 @@ jobs:
             echo "::notice::No GitLab mirror configured: the component is not published to the CI/CD Catalog."
             exit 0
           fi
-          header="AUTHORIZATION: basic $(printf 'oauth2:%s' "$MIRROR_TOKEN" | base64 -w0)"
+          case "$MIRROR_URL" in https://*) ;; *) echo "::error::GITLAB_MIRROR_URL must be an https URL."; exit 1;; esac
+          # The credential goes through the environment, scoped to the host of the mirror, as git-store does.
+          origin=$(printf '%s' "$MIRROR_URL" | cut -d/ -f1-3)
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.$origin/.extraheader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'oauth2:%s' "$MIRROR_TOKEN" | base64 -w0)"
           # main without a pipeline, then the tag alone, whose pipeline creates the release.
-          git -c "http.extraheader=$header" push -o ci.skip "$MIRROR_URL" origin/main:refs/heads/main
-          git -c "http.extraheader=$header" push "$MIRROR_URL" "refs/tags/$TAG:refs/tags/$TAG"
+          git push -o ci.skip "$MIRROR_URL" origin/main:refs/heads/main
+          git push "$MIRROR_URL" "refs/tags/$TAG:refs/tags/$TAG"
 
       # npx notmyfault, for CI systems without an integration. Skipped until the NPM_TOKEN secret exists.
       - name: Publish to npm

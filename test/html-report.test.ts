@@ -49,6 +49,28 @@ describe("renderSuitePage", () => {
     );
   });
 
+  it("renders a history written by someone else as text, never as markup or a script", () => {
+    const hostile = history();
+    hostile.updatedAt = '2026-09-16T10:04:12.000Z"><script>alert(1)</script>';
+    hostile.tests["unit › crafted"] = {
+      outcomes: "pppfff",
+      lastSeen: "2026-09-16",
+      lastFailure: '2026-09-16"><img src=x onerror=alert(1)>',
+      failingSince: {
+        sha: "0123456789ab",
+        at: '2026-09-15"><script>alert(1)</script>',
+        url: "javascript:alert(document.cookie)",
+        change: { ref: "<img src=x onerror=alert(1)>", url: "javascript:alert(1)" },
+      },
+    };
+    const page = renderSuitePage("ci-test", hostile, CONTEXT);
+    expect(page).not.toContain("<script>alert");
+    expect(page).not.toContain("<img src=x");
+    expect(page).not.toContain("javascript:");
+    // The commit and the change stay readable, only unlinked.
+    expect(page).toContain("<code>0123456</code>");
+  });
+
   it("puts the costliest tests first, with the time they cost", () => {
     const costly = history();
     costly.runDurations = [30_000];

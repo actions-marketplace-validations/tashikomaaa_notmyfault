@@ -4,6 +4,8 @@ import { isAbsolute, join } from "node:path";
 import type { AnnotationLevel, Io } from "./platform";
 
 export const ESC = "\u001b";
+/** Shorter values are too common to replace safely: "1" or "ok" would blank out the report. */
+const MIN_MASKED_LENGTH = 8;
 
 /**
  * Inputs and outputs of CI systems without step inputs nor outputs: inputs are
@@ -12,6 +14,7 @@ export const ESC = "\u001b";
  */
 export abstract class VariablesIO implements Io {
   private readonly outputs = new Map<string, string>();
+  private readonly secrets: string[] = [];
   private summaryStarted = false;
 
   constructor(
@@ -62,24 +65,35 @@ export abstract class VariablesIO implements Io {
 
   appendSummary(markdown: string): void {
     const file = this.path("NOTMYFAULT_SUMMARY_FILE", "notmyfault-summary.md");
-    if (this.summaryStarted) appendFileSync(file, markdown + EOL);
-    else writeFileSync(file, markdown + EOL);
+    const text = this.redact(markdown) + EOL;
+    if (this.summaryStarted) appendFileSync(file, text);
+    else writeFileSync(file, text);
     this.summaryStarted = true;
   }
 
-  /** Masked variables are hidden by the CI system, which has no command to mask a value at runtime. */
-  mask(): void {}
+  /**
+   * CI systems without a command to mask a value at runtime: notmyfault replaces the secret itself in everything it
+   * writes, so a token cannot reach the log, the summary or the outputs even if something else puts it there.
+   */
+  mask(secret: string): void {
+    if (secret.trim().length >= MIN_MASKED_LENGTH) this.secrets.push(secret);
+  }
+
+  /** Replaces every masked secret with ***. */
+  protected redact(text: string): string {
+    return this.secrets.reduce((redacted, secret) => redacted.split(secret).join("***"), text);
+  }
 
   info(message: string): void {
-    this.write(message);
+    this.write(this.redact(message));
   }
 
   warning(message: string): void {
-    this.write(`${ESC}[33mWarning: ${message}${ESC}[0m`);
+    this.write(`${ESC}[33mWarning: ${this.redact(message)}${ESC}[0m`);
   }
 
   error(message: string): void {
-    this.write(`${ESC}[31mError: ${message}${ESC}[0m`);
+    this.write(`${ESC}[31mError: ${this.redact(message)}${ESC}[0m`);
   }
 
   abstract group(title: string): void;
@@ -88,7 +102,7 @@ export abstract class VariablesIO implements Io {
 
   finish(): void {
     if (this.outputs.size === 0) return;
-    const lines = [...this.outputs].map(([name, value]) => `${name}=${value}`);
+    const lines = [...this.outputs].map(([name, value]) => `${name}=${this.redact(value)}`);
     writeFileSync(this.path("NOTMYFAULT_OUTPUT_FILE", "notmyfault.env"), `${lines.join("\n")}\n`);
   }
 

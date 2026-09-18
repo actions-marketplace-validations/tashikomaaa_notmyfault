@@ -1,4 +1,5 @@
 import type { Analysis } from "./analyze";
+import { matchGlob } from "./glob";
 import type { TestResult } from "./junit";
 
 export interface QuarantineEntry {
@@ -37,9 +38,14 @@ export function isActive(entry: QuarantineEntry, now: Date): boolean {
  * after a "›", so that "checkout > pays" matches "test/cart.test.ts › checkout > pays".
  */
 export function matches(entry: QuarantineEntry, test: TestResult): boolean {
-  const escaped = entry.pattern.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const pattern = new RegExp(`(?:^|\\s›\\s)${escaped.join(".*")}$`);
-  return pattern.test(test.title) || pattern.test(test.id);
+  return names(test.title).concat(names(test.id)).some((name) => matchGlob(entry.pattern, name));
+}
+
+/** The whole name, then what follows each "›" in it. */
+function names(name: string): string[] {
+  const parts = [name];
+  for (const match of name.matchAll(/\s›\s/g)) parts.push(name.slice(match.index + match[0].length));
+  return parts;
 }
 
 /** Marks the failures of the analysis covered by an active entry, and resolves to how many. */

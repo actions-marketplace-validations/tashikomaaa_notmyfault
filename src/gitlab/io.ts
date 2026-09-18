@@ -56,7 +56,8 @@ export class GitLabIO extends VariablesIO {
   }
 
   override finish(): void {
-    writeFileSync(this.path("NOTMYFAULT_CODE_QUALITY_FILE", "gl-code-quality-report.json"), `${JSON.stringify(this.issues, null, 1)}\n`);
+    const report = this.redact(JSON.stringify(this.issues, null, 1));
+    writeFileSync(this.path("NOTMYFAULT_CODE_QUALITY_FILE", "gl-code-quality-report.json"), `${report}\n`);
     super.finish();
   }
 }

@@ -327,8 +327,22 @@ export function plainExplanation(failure: FailureVerdict, context: ReportContext
 /** The commit a failure streak started with, linked, and the pull or merge request it came from: "`abc1234` from #42". */
 export function sinceCommit(since: FailingSince): string {
   const sha = `\`${since.sha.slice(0, 7)}\``;
-  const commit = since.url ? `[${sha}](${since.url})` : sha;
-  return since.change ? `${commit} from [${since.change.ref}](${since.change.url})` : commit;
+  const url = linkable(since.url);
+  const commit = url ? `[${sha}](${url})` : sha;
+  if (!since.change) return commit;
+  // "#42", "!9": anything else is escaped rather than trusted to stay inside the link.
+  const ref = /^[\w#!.\-/ ]{1,40}$/.test(since.change.ref) ? since.change.ref : escapeHtml(since.change.ref);
+  const changeUrl = linkable(since.change.url);
+  return `${commit} from ${changeUrl ? `[${ref}](${changeUrl})` : ref}`;
+}
+
+/**
+ * The addresses notmyfault turns into links. Everything else, from a history
+ * file or an API, is rendered as text: a link must open a page in a browser,
+ * never run a script, and never end the Markdown or HTML it sits in.
+ */
+export function linkable(url: string | undefined): string | undefined {
+  return url !== undefined && /^https?:\/\/[^\s<>"'`()\\]+$/i.test(url) ? url : undefined;
 }
 
 function explain(failure: FailureVerdict, context: ReportContext): string {

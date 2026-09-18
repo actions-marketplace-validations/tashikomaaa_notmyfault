@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -154,10 +155,21 @@ describe("templates/notmyfault.gitlab-ci.yml", () => {
     expect(pages).toContain("paths: [public]");
   });
 
-  it("checks the checksum when one is set, before running the file", () => {
+  it("checks the checksum of the file it downloads, before running it", () => {
     const script = read("templates/notmyfault.gitlab-ci.yml");
     const check = script.indexOf('echo "$NOTMYFAULT_SHA256  /tmp/notmyfault.mjs" | sha256sum -c -');
     expect(check).toBeGreaterThan(script.indexOf("wget"));
     expect(check).toBeLessThan(script.indexOf("node /tmp/notmyfault.mjs"));
+    // An empty checksum, or a ref that could walk out of the repository, stops the job.
+    expect(script).toContain('test -n "$NOTMYFAULT_SHA256" ||');
+    expect(script).toContain('case "$NOTMYFAULT_REF" in *[!A-Za-z0-9._-]*)');
+  });
+
+  it("is pinned to the version it was built with", () => {
+    const script = read("templates/notmyfault.gitlab-ci.yml");
+    const version = (JSON.parse(read("package.json")) as { version: string }).version;
+    const checksum = createHash("sha256").update(readFileSync(join(root, "dist", "notmyfault.mjs"))).digest("hex");
+    expect(script).toContain(`NOTMYFAULT_REF: v${version}`);
+    expect(script).toContain(`NOTMYFAULT_SHA256: ${checksum}`);
   });
 });

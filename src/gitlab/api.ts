@@ -1,3 +1,4 @@
+import { samePage } from "../github/api";
 import { ApiError, type Forge, type Issue } from "../platform";
 
 interface Note {
@@ -125,14 +126,19 @@ export class GitLabClient implements Forge {
       const response = await this.request("GET", next);
       items.push(...((await response.json()) as T[]));
       const link = response.headers.get("link")?.match(/<([^>]+)>;\s*rel="next"/)?.[1];
-      next = link?.startsWith(this.apiUrl) ? link.slice(this.apiUrl.length) : undefined;
+      next = link ? samePage(link, this.apiUrl) : undefined;
     }
     return items;
   }
 
-  private async request(method: string, path: string, body?: unknown): Promise<Response> {
+  /**
+   * fetch only strips Authorization on a cross-origin redirect, and GitLab takes its token in a header of its own:
+   * redirects are followed by hand, and only to the same GitLab, so the token never reaches another server.
+   */
+  private async request(method: string, path: string, body?: unknown, redirects = 3): Promise<Response> {
     const response = await fetch(`${this.apiUrl}${path}`, {
       method,
+      redirect: "manual",
       headers: {
         [this.jobToken ? "JOB-TOKEN" : "PRIVATE-TOKEN"]: this.token,
         "User-Agent": "notmyfault",
@@ -140,6 +146,14 @@ export class GitLabClient implements Forge {
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      const next = location ? samePage(new URL(location, `${this.apiUrl}${path}`).href, this.apiUrl) : undefined;
+      if (!next || redirects === 0) {
+        throw new ApiError(response.status, path, `redirected to ${location ?? "nowhere"}, off this GitLab`, "GitLab");
+      }
+      return this.request(method, next, body, redirects - 1);
+    }
     if (!response.ok) throw new ApiError(response.status, path, await response.text(), "GitLab");
     return response;
   }

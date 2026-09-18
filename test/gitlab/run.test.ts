@@ -287,8 +287,9 @@ describe("runOn GitLab", () => {
     ];
     await simulate({ search: "fail: no match" }, { sha: breaking });
     const mr = await simulate({ search: "fail: no match" }, { mergeRequest: true });
+    // The commit link stays out: the rig serves the repository from a file:// path, and only web addresses are linked.
     expect(api.notes.at(-1)!.body).toContain(
-      `**Already failing on \`main\`.** The latest run there failed too, on [\`eeeeeee\`](file://${join(root, "remote")}/acme/shop/-/commit/${breaking}) from [!9](https://gitlab.example.com/acme/shop/-/merge_requests/9).`,
+      "**Already failing on `main`.** The latest run there failed too, on `eeeeeee` from [!9](https://gitlab.example.com/acme/shop/-/merge_requests/9).",
     );
     expect(mr.codeQuality).toMatchObject([{ description: expect.stringContaining("The latest run there failed too, on eeeeeee from !9.") }]);
   });

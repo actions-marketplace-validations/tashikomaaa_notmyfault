@@ -12,7 +12,7 @@ import {
   type PageContext,
   type UnreliableTest,
 } from "./html-report";
-import { code, duration, escapeHtml } from "./report";
+import { code, duration, escapeHtml, linkable } from "./report";
 
 /** The history branch of one repository, as read by the dashboard. */
 export interface DashboardRepository {
@@ -85,6 +85,12 @@ export function renderDashboard(repositories: DashboardRepository[], context: Da
   return page(context.title, body, "rewritten on every run of the dashboard");
 }
 
+/** Links a repository in Markdown, as text when its address is not one a browser opens as a page. */
+function mdLink(url: string, text: string): string {
+  const safe = linkable(url);
+  return safe ? `[${text}](${safe})` : text;
+}
+
 /** The costliest unreliable tests as Markdown, for the job summary. */
 export function renderDashboardSummary(repositories: DashboardRepository[], context: DashboardContext, limit = 10): string {
   const rows = dashboardRows(repositories, context);
@@ -96,7 +102,7 @@ export function renderDashboardSummary(repositories: DashboardRepository[], cont
     lines.push("| Repository | Test | Failed runs | Passed on retry | Estimated cost |", "|---|---|--:|--:|--:|");
     for (const row of rows.slice(0, limit)) {
       lines.push(
-        `| [${escapeHtml(row.repository.name)}](${row.repository.url}) | ${code(row.id)} | ${row.stats.failures} / ${row.stats.runs} | ${row.stats.retries} | ${row.cost === undefined ? "" : duration(row.cost)} |`,
+        `| ${mdLink(row.repository.url, escapeHtml(row.repository.name))} | ${code(row.id)} | ${row.stats.failures} / ${row.stats.runs} | ${row.stats.retries} | ${row.cost === undefined ? "" : duration(row.cost)} |`,
       );
     }
   }

@@ -81,7 +81,33 @@ describe("runDashboard", () => {
     const summary = readFileSync(env.GITHUB_STEP_SUMMARY!, "utf8");
     expect(summary).toContain("2 unreliable tests in 3 repositories.");
     expect(summary).toContain("⚠️ **acme/gone:** Could not read branch");
-    expect(summary).toMatch(/\| \[acme\/api\]\(file:\/\/\S+\/acme\/api\) \| <code>users › signs up<\/code> \| 2 \/ 8 \| 0 \| 20 min 0 s \|/);
+    // The rig serves the repositories from file:// paths, which are shown as text: only web addresses are linked.
+    expect(summary).toContain("| acme/api | <code>users › signs up</code> | 2 / 8 | 0 | 20 min 0 s |");
+  });
+
+  it("never publishes credentials given in a repository URL, and stays in the workspace", async () => {
+    await repository("acme/shop", { "ci-test": history(3, { "cart › totals": { outcomes: "pfp", lastSeen: "2026-09-16" } }) });
+    const secret = "glpat-supersecret-value";
+    const env: NodeJS.ProcessEnv = {
+      // Reading a private history on another server needs credentials in the URL: they must not be published.
+      "INPUT_REPOSITORIES": `https://bot:${secret}@gitlab.invalid/acme/shop.git`,
+      GITHUB_SERVER_URL: `file://${join(root, "remote")}`,
+      GITHUB_WORKSPACE: root,
+    };
+    const logs: string[] = [];
+    await runDashboard(env, new ActionIO(env, (line) => logs.push(line)), NOW);
+    const page = readFileSync(join(root, "notmyfault-dashboard", "index.html"), "utf8");
+    expect(page).toContain("gitlab.invalid/acme/shop");
+    expect(page).not.toContain(secret);
+    expect(page).not.toContain("bot:");
+    // The only line holding it is the command asking GitHub to mask it in the log.
+    expect(logs.filter((line) => line.includes(secret))).toEqual([`::add-mask::${secret}`]);
+
+    // The output directory cannot escape the workspace.
+    const escaping: NodeJS.ProcessEnv = { ...env, "INPUT_OUTPUT": "../outside", "INPUT_REPOSITORIES": "acme/shop" };
+    const escapingLogs: string[] = [];
+    expect(await runDashboard(escaping, new ActionIO(escaping, (line) => escapingLogs.push(line)), NOW)).toBe(1);
+    expect(escapingLogs.join("\n")).toContain('::error::Input "output" must stay in the workspace, got "../outside"');
   });
 
   it("fails when no repository could be read, or none is given", async () => {

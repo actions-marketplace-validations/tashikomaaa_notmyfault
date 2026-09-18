@@ -145,8 +145,22 @@ export class GitHubClient implements Forge {
   }
 }
 
+/** The next page of a Link header, only when it stays on the API host: the server chooses this URL. */
 function nextPage(link: string | null, apiUrl: string): string | undefined {
   const match = link?.match(/<([^>]+)>;\s*rel="next"/);
-  if (!match?.[1]) return undefined;
-  return match[1].startsWith(apiUrl) ? match[1].slice(apiUrl.length) : undefined;
+  return match?.[1] ? samePage(match[1], apiUrl) : undefined;
+}
+
+/** `url` as a path relative to `apiUrl`, or undefined when it points anywhere else. */
+export function samePage(url: string, apiUrl: string): string | undefined {
+  try {
+    const next = new URL(url);
+    const base = new URL(apiUrl);
+    if (next.origin !== base.origin || !next.pathname.startsWith(base.pathname)) return undefined;
+    // The base of a server without a path, like https://api.github.com, has "/" as its pathname: keep that slash.
+    const prefix = base.pathname === "/" ? base.origin.length : base.origin.length + base.pathname.length;
+    return next.href.slice(prefix);
+  } catch {
+    return undefined;
+  }
 }

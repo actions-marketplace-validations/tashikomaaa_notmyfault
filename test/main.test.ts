@@ -310,7 +310,6 @@ describe("run", () => {
     expect(storedHistory().tests["unit › checkout › search"]).toMatchObject({
       failingSince: {
         sha: "bbbbbbbbbbbb",
-        url: `file://${join(root, "remote")}/acme/shop/commit/${breaking}`,
         change: { ref: "#12", url: "https://github.com/acme/shop/pull/12" },
       },
     });
@@ -318,7 +317,7 @@ describe("run", () => {
     const pr = await simulate({ search: "fail" }, { event: "pull_request" });
     expect(pr.logs).toContain("broken   checkout › search (failing since bbbbbbb)");
     expect(api.comments[0]!.body).toContain(
-      `**Already failing on \`main\`.** Failed the last 2 runs there. Failing since [\`bbbbbbb\`](file://${join(root, "remote")}/acme/shop/commit/${breaking}) from [#12](https://github.com/acme/shop/pull/12), on 2026-09-01.`,
+      "**Already failing on `main`.** Failed the last 2 runs there. Failing since `bbbbbbb` from [#12](https://github.com/acme/shop/pull/12), on 2026-09-01.",
     );
 
     // Passing on main ends the streak; the next one starts afresh, even when the API fails.
@@ -437,6 +436,24 @@ describe("run", () => {
     const comment = api.comments[0]!.body;
     expect(comment).toContain("👻 **Missing:** 1 test of the latest run on `main` did not run here.");
     expect(comment).toContain("🗑️ **Deleted:** 1 test no longer runs, with the file <code>test/login.e2e.ts</code> this change removes.");
+  });
+
+  it("never republishes the token a test printed in its failure", async () => {
+    // A test that fails while printing its configuration puts the token in the report notmyfault reads.
+    const pr = await simulate({ pays: "fail: POST /pay failed, Authorization: Bearer secret-token" }, { event: "pull_request" });
+    expect(pr.code).toBe(0);
+    const comment = api.comments[0]!.body;
+    // The message is kept, with the token replaced (the stars are HTML-escaped like the rest of the message).
+    expect(comment).toContain("Authorization: Bearer &#42;&#42;&#42;");
+    expect(comment).not.toContain("secret-token");
+    expect(pr.summary).not.toContain("secret-token");
+
+    // A test whose name carries the token, for instance one generated from the environment.
+    const named = await simulate({ "pays with secret-token": "fail" }, { event: "pull_request" });
+    expect(named.code).toBe(0);
+    expect(api.comments.at(-1)!.body).not.toContain("secret-token");
+    expect(named.summary).not.toContain("secret-token");
+    expect(JSON.stringify(storedHistory().tests)).not.toContain("secret-token");
   });
 
   it("stays quiet on green pull requests without a previous comment", async () => {

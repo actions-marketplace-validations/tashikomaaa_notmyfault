@@ -6,7 +6,8 @@ workflow:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
 
 release:
-  image: registry.gitlab.com/gitlab-org/cli:latest
+  # Pinned: this job holds a token that can create releases.
+  image: registry.gitlab.com/gitlab-org/cli:v1.101.0
   variables:
     # glab signs in with the job token.
     GLAB_ENABLE_CI_AUTOLOGIN: "true"

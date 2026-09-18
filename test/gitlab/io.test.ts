@@ -46,6 +46,25 @@ describe("GitLabIO", () => {
     ]);
   });
 
+  it("replaces masked secrets in everything it writes", () => {
+    const lines: string[] = [];
+    const io = new GitLabIO({ CI_PROJECT_DIR: dir }, (line) => lines.push(line));
+    io.mask("glpat-supersecret");
+    io.mask("x");  // Too short to replace safely: it would blank out the report.
+    io.info("pushing with glpat-supersecret");
+    io.warning("Could not push with glpat-supersecret");
+    io.appendSummary("the log said glpat-supersecret");
+    io.setOutput("blocking", "glpat-supersecret");
+    io.annotation("error", "failed with glpat-supersecret", { file: "a.test.ts", title: "a" });
+    io.finish();
+
+    expect(lines.join("\n")).not.toContain("glpat-supersecret");
+    expect(lines[0]).toBe("pushing with ***");
+    expect(readFileSync(join(dir, "notmyfault-summary.md"), "utf8")).toBe("the log said ***\n");
+    expect(readFileSync(join(dir, "notmyfault.env"), "utf8")).toBe("NOTMYFAULT_BLOCKING=***\n");
+    expect(readFileSync(join(dir, "gl-code-quality-report.json"), "utf8")).toContain("failed with ***");
+  });
+
   it("starts a new summary on each run", () => {
     const first = new GitLabIO({ CI_PROJECT_DIR: dir }, () => {});
     first.appendSummary("old");

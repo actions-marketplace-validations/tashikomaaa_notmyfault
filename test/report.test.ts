@@ -12,6 +12,7 @@ import {
   renderSuitesComment,
   renderSuitesSummary,
   renderSummary,
+  sinceCommit,
   type ReportContext,
 } from "../src/report";
 
@@ -176,6 +177,20 @@ describe("renderComment", () => {
     expect(plainExplanation(streak, context())).toBe(
       "Already failing on main. Failed the last 3 runs there. Failing since 0123456 from #42, on 2026-09-14.",
     );
+  });
+
+  it("does not let a stored link run a script or break out of the comment", () => {
+    // A history branch anyone can push to must not decide what a comment links to.
+    expect(sinceCommit({ sha: "0123456789ab", at: "2026-09-14T09:30:00.000Z", url: "javascript:alert(1)" })).toBe("`0123456`");
+    const crafted = sinceCommit({
+      sha: "0123456789ab",
+      at: "2026-09-14T09:30:00.000Z",
+      url: "https://github.com/o/r/commit/0123456789abcdef",
+      change: { ref: "#42](https://evil.test) [click me", url: "https://github.com/o/r/pull/42" },
+    });
+    expect(crafted.startsWith("[`0123456`](https://github.com/o/r/commit/0123456789abcdef) from [")).toBe(true);
+    expect(crafted).not.toContain("](https://evil.test)");
+    expect(crafted.endsWith("](https://github.com/o/r/pull/42)")).toBe(true);
   });
 
   it("lists missing tests, a whole file on one line", () => {

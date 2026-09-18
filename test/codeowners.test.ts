@@ -40,4 +40,19 @@ test/payments/ @payments-team
     expect(ownersOf("test/payments/card.test.ts", rules)).toEqual(["@admins", "@payments-team"]);
     expect(ownersOf("test/README.md", rules)).toEqual(["@admins", "@qa-team", "@writers"]);
   });
+
+  it("matches a crafted pattern from a pull request without stalling the job", () => {
+    // A CODEOWNERS file comes from the branch under test: a pattern must not be able to hold the run.
+    const rules = parseCodeowners(`${"**/a".repeat(40)}/*.ts @owners\n`);
+    const path = `${"a/".repeat(60)}b.js`;
+    const started = Date.now();
+    expect(ownersOf(path, rules)).toEqual([]);
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it("leaves out patterns and paths too long to be real", () => {
+    const rules = parseCodeowners(`${"a".repeat(300)} @owners\n* @admins\n`);
+    expect(rules).toHaveLength(1);
+    expect(ownersOf(`${"a/".repeat(600)}b.ts`, rules)).toEqual([]);
+  });
 });

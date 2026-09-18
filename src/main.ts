@@ -114,10 +114,18 @@ export async function runOn(platform: Platform, now = new Date()): Promise<numbe
       io.info(`Not in a CI system: the history is read, not recorded. Set ${io.inputName("record")}=true to record this run.`);
     }
 
+    // A test that fails while printing its configuration can put the token in its message, which notmyfault
+    // republishes in comments, issues and artifacts: it never leaves this function.
+    const redact = (text: string) => (settings.token ? text.split(settings.token).join("***") : text);
     const loaded: LoadedSuite[] = [];
     for (const suite of settings.suites) {
       const results = await loadResults(suite, settings.suites.length > 1, context.workspace, io);
       if (!results) return 1;
+      for (const result of results) {
+        result.id = redact(result.id);
+        result.title = redact(result.title);
+        if (result.message) result.message = redact(result.message);
+      }
       loaded.push({ ...suite, results });
     }
 

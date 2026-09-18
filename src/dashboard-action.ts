@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { renderDashboard, renderDashboardSummary, type DashboardRepository } from "./dashboard";
-import { GitStore } from "./git-store";
+import { GitStore, splitCredentials } from "./git-store";
 import { ActionIO } from "./github/io";
 import { parseHistory } from "./history";
 import type { Io } from "./platform";
@@ -21,7 +21,11 @@ export async function runDashboard(env: NodeJS.ProcessEnv = process.env, io: Io 
     if (token) io.mask(token);
     const branch = io.input("history-branch", "notmyfault-history");
     const serverUrl = (env.GITHUB_SERVER_URL ?? "https://github.com").replace(/\/+$/, "");
-    const output = resolve(env.GITHUB_WORKSPACE ?? process.cwd(), io.input("output", "notmyfault-dashboard"));
+    const workspace = env.GITHUB_WORKSPACE ?? process.cwd();
+    const output = resolve(workspace, io.input("output", "notmyfault-dashboard"));
+    if (relative(workspace, output).startsWith("..")) {
+      throw new Error(`${io.describeInput("output")} must stay in the workspace, got "${io.input("output")}"`);
+    }
     const context = {
       title: io.input("title", "Unreliable tests"),
       limit: io.integerInput("limit", 100, 1),
@@ -32,11 +36,16 @@ export async function runDashboard(env: NodeJS.ProcessEnv = process.env, io: Io 
 
     const repositories: DashboardRepository[] = [];
     for (const entry of list) {
-      const remoteUrl = /^https?:\/\/|^file:\/\//.test(entry) ? entry : `${serverUrl}/${entry}.git`;
+      const isUrl = /^https?:\/\/|^file:\/\//.test(entry);
+      const remoteUrl = isUrl ? entry : `${serverUrl}/${entry}.git`;
+      // A URL given with a user name and a password must never reach the page, the summary or the log.
+      const { url: withoutCredentials, password } = splitCredentials(remoteUrl);
+      if (password) io.mask(password);
+      const shown = isUrl ? withoutCredentials : entry;
       const repository: DashboardRepository = {
         // A URL keeps its host, to tell apart repositories of the same name on different servers.
-        name: entry.replace(/^\w+:\/\//, "").replace(/\.git$/, ""),
-        url: remoteUrl.replace(/\.git$/, ""),
+        name: shown.replace(/^\w+:\/\//, "").replace(/\.git$/, ""),
+        url: withoutCredentials.replace(/\.git$/, ""),
         suites: [],
       };
       // The token only goes to the server of the workflow: repositories elsewhere are read anonymously.

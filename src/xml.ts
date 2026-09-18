@@ -15,6 +15,10 @@ export interface XmlElement {
 
 // Large <system-out> blocks are useless for our purpose; cap what we keep.
 const MAX_TEXT_LENGTH = 64 * 1024;
+/** Attribute values hold test names and messages: enough for any of them, short enough to stay cheap to compare. */
+const MAX_ATTRIBUTE_LENGTH = 4 * 1024;
+/** Reports are three or four levels deep. Deeper is either a mistake or a report built to make the parser crawl. */
+const MAX_DEPTH = 256;
 
 const NAMED_ENTITIES: Record<string, string> = {
   lt: "<",
@@ -65,13 +69,10 @@ export function parseXml(input: string): XmlElement {
     } else if (input[lt + 1] === "/") {
       const end = input.indexOf(">", lt + 2);
       const name = input.slice(lt + 2, end === -1 ? length : end).trim();
-      // Pop back to the matching element, implicitly closing unclosed children.
-      for (let k = stack.length - 1; k > 0; k--) {
-        if (stack[k]!.name === name) {
-          stack.length = k;
-          break;
-        }
-      }
+      // Pop back to the matching element, implicitly closing unclosed children. A closing tag matching nothing is
+      // ignored without walking the stack: scanning it for every one of them is what a crafted report would abuse.
+      const open = stack.findLastIndex((element, depth) => depth > 0 && element.name === name);
+      if (open > 0) stack.length = open;
       i = end === -1 ? length : end + 1;
     } else {
       i = parseStartTag(input, lt, stack);
@@ -93,6 +94,10 @@ export function findAll(element: XmlElement, name: string, out: XmlElement[] = [
 function appendText(element: XmlElement, text: string): void {
   if (element.text.length >= MAX_TEXT_LENGTH) return;
   element.text += text.slice(0, MAX_TEXT_LENGTH - element.text.length);
+}
+
+function attribute(raw: string): string {
+  return decodeEntities(raw.length > MAX_ATTRIBUTE_LENGTH ? raw.slice(0, MAX_ATTRIBUTE_LENGTH) : raw);
 }
 
 function skipPast(input: string, terminator: string, from: number): number {
@@ -163,16 +168,17 @@ function parseStartTag(input: string, lt: number, stack: XmlElement[]): number {
     if (quote === '"' || quote === "'") {
       const end = input.indexOf(quote, j + 1);
       const stop = end === -1 ? length : end;
-      element.attrs[attrName] = decodeEntities(input.slice(j + 1, stop));
+      element.attrs[attrName] = attribute(input.slice(j + 1, stop));
       j = stop + 1;
     } else {
       const valueStart = j;
       while (j < length && !isSpace(input[j]) && input[j] !== ">") j++;
-      element.attrs[attrName] = decodeEntities(input.slice(valueStart, j));
+      element.attrs[attrName] = attribute(input.slice(valueStart, j));
     }
   }
 
-  stack[stack.length - 1]!.children.push(element);
+  // Past the depth cap the element is parsed but not kept, so nesting cannot grow the tree or the recursion.
+  if (stack.length <= MAX_DEPTH) stack[stack.length - 1]!.children.push(element);
   if (!selfClosing) stack.push(element);
   return j;
 }

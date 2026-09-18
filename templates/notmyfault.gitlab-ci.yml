@@ -21,16 +21,19 @@
   # Test failures are what notmyfault explains.
   when: always
   variables:
-    # The version of notmyfault: v1 follows every 1.x release, v1.5.0 stays on that one.
-    NOTMYFAULT_REF: v1
-    # The SHA-256 of notmyfault.mjs at NOTMYFAULT_REF, published with each release: the job fails on any other file.
-    NOTMYFAULT_SHA256: ""
+    # The version of notmyfault, pinned to the release this template comes from, with the checksum of its bundle.
+    # Changing NOTMYFAULT_REF without its NOTMYFAULT_SHA256 fails the job: set both, or neither.
+    NOTMYFAULT_REF: v1.11.0
+    NOTMYFAULT_SHA256: 655e709014892a3d63f9f09dd54f33c02f51ce42df51dc222285924fe3c4eac9
   script:
     # notmyfault stores its history with git, which node:24-alpine lacks.
     - command -v git > /dev/null || apk add --no-cache git
+    # A ref is a tag or a commit: anything else could walk out of the repository with ../.
+    - case "$NOTMYFAULT_REF" in *[!A-Za-z0-9._-]*) echo "NOTMYFAULT_REF must be a tag or a commit"; exit 1;; esac
     - wget -q -O /tmp/notmyfault.mjs "https://raw.githubusercontent.com/tashikomaaa/notmyfault/${NOTMYFAULT_REF}/dist/notmyfault.mjs"
-    # With NOTMYFAULT_SHA256 set, only that exact file runs.
-    - test -z "$NOTMYFAULT_SHA256" || echo "$NOTMYFAULT_SHA256  /tmp/notmyfault.mjs" | sha256sum -c -
+    # Only the file published with that release runs. Empty means "no check", which the job refuses by default.
+    - test -n "$NOTMYFAULT_SHA256" || { echo "NOTMYFAULT_SHA256 is empty: set it to the checksum of the release in NOTMYFAULT_REF"; exit 1; }
+    - echo "$NOTMYFAULT_SHA256  /tmp/notmyfault.mjs" | sha256sum -c -
     - node /tmp/notmyfault.mjs
   artifacts:
     when: always

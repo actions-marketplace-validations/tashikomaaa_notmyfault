@@ -1,14 +1,21 @@
 // src/dashboard-action.ts
 import { mkdir, writeFile } from "node:fs/promises";
-import { join as join2, resolve } from "node:path";
+import { join as join2, relative, resolve } from "node:path";
 
 // src/history.ts
 var HISTORY_VERSION = 1;
 var FAIL = "f";
 var RETRY = "r";
+var MAX_FAILED_ON = 20;
+var MAX_EVIDENCE = 10;
+var MAX_ERRORS = 10;
+var MAX_OUTCOMES = 500;
+var MAX_REF_LENGTH = 40;
+var MAX_URL_LENGTH = 2048;
+var MAX_DURATIONS = 10;
 var DAY_MS = 24 * 60 * 60 * 1e3;
 function emptyHistory() {
-  return { version: HISTORY_VERSION, updatedAt: (/* @__PURE__ */ new Date(0)).toISOString(), runs: 0, tests: {} };
+  return { version: HISTORY_VERSION, updatedAt: (/* @__PURE__ */ new Date(0)).toISOString(), runs: 0, tests: /* @__PURE__ */ Object.create(null) };
 }
 function parseHistory(json) {
   if (!json) return emptyHistory();
@@ -17,16 +24,98 @@ function parseHistory(json) {
     if (data.version !== HISTORY_VERSION || typeof data.tests !== "object" || data.tests === null) {
       return emptyHistory();
     }
+    const tests = /* @__PURE__ */ Object.create(null);
+    for (const [id, test] of Object.entries(data.tests)) {
+      const parsed = parseTest(test);
+      if (parsed) tests[id] = parsed;
+    }
     return {
       version: HISTORY_VERSION,
-      updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : emptyHistory().updatedAt,
-      runs: typeof data.runs === "number" ? data.runs : 0,
-      ...Array.isArray(data.runDurations) ? { runDurations: data.runDurations.filter((ms) => typeof ms === "number") } : {},
-      tests: data.tests
+      updatedAt: isoDate(data.updatedAt) ?? emptyHistory().updatedAt,
+      runs: count(data.runs),
+      ...Array.isArray(data.runDurations) ? { runDurations: data.runDurations.filter(isDuration).slice(-MAX_DURATIONS) } : {},
+      tests
     };
   } catch {
     return emptyHistory();
   }
+}
+function parseTest(value) {
+  if (typeof value !== "object" || value === null) return void 0;
+  const raw = value;
+  const outcomes = typeof raw.outcomes === "string" ? raw.outcomes.replace(/[^pfr]/g, "").slice(-MAX_OUTCOMES) : "";
+  const test = { outcomes, lastSeen: day(raw.lastSeen) ?? (/* @__PURE__ */ new Date(0)).toISOString().slice(0, 10) };
+  const failedOn = list(raw.failedOn, (sha) => hex(sha)).slice(-MAX_FAILED_ON);
+  if (failedOn.length > 0) test.failedOn = failedOn;
+  const evidence = list(raw.evidence, parseEvidence).slice(-MAX_EVIDENCE);
+  if (evidence.length > 0) test.evidence = evidence;
+  const errors = list(raw.errors, (value2) => hex(value2)).slice(-MAX_ERRORS);
+  if (errors.length > 0) test.errors = errors;
+  const lastFailure2 = day(raw.lastFailure);
+  if (lastFailure2) test.lastFailure = lastFailure2;
+  const durations = list(raw.durations, (ms) => isDuration(ms) ? ms : void 0).slice(-MAX_DURATIONS);
+  if (durations.length > 0) test.durations = durations;
+  if (typeof raw.lastRun === "number" && Number.isInteger(raw.lastRun) && raw.lastRun >= 0) test.lastRun = raw.lastRun;
+  const failingSince = parseFailingSince(raw.failingSince);
+  if (failingSince) test.failingSince = failingSince;
+  return test;
+}
+function parseEvidence(value) {
+  if (typeof value !== "object" || value === null) return void 0;
+  const raw = value;
+  const at = isoDate(raw.at);
+  const sha = hex(raw.sha);
+  if (!at || !sha || raw.kind !== "retry" && raw.kind !== "rerun") return void 0;
+  return { at, sha, kind: raw.kind };
+}
+function parseFailingSince(value) {
+  if (typeof value !== "object" || value === null) return void 0;
+  const raw = value;
+  const at = isoDate(raw.at);
+  const sha = hex(raw.sha);
+  if (!at || !sha) return void 0;
+  const since2 = { sha, at };
+  const url = webUrl(raw.url);
+  if (url) since2.url = url;
+  const change = raw.change;
+  const changeUrl = change ? webUrl(change.url) : void 0;
+  if (change && changeUrl && typeof change.ref === "string" && change.ref.length <= MAX_REF_LENGTH) {
+    since2.change = { ref: change.ref, url: changeUrl };
+  }
+  return since2;
+}
+function list(value, parse) {
+  if (!Array.isArray(value)) return [];
+  const parsed = [];
+  for (const item of value.slice(-MAX_FAILED_ON * 2)) {
+    const kept = parse(item);
+    if (kept !== void 0) parsed.push(kept);
+  }
+  return parsed;
+}
+function hex(value) {
+  return typeof value === "string" && /^[0-9a-f]{1,64}$/.test(value) ? value : void 0;
+}
+function day(value) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : void 0;
+}
+function isoDate(value) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}T[\d:.]+Z?$/.test(value) ? value : void 0;
+}
+function webUrl(value) {
+  if (typeof value !== "string" || value.length > MAX_URL_LENGTH) return void 0;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function isDuration(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+function count(value) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0;
 }
 
 // src/analyze.ts
@@ -39,13 +128,13 @@ function computeStats(history, now, evidenceTtlDays) {
   const outcomes = history?.outcomes ?? "";
   const cutoff = now.getTime() - evidenceTtlDays * DAY_MS2;
   const evidence = (history?.evidence ?? []).filter((e) => Date.parse(e.at) >= cutoff);
-  const retries = count(outcomes, RETRY);
+  const retries = count2(outcomes, RETRY);
   const trailing = trailingFailures(outcomes);
   const before = outcomes.slice(0, outcomes.length - trailing);
-  const failureRate = before.length === 0 ? 0 : count(before, FAIL) / before.length;
+  const failureRate = before.length === 0 ? 0 : count2(before, FAIL) / before.length;
   const stats = {
     runs: outcomes.length,
-    failures: count(outcomes, FAIL),
+    failures: count2(outcomes, FAIL),
     retries,
     trailingFailures: trailing,
     failureRate,
@@ -78,8 +167,8 @@ function rankFlakyTests(history, now, evidenceTtlDays, limit) {
   return ranked.sort((a, b) => (b.cost ?? -1) - (a.cost ?? -1) || score2(b) - score2(a) || a.id.localeCompare(b.id)).slice(0, limit);
 }
 function estimateCost(test, history) {
-  const failures = count(test.outcomes, FAIL);
-  const retries = count(test.outcomes, RETRY);
+  const failures = count2(test.outcomes, FAIL);
+  const retries = count2(test.outcomes, RETRY);
   const suite = history.runDurations?.length ? median(history.runDurations) : void 0;
   const own = test.durations?.length ? median(test.durations) : void 0;
   if (failures > 0 && suite === void 0 || retries > 0 && own === void 0) return void 0;
@@ -107,13 +196,16 @@ function trailingFailures(outcomes) {
   for (let i = outcomes.length - 1; i >= 0 && outcomes[i] === FAIL; i--) streak++;
   return streak;
 }
-function count(value, char) {
+function count2(value, char) {
   let n = 0;
   for (const c of value) if (c === char) n++;
   return n;
 }
 
 // src/report.ts
+function linkable(url) {
+  return url !== void 0 && /^https?:\/\/[^\s<>"'`()\\]+$/i.test(url) ? url : void 0;
+}
 function duration(ms) {
   if (ms < 1e3) return `${ms} ms`;
   if (ms < 6e4) return `${(ms / 1e3).toFixed(1)} s`;
@@ -165,7 +257,7 @@ function renderRow(id, test, stats, cost, leading = []) {
   const retried = outcomes.filter((outcome) => outcome === RETRY).length;
   const summary = `${outcomes.length - failed - retried} passed, ${retried} passed after a retry, ${failed} failed`;
   const timeline = outcomes.map((outcome) => `<i class="${outcome === FAIL ? "f" : outcome === RETRY ? "r" : "p"}"></i>`).join("");
-  const proof = stats.latestEvidence ? `${stats.latestEvidence.kind === "rerun" ? "Passed on re-run" : "Passed after a retry"}, ${stats.latestEvidence.at.slice(0, 10)}` : "";
+  const proof = stats.latestEvidence ? `${stats.latestEvidence.kind === "rerun" ? "Passed on re-run" : "Passed after a retry"}, ${escapeHtml(stats.latestEvidence.at.slice(0, 10))}` : "";
   const durations = test.durations ?? [];
   return [
     `<tr>`,
@@ -175,7 +267,7 @@ function renderRow(id, test, stats, cost, leading = []) {
     `<td><span class="timeline" role="img" aria-label="${summary}">${timeline}</span></td>`,
     `<td class="number">${failed}</td>`,
     `<td class="number">${retried}</td>`,
-    `<td>${lastFailure(test) ?? ""}</td>`,
+    `<td>${escapeHtml(lastFailure(test) ?? "")}</td>`,
     `<td>${proof}</td>`,
     `<td class="number">${durations.length > 0 ? duration(median2(durations)) : ""}</td>`,
     `<td class="number">${cost === void 0 ? "" : duration(cost)}</td>`,
@@ -183,10 +275,13 @@ function renderRow(id, test, stats, cost, leading = []) {
   ].join("");
 }
 function since(failing) {
-  const sha = `<code>${escapeHtml(failing.sha.slice(0, 7))}</code>`;
-  const commit = failing.url ? `<a href="${escapeAttribute(failing.url)}">${sha}</a>` : sha;
-  const change = failing.change ? ` from <a href="${escapeAttribute(failing.change.url)}">${escapeHtml(failing.change.ref)}</a>` : "";
-  return `<span class="since">since ${commit}${change}, ${failing.at.slice(0, 10)}</span>`;
+  const commit = link(failing.url, `<code>${escapeHtml(failing.sha.slice(0, 7))}</code>`);
+  const change = failing.change ? ` from ${link(failing.change.url, escapeHtml(failing.change.ref))}` : "";
+  return `<span class="since">since ${commit}${change}, ${escapeHtml(failing.at.slice(0, 10))}</span>`;
+}
+function link(url, text) {
+  const safe = linkable(url);
+  return safe ? `<a href="${escapeAttribute(safe)}">${text}</a>` : text;
 }
 function verdict(stats) {
   switch (verdictFor(stats)) {
@@ -206,7 +301,7 @@ function score(stats) {
 }
 function lastFailure(test) {
   const days = [test.lastFailure, ...(test.evidence ?? []).map((evidence) => evidence.at.slice(0, 10))];
-  return days.filter((day) => day !== void 0).sort().at(-1);
+  return days.filter((day2) => day2 !== void 0).sort().at(-1);
 }
 function median2(values) {
   const sorted = [...values].sort((a, b) => a - b);
@@ -214,13 +309,13 @@ function median2(values) {
   return sorted.length % 2 === 1 ? sorted[middle] : Math.round((sorted[middle - 1] + sorted[middle]) / 2);
 }
 function formatTime(iso) {
-  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+  return escapeHtml(`${iso.slice(0, 10)} ${iso.slice(11, 16)}`) + " UTC";
 }
 function plural(n, word) {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 function escapeAttribute(value) {
-  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 function page(title, body, footer = "rewritten on every update of the history") {
   return `<!doctype html>
@@ -280,7 +375,7 @@ function renderDashboard(repositories, context) {
   const rows = dashboardRows(repositories, context);
   const total = rows.reduce((sum, row) => sum + (row.cost ?? 0), 0);
   const flaky = repositories.reduce(
-    (sum, repository) => sum + repository.suites.reduce((count2, suite) => count2 + rankFlakyTests(suite.history, context.now, context.evidenceTtlDays, Infinity).length, 0),
+    (sum, repository) => sum + repository.suites.reduce((count3, suite) => count3 + rankFlakyTests(suite.history, context.now, context.evidenceTtlDays, Infinity).length, 0),
     0
   );
   const costing = total > 0 ? ` Their failures and retries cost about ${duration(total)} of test time.` : "";
@@ -314,6 +409,10 @@ function renderDashboard(repositories, context) {
   }
   return page(context.title, body, "rewritten on every run of the dashboard");
 }
+function mdLink(url, text) {
+  const safe = linkable(url);
+  return safe ? `[${text}](${safe})` : text;
+}
 function renderDashboardSummary(repositories, context, limit = 10) {
   const rows = dashboardRows(repositories, context);
   const lines = [`### ${escapeHtml(context.title)}`, "", `${plural(rows.length, "unreliable test")} in ${countRepositories(repositories.length)}.`, ""];
@@ -324,20 +423,20 @@ function renderDashboardSummary(repositories, context, limit = 10) {
     lines.push("| Repository | Test | Failed runs | Passed on retry | Estimated cost |", "|---|---|--:|--:|--:|");
     for (const row of rows.slice(0, limit)) {
       lines.push(
-        `| [${escapeHtml(row.repository.name)}](${row.repository.url}) | ${code(row.id)} | ${row.stats.failures} / ${row.stats.runs} | ${row.stats.retries} | ${row.cost === void 0 ? "" : duration(row.cost)} |`
+        `| ${mdLink(row.repository.url, escapeHtml(row.repository.name))} | ${code(row.id)} | ${row.stats.failures} / ${row.stats.runs} | ${row.stats.retries} | ${row.cost === void 0 ? "" : duration(row.cost)} |`
       );
     }
   }
   return lines.join("\n");
 }
 function repositoryRow(repository, rows) {
-  const link = `<a href="${escapeAttribute(repository.url)}">${escapeHtml(repository.name)}</a>`;
-  if (repository.error) return `<tr><td>${link}</td><td colspan="4">${escapeHtml(repository.error)}</td></tr>`;
+  const link2 = `<a href="${escapeAttribute(repository.url)}">${escapeHtml(repository.name)}</a>`;
+  if (repository.error) return `<tr><td>${link2}</td><td colspan="4">${escapeHtml(repository.error)}</td></tr>`;
   const own = rows.filter((row) => row.repository === repository);
   const cost = own.reduce((sum, row) => sum + (row.cost ?? 0), 0);
   const runs = Math.max(0, ...repository.suites.map((suite) => suite.history.runs));
   return [
-    `<tr><td>${link}</td>`,
+    `<tr><td>${link2}</td>`,
     `<td>${repository.suites.map((suite) => `<code>${escapeHtml(suite.key)}</code>`).join(" ")}</td>`,
     `<td class="number">${runs}</td>`,
     `<td class="number">${own.length}</td>`,
@@ -368,9 +467,16 @@ var RETRYABLE_PUSH = /stale info|fetch first|non-fast-forward|cannot lock ref|fa
 var GitStore = class {
   constructor(options) {
     this.options = options;
+    const { url, user, password } = splitCredentials(options.remoteUrl);
+    this.remoteUrl = url;
+    this.urlToken = password;
+    if (password && !options.token) this.options = { ...options, token: password, username: user || options.username };
   }
   options;
   dir;
+  /** The remote without its user name and password, which git would show in the process list. */
+  remoteUrl;
+  urlToken;
   async read(path) {
     const head = await this.fetchHead();
     return head ? this.readFile(head, path) : void 0;
@@ -408,7 +514,7 @@ var GitStore = class {
           "--porcelain",
           ...(this.options.pushOptions ?? []).map((option) => `--push-option=${option}`),
           `--force-with-lease=refs/heads/${this.options.branch}:${head ?? ""}`,
-          this.options.remoteUrl,
+          this.remoteUrl,
           `${commit}:refs/heads/${this.options.branch}`
         ]);
         if (commit === head || !/^=\t/m.test(output)) return true;
@@ -433,7 +539,7 @@ var GitStore = class {
         "--quiet",
         "--depth=1",
         "--no-tags",
-        this.options.remoteUrl,
+        this.remoteUrl,
         `refs/heads/${this.options.branch}`
       ]);
     } catch (error) {
@@ -485,7 +591,8 @@ var GitStore = class {
       GIT_CONFIG_NOSYSTEM: "1",
       GIT_CONFIG_GLOBAL: devNull
     };
-    const { token, remoteUrl } = this.options;
+    const token = this.options.token ?? this.urlToken;
+    const remoteUrl = this.remoteUrl;
     if (token && /^https?:\/\//.test(remoteUrl)) {
       const origin = new URL(remoteUrl).origin;
       const credentials = Buffer.from(`${this.options.username ?? "x-access-token"}:${token}`).toString("base64");
@@ -498,6 +605,20 @@ var GitStore = class {
     return env;
   }
 };
+function splitCredentials(remoteUrl) {
+  if (!/^https?:\/\//.test(remoteUrl)) return { url: remoteUrl };
+  try {
+    const url = new URL(remoteUrl);
+    if (!url.username && !url.password) return { url: remoteUrl };
+    const user = decodeURIComponent(url.username);
+    const password = decodeURIComponent(url.password);
+    url.username = "";
+    url.password = "";
+    return { url: url.href, ...user ? { user } : {}, ...password ? { password } : { password: user } };
+  } catch {
+    return { url: remoteUrl };
+  }
+}
 function run(args, env, input) {
   return new Promise((resolve2, reject) => {
     const child = spawn("git", args, {
@@ -590,8 +711,8 @@ var ActionIO = class {
   /** A workflow annotation on a file, shown in the run summary and next to the code of pull requests. */
   annotation(level, message, properties) {
     const escapeProperty = (value) => value.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A").replace(/:/g, "%3A").replace(/,/g, "%2C");
-    const list = Object.entries(properties).filter(([, value]) => value !== void 0).map(([key, value]) => `${key}=${escapeProperty(String(value))}`).join(",");
-    this.command(`${level} ${list}`, message);
+    const list2 = Object.entries(properties).filter(([, value]) => value !== void 0).map(([key, value]) => `${key}=${escapeProperty(String(value))}`).join(",");
+    this.command(`${level} ${list2}`, message);
   }
   group(title) {
     this.command("group", title);
@@ -612,13 +733,17 @@ var ActionIO = class {
 var EVIDENCE_TTL_DAYS = 30;
 async function runDashboard(env = process.env, io = new ActionIO(env), now = /* @__PURE__ */ new Date()) {
   try {
-    const list = io.input("repositories").split(/[\n,]/).map((entry) => entry.trim()).filter(Boolean);
-    if (list.length === 0) throw new Error(`${io.describeInput("repositories")} is required: one owner/repo, or git URL, per line.`);
+    const list2 = io.input("repositories").split(/[\n,]/).map((entry) => entry.trim()).filter(Boolean);
+    if (list2.length === 0) throw new Error(`${io.describeInput("repositories")} is required: one owner/repo, or git URL, per line.`);
     const token = io.input("token");
     if (token) io.mask(token);
     const branch = io.input("history-branch", "notmyfault-history");
     const serverUrl = (env.GITHUB_SERVER_URL ?? "https://github.com").replace(/\/+$/, "");
-    const output = resolve(env.GITHUB_WORKSPACE ?? process.cwd(), io.input("output", "notmyfault-dashboard"));
+    const workspace = env.GITHUB_WORKSPACE ?? process.cwd();
+    const output = resolve(workspace, io.input("output", "notmyfault-dashboard"));
+    if (relative(workspace, output).startsWith("..")) {
+      throw new Error(`${io.describeInput("output")} must stay in the workspace, got "${io.input("output")}"`);
+    }
     const context = {
       title: io.input("title", "Unreliable tests"),
       limit: io.integerInput("limit", 100, 1),
@@ -627,12 +752,16 @@ async function runDashboard(env = process.env, io = new ActionIO(env), now = /* 
       evidenceTtlDays: EVIDENCE_TTL_DAYS
     };
     const repositories = [];
-    for (const entry of list) {
-      const remoteUrl = /^https?:\/\/|^file:\/\//.test(entry) ? entry : `${serverUrl}/${entry}.git`;
+    for (const entry of list2) {
+      const isUrl = /^https?:\/\/|^file:\/\//.test(entry);
+      const remoteUrl = isUrl ? entry : `${serverUrl}/${entry}.git`;
+      const { url: withoutCredentials, password } = splitCredentials(remoteUrl);
+      if (password) io.mask(password);
+      const shown = isUrl ? withoutCredentials : entry;
       const repository = {
         // A URL keeps its host, to tell apart repositories of the same name on different servers.
-        name: entry.replace(/^\w+:\/\//, "").replace(/\.git$/, ""),
-        url: remoteUrl.replace(/\.git$/, ""),
+        name: shown.replace(/^\w+:\/\//, "").replace(/\.git$/, ""),
+        url: withoutCredentials.replace(/\.git$/, ""),
         suites: []
       };
       const sameServer = token !== "" && remoteUrl.startsWith(`${serverUrl}/`);

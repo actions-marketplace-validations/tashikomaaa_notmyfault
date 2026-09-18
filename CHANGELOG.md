@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Security
+
+A pass over everything notmyfault reads, prints and publishes ([#31](https://github.com/tashikomaaa/notmyfault/issues/31)). See [Permissions and security](docs/security.md).
+
+- **Tokens.** Outside GitHub Actions, the token is replaced by `***` in the log, the job summary, `notmyfault.env` and the GitLab Code Quality report, where nothing was masking it before. It is also replaced in test names and identities, not only in failure messages. A repository URL carrying a user name and a password is split before use, so the dashboard and the log never publish the password, and git only receives the credential for the origin of the remote.
+- **The API clients** follow the pages of a listing only on the host and path they were given, and no longer follow a redirect off the server, which could have sent the token to another host.
+- **Reports, CODEOWNERS, quarantine files and the history** are read as written by someone else: control characters and terminal escapes are stripped from names and messages, names and lengths are capped, XML is parsed with a bounded depth, glob patterns are matched without regular expressions, and every field of the history is checked against the shape notmyfault writes. A test named `__proto__` is a test like any other.
+- **Rendered links** are only links when they are `http` or `https` addresses: a crafted history cannot put a `javascript:` address in a comment, an issue or a history page.
+- **The GitLab template** pins the release it downloads and always checks its checksum, and the workflows that push to the wiki and to the GitLab mirror scope their credential to the host they push to.
+
 ## [1.11.0] - 2026-09-18
 
 ### Added

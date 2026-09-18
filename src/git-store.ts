@@ -41,8 +41,16 @@ const RETRYABLE_PUSH = /stale info|fetch first|non-fast-forward|cannot lock ref|
  */
 export class GitStore {
   private dir: string | undefined;
+  /** The remote without its user name and password, which git would show in the process list. */
+  private readonly remoteUrl: string;
+  private readonly urlToken: string | undefined;
 
-  constructor(private readonly options: GitStoreOptions) {}
+  constructor(private readonly options: GitStoreOptions) {
+    const { url, user, password } = splitCredentials(options.remoteUrl);
+    this.remoteUrl = url;
+    this.urlToken = password;
+    if (password && !options.token) this.options = { ...options, token: password, username: user || options.username };
+  }
 
   async read(path: string): Promise<string | undefined> {
     const head = await this.fetchHead();
@@ -93,7 +101,7 @@ export class GitStore {
           "--porcelain",
           ...(this.options.pushOptions ?? []).map((option) => `--push-option=${option}`),
           `--force-with-lease=refs/heads/${this.options.branch}:${head ?? ""}`,
-          this.options.remoteUrl,
+          this.remoteUrl,
           `${commit}:refs/heads/${this.options.branch}`,
         ]);
         // Another writer may have pushed the exact same commit (same content,
@@ -122,7 +130,7 @@ export class GitStore {
         "--quiet",
         "--depth=1",
         "--no-tags",
-        this.options.remoteUrl,
+        this.remoteUrl,
         `refs/heads/${this.options.branch}`,
       ]);
     } catch (error) {
@@ -182,7 +190,8 @@ export class GitStore {
       GIT_CONFIG_NOSYSTEM: "1",
       GIT_CONFIG_GLOBAL: devNull,
     };
-    const { token, remoteUrl } = this.options;
+    const token = this.options.token ?? this.urlToken;
+    const remoteUrl = this.remoteUrl;
     if (token && /^https?:\/\//.test(remoteUrl)) {
       const origin = new URL(remoteUrl).origin;
       const credentials = Buffer.from(`${this.options.username ?? "x-access-token"}:${token}`).toString("base64");
@@ -193,6 +202,25 @@ export class GitStore {
       });
     }
     return env;
+  }
+}
+
+/**
+ * A git URL without its user name and password, which would otherwise be visible in the process list of the runner.
+ * The password is returned so that it can be sent through the environment instead.
+ */
+export function splitCredentials(remoteUrl: string): { url: string; user?: string; password?: string } {
+  if (!/^https?:\/\//.test(remoteUrl)) return { url: remoteUrl };
+  try {
+    const url = new URL(remoteUrl);
+    if (!url.username && !url.password) return { url: remoteUrl };
+    const user = decodeURIComponent(url.username);
+    const password = decodeURIComponent(url.password);
+    url.username = "";
+    url.password = "";
+    return { url: url.href, ...(user ? { user } : {}), ...(password ? { password } : { password: user }) };
+  } catch {
+    return { url: remoteUrl };
   }
 }
 

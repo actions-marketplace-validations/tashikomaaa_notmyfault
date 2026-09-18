@@ -161,7 +161,8 @@ describe("run on Forgejo Actions", () => {
     await simulate({ totals: "fail" }, { sha: "c".repeat(40) });
     const pr = await simulate({ totals: "fail" }, { pullRequest: true });
     expect(pr.logs).toContain("Pull request comment created.");
-    expect(api.comments[0]!.body).toContain("**Already failing on `main`.** The latest run there failed too, on [`ccccccc`]");
+    // The rig serves the repository from a file:// path: a link only points at a commit when it is a web address.
+    expect(api.comments[0]!.body).toContain("**Already failing on `main`.** The latest run there failed too, on `ccccccc`.");
     expect(api.requests.every((request) => request.endsWith(" token"))).toBe(true);
     expect(api.requests).toContain(`GET /api/v1/repos/acme/shop/commits/${breaking}/pull token`);
   });

@@ -65,8 +65,15 @@ notmyfault:
 The [template](../templates/notmyfault.gitlab-ci.yml) defines a hidden job, `.notmyfault`, which:
 
 - runs in the `.post` stage and `when: always`, so it runs after failed tests too;
-- downloads `dist/notmyfault.mjs` from the tag in `NOTMYFAULT_REF`, `v1` by default, which follows every 1.x release;
+- downloads `dist/notmyfault.mjs` from the release it was published with, `NOTMYFAULT_REF`, and **runs it only if its checksum matches** `NOTMYFAULT_SHA256`, which the template carries. Changing one without the other fails the job, and a ref that is not a tag or a commit is refused;
 - keeps the summary, the Code Quality report and the outputs as artifacts, and links the summary from merge requests as *notmyfault report*.
+
+**Pin the include too.** `v1` follows every 1.x release, so the template itself changes under you, and a `remote:` include has no checksum. For a pipeline that cannot change on its own, include the template from a tag or a commit, or use the [component](#cicd-catalog-component), which GitLab resolves to an immutable commit:
+
+```yaml
+include:
+  - remote: https://raw.githubusercontent.com/tashikomaaa/notmyfault/v1.11.0/templates/notmyfault.gitlab-ci.yml
+```
 
 Set `NOTMYFAULT_KEY` to name the history of the suite. It defaults to the name of the job running notmyfault, `notmyfault` here, which would not tell several suites apart.
 
@@ -185,9 +192,9 @@ https://img.shields.io/endpoint?url=https://<namespace>.gitlab.io/<project>/badg
 
 See the pages of the [GitLab demo](https://pages.aldwin.fr/notmyfault/notmyfault-demo/).
 
-## Pin a release
+## Pin another release
 
-`v1` follows every 1.x release. To run an exact file, pin the release and its checksum, published in the notes of each [GitHub release](https://github.com/tashikomaaa/notmyfault/releases) and in its `notmyfault.mjs.sha256` asset:
+The template already pins the release it comes from. To move to another one, change **both** variables, taking the checksum from the notes of that [GitHub release](https://github.com/tashikomaaa/notmyfault/releases) or from its `notmyfault.mjs.sha256` asset:
 
 ```yaml
 notmyfault:
@@ -199,7 +206,7 @@ notmyfault:
     NOTMYFAULT_JUNIT: reports/junit.xml
 ```
 
-The job then fails before running anything if the downloaded file is different. The build provenance of the file can be checked too, see [Supply chain](security.md#supply-chain). Include the template from the same tag, so that it cannot change either.
+The job fails before running anything if the file does not match. Its build provenance can be checked too, see [Supply chain](security.md#supply-chain). Include the template from the same tag, so that it cannot change either.
 
 ## Without the template
 
@@ -240,8 +247,8 @@ Every [input](configuration.md#inputs) of the GitHub Action is a variable: its n
 | `NOTMYFAULT_TOKEN` | `CI_JOB_TOKEN` | Access token used to push the history, comment and manage issues |
 | `NOTMYFAULT_KEY` | the job name | Name of the test suite in the history |
 | `NOTMYFAULT_TRACK_BRANCHES` | the default branch | Branches whose pipelines build the history |
-| `NOTMYFAULT_REF` | `v1` | Tag or commit of notmyfault downloaded by the template |
-| `NOTMYFAULT_SHA256` | none | SHA-256 of `notmyfault.mjs` at `NOTMYFAULT_REF`: the template fails on any other file |
+| `NOTMYFAULT_REF` | the release of the template | Tag or commit of notmyfault downloaded by the template. Letters, digits, `.`, `-` and `_` only |
+| `NOTMYFAULT_SHA256` | the checksum of that release | SHA-256 of `notmyfault.mjs` at `NOTMYFAULT_REF`. The job refuses to run an empty or mismatched checksum |
 | `NOTMYFAULT_SUMMARY_FILE` | `notmyfault-summary.md` | Where the summary is written |
 | `NOTMYFAULT_CODE_QUALITY_FILE` | `gl-code-quality-report.json` | Where the Code Quality report is written |
 | `NOTMYFAULT_OUTPUT_FILE` | `notmyfault.env` | Where the outputs are written, as a dotenv file |

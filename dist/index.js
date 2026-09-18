@@ -40,8 +40,8 @@ var ActionIO = class {
   describeInput(name) {
     return `Input "${name}"`;
   }
-  describeInputs(names) {
-    return `Inputs ${names.map((name) => `"${name}"`).join(" and ")}`;
+  describeInputs(names2) {
+    return `Inputs ${names2.map((name) => `"${name}"`).join(" and ")}`;
   }
   setOutput(name, value) {
     const file = this.env.GITHUB_OUTPUT;
@@ -68,8 +68,8 @@ var ActionIO = class {
   /** A workflow annotation on a file, shown in the run summary and next to the code of pull requests. */
   annotation(level, message, properties) {
     const escapeProperty = (value) => value.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A").replace(/:/g, "%3A").replace(/,/g, "%2C");
-    const list = Object.entries(properties).filter(([, value]) => value !== void 0).map(([key, value]) => `${key}=${escapeProperty(String(value))}`).join(",");
-    this.command(`${level} ${list}`, message);
+    const list2 = Object.entries(properties).filter(([, value]) => value !== void 0).map(([key, value]) => `${key}=${escapeProperty(String(value))}`).join(",");
+    this.command(`${level} ${list2}`, message);
   }
   group(title) {
     this.command("group", title);
@@ -218,10 +218,20 @@ var GitHubClient = class {
     return response;
   }
 };
-function nextPage(link, apiUrl) {
-  const match = link?.match(/<([^>]+)>;\s*rel="next"/);
-  if (!match?.[1]) return void 0;
-  return match[1].startsWith(apiUrl) ? match[1].slice(apiUrl.length) : void 0;
+function nextPage(link2, apiUrl) {
+  const match = link2?.match(/<([^>]+)>;\s*rel="next"/);
+  return match?.[1] ? samePage(match[1], apiUrl) : void 0;
+}
+function samePage(url, apiUrl) {
+  try {
+    const next = new URL(url);
+    const base = new URL(apiUrl);
+    if (next.origin !== base.origin || !next.pathname.startsWith(base.pathname)) return void 0;
+    const prefix2 = base.pathname === "/" ? base.origin.length : base.origin.length + base.pathname.length;
+    return next.href.slice(prefix2);
+  } catch {
+    return void 0;
+  }
 }
 
 // src/github/context.ts
@@ -369,8 +379,8 @@ var ForgejoClient = class {
     while (next) {
       const response = await this.request("GET", next);
       items.push(...await response.json());
-      const link = response.headers.get("link")?.match(/<([^>]+)>;\s*rel="next"/)?.[1];
-      next = link?.startsWith(this.apiUrl) ? link.slice(this.apiUrl.length) : void 0;
+      const link2 = response.headers.get("link")?.match(/<([^>]+)>;\s*rel="next"/)?.[1];
+      next = link2 ? samePage(link2, this.apiUrl) : void 0;
     }
     return items;
   }
@@ -421,11 +431,15 @@ var RETRY = "r";
 var MAX_FAILED_ON = 20;
 var MAX_EVIDENCE = 10;
 var MAX_ERRORS = 10;
+var MAX_OUTCOMES = 500;
+var MAX_REF_LENGTH = 40;
+var MAX_URL_LENGTH = 2048;
+var MAX_TESTS = 2e4;
 var MAX_DURATIONS = 10;
 var MAX_FINGERPRINTED_LENGTH = 200;
 var DAY_MS = 24 * 60 * 60 * 1e3;
 function emptyHistory() {
-  return { version: HISTORY_VERSION, updatedAt: (/* @__PURE__ */ new Date(0)).toISOString(), runs: 0, tests: {} };
+  return { version: HISTORY_VERSION, updatedAt: (/* @__PURE__ */ new Date(0)).toISOString(), runs: 0, tests: /* @__PURE__ */ Object.create(null) };
 }
 function errorFingerprint(message) {
   const normalized = message.toLowerCase().replace(/\b(?=[0-9a-f-]*\d)[0-9a-f]{7,}(?:-[0-9a-f]{4,})*\b/g, "#").replace(/\d+/g, "#").replace(/\s+/g, " ").trim().slice(0, MAX_FINGERPRINTED_LENGTH);
@@ -438,16 +452,98 @@ function parseHistory(json) {
     if (data.version !== HISTORY_VERSION || typeof data.tests !== "object" || data.tests === null) {
       return emptyHistory();
     }
+    const tests = /* @__PURE__ */ Object.create(null);
+    for (const [id, test] of Object.entries(data.tests)) {
+      const parsed = parseTest(test);
+      if (parsed) tests[id] = parsed;
+    }
     return {
       version: HISTORY_VERSION,
-      updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : emptyHistory().updatedAt,
-      runs: typeof data.runs === "number" ? data.runs : 0,
-      ...Array.isArray(data.runDurations) ? { runDurations: data.runDurations.filter((ms) => typeof ms === "number") } : {},
-      tests: data.tests
+      updatedAt: isoDate(data.updatedAt) ?? emptyHistory().updatedAt,
+      runs: count(data.runs),
+      ...Array.isArray(data.runDurations) ? { runDurations: data.runDurations.filter(isDuration).slice(-MAX_DURATIONS) } : {},
+      tests
     };
   } catch {
     return emptyHistory();
   }
+}
+function parseTest(value) {
+  if (typeof value !== "object" || value === null) return void 0;
+  const raw = value;
+  const outcomes = typeof raw.outcomes === "string" ? raw.outcomes.replace(/[^pfr]/g, "").slice(-MAX_OUTCOMES) : "";
+  const test = { outcomes, lastSeen: day(raw.lastSeen) ?? (/* @__PURE__ */ new Date(0)).toISOString().slice(0, 10) };
+  const failedOn = list(raw.failedOn, (sha) => hex(sha)).slice(-MAX_FAILED_ON);
+  if (failedOn.length > 0) test.failedOn = failedOn;
+  const evidence = list(raw.evidence, parseEvidence).slice(-MAX_EVIDENCE);
+  if (evidence.length > 0) test.evidence = evidence;
+  const errors = list(raw.errors, (value2) => hex(value2)).slice(-MAX_ERRORS);
+  if (errors.length > 0) test.errors = errors;
+  const lastFailure2 = day(raw.lastFailure);
+  if (lastFailure2) test.lastFailure = lastFailure2;
+  const durations = list(raw.durations, (ms) => isDuration(ms) ? ms : void 0).slice(-MAX_DURATIONS);
+  if (durations.length > 0) test.durations = durations;
+  if (typeof raw.lastRun === "number" && Number.isInteger(raw.lastRun) && raw.lastRun >= 0) test.lastRun = raw.lastRun;
+  const failingSince = parseFailingSince(raw.failingSince);
+  if (failingSince) test.failingSince = failingSince;
+  return test;
+}
+function parseEvidence(value) {
+  if (typeof value !== "object" || value === null) return void 0;
+  const raw = value;
+  const at = isoDate(raw.at);
+  const sha = hex(raw.sha);
+  if (!at || !sha || raw.kind !== "retry" && raw.kind !== "rerun") return void 0;
+  return { at, sha, kind: raw.kind };
+}
+function parseFailingSince(value) {
+  if (typeof value !== "object" || value === null) return void 0;
+  const raw = value;
+  const at = isoDate(raw.at);
+  const sha = hex(raw.sha);
+  if (!at || !sha) return void 0;
+  const since2 = { sha, at };
+  const url = webUrl(raw.url);
+  if (url) since2.url = url;
+  const change = raw.change;
+  const changeUrl = change ? webUrl(change.url) : void 0;
+  if (change && changeUrl && typeof change.ref === "string" && change.ref.length <= MAX_REF_LENGTH) {
+    since2.change = { ref: change.ref, url: changeUrl };
+  }
+  return since2;
+}
+function list(value, parse) {
+  if (!Array.isArray(value)) return [];
+  const parsed = [];
+  for (const item of value.slice(-MAX_FAILED_ON * 2)) {
+    const kept = parse(item);
+    if (kept !== void 0) parsed.push(kept);
+  }
+  return parsed;
+}
+function hex(value) {
+  return typeof value === "string" && /^[0-9a-f]{1,64}$/.test(value) ? value : void 0;
+}
+function day(value) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : void 0;
+}
+function isoDate(value) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}T[\d:.]+Z?$/.test(value) ? value : void 0;
+}
+function webUrl(value) {
+  if (typeof value !== "string" || value.length > MAX_URL_LENGTH) return void 0;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function isDuration(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+function count(value) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0;
 }
 function serializeHistory(history) {
   return `${JSON.stringify(history, null, 1)}
@@ -539,7 +635,14 @@ function prune(history, options) {
       changed = true;
     }
   }
-  return changed;
+  return forget(history) || changed;
+}
+function forget(history) {
+  const ids = Object.keys(history.tests);
+  if (ids.length <= MAX_TESTS) return false;
+  const oldest = ids.sort((a, b) => history.tests[a].lastSeen.localeCompare(history.tests[b].lastSeen) || a.localeCompare(b)).slice(0, ids.length - MAX_TESTS);
+  for (const id of oldest) delete history.tests[id];
+  return true;
 }
 
 // src/analyze.ts
@@ -653,13 +756,13 @@ function computeStats(history, now, evidenceTtlDays) {
   const outcomes = history?.outcomes ?? "";
   const cutoff = now.getTime() - evidenceTtlDays * DAY_MS2;
   const evidence = (history?.evidence ?? []).filter((e) => Date.parse(e.at) >= cutoff);
-  const retries = count(outcomes, RETRY);
+  const retries = count2(outcomes, RETRY);
   const trailing = trailingFailures(outcomes);
   const before = outcomes.slice(0, outcomes.length - trailing);
-  const failureRate = before.length === 0 ? 0 : count(before, FAIL) / before.length;
+  const failureRate = before.length === 0 ? 0 : count2(before, FAIL) / before.length;
   const stats = {
     runs: outcomes.length,
-    failures: count(outcomes, FAIL),
+    failures: count2(outcomes, FAIL),
     retries,
     trailingFailures: trailing,
     failureRate,
@@ -702,8 +805,8 @@ function rankFlakyTests(history, now, evidenceTtlDays, limit) {
   return ranked.sort((a, b) => (b.cost ?? -1) - (a.cost ?? -1) || score2(b) - score2(a) || a.id.localeCompare(b.id)).slice(0, limit);
 }
 function estimateCost(test, history) {
-  const failures = count(test.outcomes, FAIL);
-  const retries = count(test.outcomes, RETRY);
+  const failures = count2(test.outcomes, FAIL);
+  const retries = count2(test.outcomes, RETRY);
   const suite = history.runDurations?.length ? median(history.runDurations) : void 0;
   const own = test.durations?.length ? median(test.durations) : void 0;
   if (failures > 0 && suite === void 0 || retries > 0 && own === void 0) return void 0;
@@ -723,7 +826,7 @@ function failureTrends(history, ids) {
     if (outcomes.length < TREND_MIN_RUNS) continue;
     const rates = [];
     for (let end = TREND_WINDOW; end <= outcomes.length; end++) {
-      rates.push(Math.round(count(outcomes.slice(end - TREND_WINDOW, end), FAIL) / TREND_WINDOW * 100));
+      rates.push(Math.round(count2(outcomes.slice(end - TREND_WINDOW, end), FAIL) / TREND_WINDOW * 100));
     }
     trends.push({ id, rates, firstRun: TREND_WINDOW });
   }
@@ -755,7 +858,7 @@ function trailingFailures(outcomes) {
   for (let i = outcomes.length - 1; i >= 0 && outcomes[i] === FAIL; i--) streak++;
   return streak;
 }
-function count(value, char) {
+function count2(value, char) {
   let n = 0;
   for (const c of value) if (c === char) n++;
   return n;
@@ -781,9 +884,16 @@ var RETRYABLE_PUSH = /stale info|fetch first|non-fast-forward|cannot lock ref|fa
 var GitStore = class {
   constructor(options) {
     this.options = options;
+    const { url, user, password } = splitCredentials(options.remoteUrl);
+    this.remoteUrl = url;
+    this.urlToken = password;
+    if (password && !options.token) this.options = { ...options, token: password, username: user || options.username };
   }
   options;
   dir;
+  /** The remote without its user name and password, which git would show in the process list. */
+  remoteUrl;
+  urlToken;
   async read(path) {
     const head = await this.fetchHead();
     return head ? this.readFile(head, path) : void 0;
@@ -821,7 +931,7 @@ var GitStore = class {
           "--porcelain",
           ...(this.options.pushOptions ?? []).map((option) => `--push-option=${option}`),
           `--force-with-lease=refs/heads/${this.options.branch}:${head ?? ""}`,
-          this.options.remoteUrl,
+          this.remoteUrl,
           `${commit}:refs/heads/${this.options.branch}`
         ]);
         if (commit === head || !/^=\t/m.test(output)) return true;
@@ -846,7 +956,7 @@ var GitStore = class {
         "--quiet",
         "--depth=1",
         "--no-tags",
-        this.options.remoteUrl,
+        this.remoteUrl,
         `refs/heads/${this.options.branch}`
       ]);
     } catch (error) {
@@ -898,7 +1008,8 @@ var GitStore = class {
       GIT_CONFIG_NOSYSTEM: "1",
       GIT_CONFIG_GLOBAL: devNull
     };
-    const { token, remoteUrl } = this.options;
+    const token = this.options.token ?? this.urlToken;
+    const remoteUrl = this.remoteUrl;
     if (token && /^https?:\/\//.test(remoteUrl)) {
       const origin = new URL(remoteUrl).origin;
       const credentials = Buffer.from(`${this.options.username ?? "x-access-token"}:${token}`).toString("base64");
@@ -911,6 +1022,20 @@ var GitStore = class {
     return env;
   }
 };
+function splitCredentials(remoteUrl) {
+  if (!/^https?:\/\//.test(remoteUrl)) return { url: remoteUrl };
+  try {
+    const url = new URL(remoteUrl);
+    if (!url.username && !url.password) return { url: remoteUrl };
+    const user = decodeURIComponent(url.username);
+    const password = decodeURIComponent(url.password);
+    url.username = "";
+    url.password = "";
+    return { url: url.href, ...user ? { user } : {}, ...password ? { password } : { password: user } };
+  } catch {
+    return { url: remoteUrl };
+  }
+}
 function run(args, env, input) {
   return new Promise((resolve2, reject) => {
     const child = spawn("git", args, {
@@ -1130,20 +1255,20 @@ function renderSuite(analysis, context) {
   return lines;
 }
 function renderDeleted(deleted) {
-  const count2 = deleted.reduce((sum, group) => sum + group.ids.length, 0);
+  const count3 = deleted.reduce((sum, group) => sum + group.ids.length, 0);
   const files = [...new Set(deleted.map((group) => group.deletedFile))];
   return [
-    `\u{1F5D1}\uFE0F **Deleted:** ${plural(count2, "test")} ${count2 === 1 ? "no longer runs" : "no longer run"}, with ${files.length === 1 ? "the file" : "the files"} ${files.slice(0, MAX_MISSING).map(code).join(", ")} this change removes.`,
+    `\u{1F5D1}\uFE0F **Deleted:** ${plural(count3, "test")} ${count3 === 1 ? "no longer runs" : "no longer run"}, with ${files.length === 1 ? "the file" : "the files"} ${files.slice(0, MAX_MISSING).map(code).join(", ")} this change removes.`,
     ""
   ];
 }
 function renderMissing(missing, context) {
-  const count2 = missing.reduce((sum, group) => sum + group.ids.length, 0);
+  const count3 = missing.reduce((sum, group) => sum + group.ids.length, 0);
   const items = missing.flatMap(
     (group) => group.whole && group.group && group.ids.length > 1 ? [`- ${code(group.group)}: all ${group.ids.length} tests`] : group.ids.map((id) => `- ${code(id)}`)
   );
   const lines = [
-    `\u{1F47B} **Missing:** ${plural(count2, "test")} of the latest run on ${branches(context)} did not run here. Deleted or renamed on purpose? Nothing to do. Otherwise, check that the test runner still finds ${count2 === 1 ? "it" : "them"}.`,
+    `\u{1F47B} **Missing:** ${plural(count3, "test")} of the latest run on ${branches(context)} did not run here. Deleted or renamed on purpose? Nothing to do. Otherwise, check that the test runner still finds ${count3 === 1 ? "it" : "them"}.`,
     "",
     ...items.slice(0, MAX_MISSING)
   ];
@@ -1172,8 +1297,15 @@ function plainExplanation(failure, context) {
 }
 function sinceCommit(since2) {
   const sha = `\`${since2.sha.slice(0, 7)}\``;
-  const commit = since2.url ? `[${sha}](${since2.url})` : sha;
-  return since2.change ? `${commit} from [${since2.change.ref}](${since2.change.url})` : commit;
+  const url = linkable(since2.url);
+  const commit = url ? `[${sha}](${url})` : sha;
+  if (!since2.change) return commit;
+  const ref = /^[\w#!.\-/ ]{1,40}$/.test(since2.change.ref) ? since2.change.ref : escapeHtml(since2.change.ref);
+  const changeUrl = linkable(since2.change.url);
+  return `${commit} from ${changeUrl ? `[${ref}](${changeUrl})` : ref}`;
+}
+function linkable(url) {
+  return url !== void 0 && /^https?:\/\/[^\s<>"'`()\\]+$/i.test(url) ? url : void 0;
 }
 function explain(failure, context) {
   const where = branches(context);
@@ -1196,9 +1328,9 @@ function explain(failure, context) {
       if (failure.failures > 0) parts.push(`failed ${failure.failures} of the last ${plural(failure.runs, "run")} on ${where}`);
       if (failure.retries > 0) parts.push(`passed only after a retry ${plural(failure.retries, "time")}`);
       if (failure.latestEvidence) {
-        const day = failure.latestEvidence.at.slice(0, 10);
+        const day2 = failure.latestEvidence.at.slice(0, 10);
         parts.push(
-          failure.latestEvidence.kind === "rerun" ? `passed when the same commit was re-run on ${day}` : `passed after a retry on ${day}`
+          failure.latestEvidence.kind === "rerun" ? `passed when the same commit was re-run on ${day2}` : `passed after a retry on ${day2}`
         );
       }
       const detail = parts.length > 0 ? ` ${capitalize(parts.join("; "))}.` : "";
@@ -1260,9 +1392,9 @@ function duration(ms) {
 function footer(retried, context) {
   const parts = [];
   if (retried.length > 0) {
-    const names = retried.slice(0, 5).map((t) => code(t.title)).join(", ");
+    const names2 = retried.slice(0, 5).map((t) => code(t.title)).join(", ");
     const more = retried.length > 5 ? ` and ${retried.length - 5} more` : "";
-    parts.push(`\u{1F501} Passed only after a retry: ${names}${more}`);
+    parts.push(`\u{1F501} Passed only after a retry: ${names2}${more}`);
   }
   if (context.runUrl) parts.push(`[${context.runLink ?? "Workflow run"}](${context.runUrl})`);
   parts.push(`Reported by [notmyfault](${PROJECT_URL})`);
@@ -1306,6 +1438,7 @@ function escapeHtml(value) {
 
 // src/html-report.ts
 var PROJECT_URL2 = "https://github.com/tashikomaaa/notmyfault";
+var MAX_ROWS2 = 500;
 function reportPath(key) {
   return `reports/${key}.html`;
 }
@@ -1315,6 +1448,8 @@ function renderSuitePage(key, history, context) {
   const total = rows.reduce((sum, row) => sum + (row.cost ?? 0), 0);
   const costing = total > 0 ? ` Their failures and retries cost about ${duration(total)} of test time.` : "";
   const stable = Object.keys(history.tests).length - rows.length;
+  const listed = rows.slice(0, MAX_ROWS2);
+  const beyond = rows.length - listed.length;
   const where = context.trackedBranches.map((branch) => `<code>${escapeHtml(branch)}</code>`).join(", ");
   const body = [
     `<p class="back"><a href="../index.html">All test suites</a></p>`,
@@ -1328,8 +1463,9 @@ function renderSuitePage(key, history, context) {
       `<div class="scroll"><table>`,
       tableHeader(),
       `<tbody>`,
-      ...rows.map(({ id, test, stats, cost }) => renderRow(id, test, stats, cost)),
+      ...listed.map(({ id, test, stats, cost }) => renderRow(id, test, stats, cost)),
       `</tbody></table></div>`,
+      ...beyond > 0 ? [`<p class="empty">${plural2(beyond, "less unreliable test")} not shown.</p>`] : [],
       `<p class="legend"><i class="p"></i> passed <i class="r"></i> passed after a retry <i class="f"></i> failed</p>`
     );
   }
@@ -1362,7 +1498,7 @@ function renderRow(id, test, stats, cost, leading = []) {
   const retried = outcomes.filter((outcome) => outcome === RETRY).length;
   const summary = `${outcomes.length - failed - retried} passed, ${retried} passed after a retry, ${failed} failed`;
   const timeline = outcomes.map((outcome) => `<i class="${outcome === FAIL ? "f" : outcome === RETRY ? "r" : "p"}"></i>`).join("");
-  const proof = stats.latestEvidence ? `${stats.latestEvidence.kind === "rerun" ? "Passed on re-run" : "Passed after a retry"}, ${stats.latestEvidence.at.slice(0, 10)}` : "";
+  const proof = stats.latestEvidence ? `${stats.latestEvidence.kind === "rerun" ? "Passed on re-run" : "Passed after a retry"}, ${escapeHtml(stats.latestEvidence.at.slice(0, 10))}` : "";
   const durations = test.durations ?? [];
   return [
     `<tr>`,
@@ -1372,7 +1508,7 @@ function renderRow(id, test, stats, cost, leading = []) {
     `<td><span class="timeline" role="img" aria-label="${summary}">${timeline}</span></td>`,
     `<td class="number">${failed}</td>`,
     `<td class="number">${retried}</td>`,
-    `<td>${lastFailure(test) ?? ""}</td>`,
+    `<td>${escapeHtml(lastFailure(test) ?? "")}</td>`,
     `<td>${proof}</td>`,
     `<td class="number">${durations.length > 0 ? duration(median2(durations)) : ""}</td>`,
     `<td class="number">${cost === void 0 ? "" : duration(cost)}</td>`,
@@ -1380,10 +1516,13 @@ function renderRow(id, test, stats, cost, leading = []) {
   ].join("");
 }
 function since(failing) {
-  const sha = `<code>${escapeHtml(failing.sha.slice(0, 7))}</code>`;
-  const commit = failing.url ? `<a href="${escapeAttribute(failing.url)}">${sha}</a>` : sha;
-  const change = failing.change ? ` from <a href="${escapeAttribute(failing.change.url)}">${escapeHtml(failing.change.ref)}</a>` : "";
-  return `<span class="since">since ${commit}${change}, ${failing.at.slice(0, 10)}</span>`;
+  const commit = link(failing.url, `<code>${escapeHtml(failing.sha.slice(0, 7))}</code>`);
+  const change = failing.change ? ` from ${link(failing.change.url, escapeHtml(failing.change.ref))}` : "";
+  return `<span class="since">since ${commit}${change}, ${escapeHtml(failing.at.slice(0, 10))}</span>`;
+}
+function link(url, text) {
+  const safe = linkable(url);
+  return safe ? `<a href="${escapeAttribute(safe)}">${text}</a>` : text;
 }
 function verdict(stats) {
   switch (verdictFor(stats)) {
@@ -1403,7 +1542,7 @@ function score(stats) {
 }
 function lastFailure(test) {
   const days = [test.lastFailure, ...(test.evidence ?? []).map((evidence) => evidence.at.slice(0, 10))];
-  return days.filter((day) => day !== void 0).sort().at(-1);
+  return days.filter((day2) => day2 !== void 0).sort().at(-1);
 }
 function median2(values) {
   const sorted = [...values].sort((a, b) => a - b);
@@ -1411,13 +1550,13 @@ function median2(values) {
   return sorted.length % 2 === 1 ? sorted[middle] : Math.round((sorted[middle - 1] + sorted[middle]) / 2);
 }
 function formatTime(iso) {
-  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+  return escapeHtml(`${iso.slice(0, 10)} ${iso.slice(11, 16)}`) + " UTC";
 }
 function plural2(n, word) {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 function escapeAttribute(value) {
-  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 function page(title, body, footer2 = "rewritten on every update of the history") {
   return `<!doctype html>
@@ -1557,9 +1696,9 @@ function renderFlakyIssue(key, id, test, stats, result, context) {
     `- **Last failure:** ${lastFailureDay(test) ?? "unknown"}`
   ];
   if (stats.latestEvidence) {
-    const day = stats.latestEvidence.at.slice(0, 10);
+    const day2 = stats.latestEvidence.at.slice(0, 10);
     lines.push(
-      `- **Proof:** ${stats.latestEvidence.kind === "rerun" ? "passed when the same commit was re-run" : "passed after a retry"} on ${day}`
+      `- **Proof:** ${stats.latestEvidence.kind === "rerun" ? "passed when the same commit was re-run" : "passed after a retry"} on ${day2}`
     );
   }
   if (result?.outcome === "failed" || result?.outcome === "flaky") lines.push("", latestFailure(result, context));
@@ -1594,7 +1733,7 @@ function verdict2(stats) {
 }
 function lastFailureDay(test) {
   const days = [test.lastFailure, ...(test.evidence ?? []).map((evidence) => evidence.at.slice(0, 10))];
-  return days.filter((day) => day !== void 0).sort().at(-1);
+  return days.filter((day2) => day2 !== void 0).sort().at(-1);
 }
 function quietComment(lastFailure2, context) {
   const since2 = lastFailure2 ? ` since ${lastFailure2}` : "";
@@ -1612,6 +1751,53 @@ function plural3(n, word) {
 }
 function times2(n) {
   return n === 1 ? "once" : n === 2 ? "twice" : `${n} times`;
+}
+
+// src/glob.ts
+function matchGlob(pattern, text, singleChar = false) {
+  let p = 0;
+  let t = 0;
+  let star = -1;
+  let mark = 0;
+  while (t < text.length) {
+    if (pattern[p] === "*") {
+      star = p++;
+      mark = t;
+      while (pattern[p] === "*") p++;
+    } else if (p < pattern.length && (pattern[p] === text[t] || singleChar && pattern[p] === "?")) {
+      p++;
+      t++;
+    } else if (star >= 0) {
+      p = star + 1;
+      t = ++mark;
+    } else {
+      return false;
+    }
+  }
+  while (pattern[p] === "*") p++;
+  return p === pattern.length;
+}
+function matchSegments(pattern, path) {
+  let p = 0;
+  let t = 0;
+  let star = -1;
+  let mark = 0;
+  while (t < path.length) {
+    if (pattern[p] === "**") {
+      star = p++;
+      mark = t;
+    } else if (p < pattern.length && matchGlob(pattern[p], path[t], true)) {
+      p++;
+      t++;
+    } else if (star >= 0) {
+      p = star + 1;
+      t = ++mark;
+    } else {
+      return false;
+    }
+  }
+  while (pattern[p] === "**") p++;
+  return p === pattern.length;
 }
 
 // src/quarantine.ts
@@ -1634,9 +1820,12 @@ function isActive(entry, now) {
   return now.toISOString().slice(0, 10) <= entry.until;
 }
 function matches(entry, test) {
-  const escaped = entry.pattern.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const pattern = new RegExp(`(?:^|\\s\u203A\\s)${escaped.join(".*")}$`);
-  return pattern.test(test.title) || pattern.test(test.id);
+  return names(test.title).concat(names(test.id)).some((name) => matchGlob(entry.pattern, name));
+}
+function names(name) {
+  const parts = [name];
+  for (const match of name.matchAll(/\s›\s/g)) parts.push(name.slice(match.index + match[0].length));
+  return parts;
 }
 function applyQuarantine(analysis, entries, now) {
   const active = entries.filter((entry) => isActive(entry, now));
@@ -1653,6 +1842,7 @@ function applyQuarantine(analysis, entries, now) {
 // src/renames.ts
 var MIN_SIMILARITY = 0.6;
 var SEPARATOR2 = " \u203A ";
+var MAX_COMPARED = 200;
 function detectRenames(history, results) {
   const previousRun = history.runs;
   if (previousRun === 0) return [];
@@ -1724,6 +1914,7 @@ function lastPart(id) {
 }
 function similarity(a, b) {
   if (a === b) return 1;
+  if (a.length > MAX_COMPARED || b.length > MAX_COMPARED) return similarity(a.slice(0, MAX_COMPARED), b.slice(0, MAX_COMPARED));
   let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
   for (let i = 1; i <= a.length; i++) {
     const current = [i];
@@ -1737,6 +1928,8 @@ function similarity(a, b) {
 
 // src/xml.ts
 var MAX_TEXT_LENGTH = 64 * 1024;
+var MAX_ATTRIBUTE_LENGTH = 4 * 1024;
+var MAX_DEPTH = 256;
 var NAMED_ENTITIES = {
   lt: "<",
   gt: ">",
@@ -1781,12 +1974,8 @@ function parseXml(input) {
     } else if (input[lt + 1] === "/") {
       const end = input.indexOf(">", lt + 2);
       const name = input.slice(lt + 2, end === -1 ? length : end).trim();
-      for (let k = stack.length - 1; k > 0; k--) {
-        if (stack[k].name === name) {
-          stack.length = k;
-          break;
-        }
-      }
+      const open = stack.findLastIndex((element, depth) => depth > 0 && element.name === name);
+      if (open > 0) stack.length = open;
       i = end === -1 ? length : end + 1;
     } else {
       i = parseStartTag(input, lt, stack);
@@ -1797,6 +1986,9 @@ function parseXml(input) {
 function appendText(element, text) {
   if (element.text.length >= MAX_TEXT_LENGTH) return;
   element.text += text.slice(0, MAX_TEXT_LENGTH - element.text.length);
+}
+function attribute(raw) {
+  return decodeEntities(raw.length > MAX_ATTRIBUTE_LENGTH ? raw.slice(0, MAX_ATTRIBUTE_LENGTH) : raw);
 }
 function skipPast(input, terminator, from) {
   const end = input.indexOf(terminator, from);
@@ -1852,22 +2044,25 @@ function parseStartTag(input, lt, stack) {
     if (quote === '"' || quote === "'") {
       const end = input.indexOf(quote, j + 1);
       const stop = end === -1 ? length : end;
-      element.attrs[attrName] = decodeEntities(input.slice(j + 1, stop));
+      element.attrs[attrName] = attribute(input.slice(j + 1, stop));
       j = stop + 1;
     } else {
       const valueStart = j;
       while (j < length && !isSpace(input[j]) && input[j] !== ">") j++;
-      element.attrs[attrName] = decodeEntities(input.slice(valueStart, j));
+      element.attrs[attrName] = attribute(input.slice(valueStart, j));
     }
   }
-  stack[stack.length - 1].children.push(element);
+  if (stack.length <= MAX_DEPTH) stack[stack.length - 1].children.push(element);
   if (!selfClosing) stack.push(element);
   return j;
 }
 
 // src/junit.ts
 var MAX_MESSAGE_LENGTH = 300;
+var MAX_NAME_LENGTH = 500;
 var MAX_REFERENCES = 20;
+var ANSI = /\u001b\[[0-9;?]*[ -\/]*[@-~]/g;
+var CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g;
 var REFERENCE = /(?:^|[\s(['"])((?:[\w@.-]+\/|\/)*[\w@-][\w@.-]*\.[a-z][a-z0-9]{0,5}):(\d+)/gi;
 function parseJUnit(xml) {
   const root = [];
@@ -1987,13 +2182,14 @@ function mergeAttempt(previous, next) {
 }
 function firstMessage(element) {
   if (!element) return void 0;
-  const raw = element.attrs.message || element.text;
+  const raw = (element.attrs.message || element.text).replace(ANSI, "").replace(CONTROL, "");
   const line = raw.split("\n").map((part) => part.trim()).find((part) => part.length > 0);
   if (!line) return void 0;
   return line.length > MAX_MESSAGE_LENGTH ? `${line.slice(0, MAX_MESSAGE_LENGTH - 1)}\u2026` : line;
 }
 function normalize(value) {
-  return value.replace(/\s+/g, " ").trim();
+  const clean = value.replace(ANSI, "").replace(CONTROL, "").replace(/\s+/g, " ").trim();
+  return clean.length > MAX_NAME_LENGTH ? `${clean.slice(0, MAX_NAME_LENGTH - 1)}\u2026` : clean;
 }
 function joinDistinct(parts) {
   const kept = [];
@@ -2050,6 +2246,9 @@ function sameFile(reference, file, workspace) {
 // src/codeowners.ts
 import { readFileSync as readFileSync2 } from "node:fs";
 import { join as join2 } from "node:path";
+var MAX_PATTERN_LENGTH = 256;
+var MAX_RULES = 2e3;
+var MAX_PATH_LENGTH = 1024;
 function parseCodeowners(text) {
   const rules = [];
   let section = 0;
@@ -2064,14 +2263,18 @@ function parseCodeowners(text) {
       continue;
     }
     const [pattern, ...owners2] = line.split(/\s+/);
+    const segments = toSegments(pattern);
+    if (!segments || rules.length >= MAX_RULES) continue;
     const listed = mentions(owners2);
-    rules.push({ section, pattern: toRegExp(pattern), owners: owners2.length > 0 ? listed : defaults });
+    rules.push({ section, pattern: segments, owners: owners2.length > 0 ? listed : defaults });
   }
   return rules;
 }
 function ownersOf(path, rules) {
+  if (path.length > MAX_PATH_LENGTH) return [];
+  const segments = path.split("/").filter((segment) => segment !== "");
   const bySection = /* @__PURE__ */ new Map();
-  for (const rule of rules) if (rule.pattern.test(path)) bySection.set(rule.section, rule.owners);
+  for (const rule of rules) if (matchSegments(rule.pattern, segments)) bySection.set(rule.section, rule.owners);
   return [...new Set([...bySection.values()].flat())];
 }
 function readCodeowners(workspace, paths) {
@@ -2086,33 +2289,16 @@ function readCodeowners(workspace, paths) {
 function mentions(tokens) {
   return tokens.filter((token) => /^@[\w.\-/]+$/.test(token));
 }
-function toRegExp(pattern) {
+function toSegments(pattern) {
+  if (pattern.length > MAX_PATTERN_LENGTH) return void 0;
   const anchored = pattern.startsWith("/") || pattern.slice(0, -1).includes("/");
   const directory = pattern.endsWith("/");
-  let body = pattern.replace(/^\//, "").replace(/\/$/, "");
+  const body = pattern.replace(/^\//, "").replace(/\/$/, "");
   const shallow = /(^|\/)\*$/.test(body);
-  let source = "";
-  for (let i = 0; i < body.length; i++) {
-    const char = body[i];
-    if (char === "*" && body[i + 1] === "*") {
-      if (body[i + 2] === "/") {
-        source += "(?:.*/)?";
-        i += 2;
-      } else {
-        source += ".*";
-        i++;
-      }
-    } else if (char === "*") {
-      source += "[^/]*";
-    } else if (char === "?") {
-      source += "[^/]";
-    } else {
-      source += char.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-    }
-  }
-  body = source;
-  const end = directory ? "/" : shallow ? "$" : "(?:$|/)";
-  return new RegExp(`^${anchored ? "" : "(?:.*/)?"}${body}${end}`);
+  const segments = body.split("/").filter((segment) => segment !== "");
+  if (segments.length === 0) return void 0;
+  const under = directory ? ["*", "**"] : shallow ? [] : ["**"];
+  return [...anchored ? [] : ["**"], ...segments, ...under];
 }
 
 // src/main.ts
@@ -2152,10 +2338,16 @@ async function runOn(platform, now = /* @__PURE__ */ new Date()) {
     if (context.local && !settings.record) {
       io.info(`Not in a CI system: the history is read, not recorded. Set ${io.inputName("record")}=true to record this run.`);
     }
+    const redact = (text) => settings.token ? text.split(settings.token).join("***") : text;
     const loaded = [];
     for (const suite of settings.suites) {
       const results = await loadResults(suite, settings.suites.length > 1, context.workspace, io);
       if (!results) return 1;
+      for (const result of results) {
+        result.id = redact(result.id);
+        result.title = redact(result.title);
+        if (result.message) result.message = redact(result.message);
+      }
       loaded.push({ ...suite, results });
     }
     const store = new GitStore({
@@ -2202,7 +2394,7 @@ async function evaluate(loaded, platform, settings, store, now) {
     const deleted = await deletedFiles(platform, settings);
     for (const suite of suites) markDeleted(suite.analysis.missing, deleted);
   }
-  const sum = (count3) => suites.reduce((total, suite) => total + count3(suite.analysis), 0);
+  const sum = (count4) => suites.reduce((total, suite) => total + count4(suite.analysis), 0);
   const failures = suites.flatMap((suite) => suite.analysis.failures);
   const blocking = suites.flatMap((suite) => blockingFailures(suite.analysis, settings.tolerated));
   const reportContext = {
@@ -2275,12 +2467,12 @@ async function evaluate(loaded, platform, settings, store, now) {
     await comment(platform, settings, renderSuitesComment(reports, reportContext), noteworthy);
   }
   if (settings.check) await reportCheck(settings.check, platform, settings, renderCheck(reports, reportContext), blocking.length === 0);
-  const count2 = (verdicts) => failures.filter((f) => verdicts.includes(f.verdict)).length;
+  const count3 = (verdicts) => failures.filter((f) => verdicts.includes(f.verdict)).length;
   io.setOutput("total", sum((a) => a.total));
   io.setOutput("failed", failures.length);
-  io.setOutput("new-failures", count2(["new", "suspect"]));
-  io.setOutput("flaky-failures", count2(["flaky"]));
-  io.setOutput("broken-failures", count2(["broken"]));
+  io.setOutput("new-failures", count3(["new", "suspect"]));
+  io.setOutput("flaky-failures", count3(["flaky"]));
+  io.setOutput("broken-failures", count3(["broken"]));
   io.setOutput("retried", sum((a) => a.retried.length));
   io.setOutput("fixed", sum((a) => a.fixed.length));
   io.setOutput("slower", sum((a) => a.slower.length));
@@ -2288,8 +2480,8 @@ async function evaluate(loaded, platform, settings, store, now) {
   io.setOutput("quarantined", quarantined);
   io.setOutput("blocking", blocking.length);
   if (settings.mode === "quarantine" && blocking.length > 0) {
-    const names = blocking.slice(0, 5).map((f) => f.test.title).join(", ");
-    io.error(`${blocking.length} failing test(s) are not tolerated in quarantine mode: ${names}`);
+    const names2 = blocking.slice(0, 5).map((f) => f.test.title).join(", ");
+    io.error(`${blocking.length} failing test(s) are not tolerated in quarantine mode: ${names2}`);
     return 1;
   }
   return 0;
@@ -2334,8 +2526,8 @@ function readSettings(platform) {
   };
 }
 function readSuites(io, defaultKey) {
-  const list = io.input("suites");
-  if (!list) {
+  const list2 = io.input("suites");
+  if (!list2) {
     const patterns = splitList(io.input("junit"));
     if (patterns.length === 0) {
       throw new Error(
@@ -2350,7 +2542,7 @@ function readSuites(io, defaultKey) {
     );
   }
   const suites = [];
-  for (const line of list.split("\n").map((part) => part.trim()).filter(Boolean)) {
+  for (const line of list2.split("\n").map((part) => part.trim()).filter(Boolean)) {
     const match = /^([^:]+):(.*)$/.exec(line);
     const patterns = splitList(match?.[2] ?? "");
     if (!match || patterns.length === 0) throw new Error(`${io.describeInput("suites")} expects one "name: glob" per line, got "${line}"`);
