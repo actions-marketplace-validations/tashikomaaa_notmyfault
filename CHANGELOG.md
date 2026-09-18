@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+
+- Gitea Actions are checked like Forgejo: the history, comments, flaky test issues with their owners, deleted test files and the pull request a streak started with all work on Gitea 1.27 ([#30](https://github.com/tashikomaaa/notmyfault/issues/30)).
+
 ### Added
 
 - `assign-owners: true` assigns each flaky test issue, when it is created, to the owners of the test file who are users, on GitHub, GitLab, Forgejo and Gitea. Teams stay mentioned ([#28](https://github.com/tashikomaaa/notmyfault/issues/28)).

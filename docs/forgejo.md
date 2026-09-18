@@ -6,7 +6,7 @@
 
 Forgejo and Gitea run workflows written for GitHub Actions, and notmyfault is one of the actions they can run. It keeps the same history, gives the same verdicts and comments on pull requests. Only what their API does not have is left out.
 
-It is tested on Forgejo 16 with Forgejo Runner 13. Gitea Actions set the same variables and share the same API, and should work the same, but are not covered by the tests yet.
+It is checked on **Forgejo 16** with Forgejo Runner 13, and on **Gitea 1.27** with act_runner 0.6: the history, the pull request comment, the flaky test issues with their label, owners and assignees, the deleted test files and the pull request a failing streak started with.
 
 ## Setup
 
@@ -34,7 +34,7 @@ jobs:
           junit: reports/**/*.xml
 ```
 
-- **The full URL.** Forgejo looks for actions on its own mirror by default, which does not have notmyfault. With `DEFAULT_ACTIONS_URL = https://github.com` in the `[actions]` section of the server configuration, `tashikomaaa/notmyfault@v1` works too.
+- **The full URL.** Forgejo and Gitea look for actions on their own mirror by default, which does not have notmyfault. With `DEFAULT_ACTIONS_URL` set to `https://github.com` on Forgejo, or to `github` on Gitea, in the `[actions]` section of the server configuration, `tashikomaaa/notmyfault@v1` works too.
 - **Node.js 24.** notmyfault runs on the `node24` runtime: the image of the job must have Node.js 24, like `node:24`. The runner label `ubuntu-latest:docker://node:24` gives one.
 - **The token.** The token Forgejo gives each job can push to the repository and comment, except on pull requests from forks.
 
@@ -47,6 +47,7 @@ Every input and output works as on GitHub, see [Configuration](configuration.md)
 - **Flaky test issues** with `flaky-issues: true`, labeled `flaky-test`.
 - **Since when a test fails**, with the pull request its first failing commit came from.
 - **Owners** of flaky tests with `mention-owners: true`, from `.forgejo/CODEOWNERS`, `.gitea/CODEOWNERS`, `docs/CODEOWNERS` or `CODEOWNERS`, and `assign-owners: true` to assign them.
+- **Tests deleted** by a pull request, told apart from tests that stopped running.
 - **Outputs**, missing tests, quarantine mode, badges and history pages.
 
 ## Differences with GitHub
