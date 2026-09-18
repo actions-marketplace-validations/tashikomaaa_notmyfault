@@ -166,8 +166,12 @@ jobs:
         run: |
           failed=$(gh api "repos/$REPO/actions/runs/$RUN/jobs?per_page=100" --jq '.jobs[] | select(.conclusion == "failure") | .id')
           [ -n "$failed" ] || exit 0
+          # The whole notice, not only a title anything could carry.
+          notice='select(.annotation_level == "notice" and .title == "notmyfault: only flaky tests failed"
+                  and (.message | startswith("Every failed test is known or probably flaky")))'
           for job in $failed; do
-            if ! gh api "repos/$REPO/check-runs/$job/annotations?per_page=100" --jq '.[].title' | grep -qx "notmyfault: only flaky tests failed"; then
+            found=$(gh api "repos/$REPO/check-runs/$job/annotations?per_page=100" --jq "[.[] | $notice] | length")
+            if [ "$found" -eq 0 ]; then
               echo "Job $job did not fail only because of flaky tests: not re-running."
               exit 0
             fi

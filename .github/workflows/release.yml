@@ -17,15 +17,18 @@ jobs:
   assets:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    # The environment only opens for tags named v*, so the tokens it holds are
+    # out of reach of a run on a branch.
+    environment: release
     env:
       TAG: ${{ github.ref_name }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The whole history, for the GitLab mirror.
           fetch-depth: 0
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           cache: npm
@@ -45,7 +48,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/attest-build-provenance@v4
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             dist/index.js
