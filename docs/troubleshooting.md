@@ -134,7 +134,7 @@ A matched file could not be read. The other reports are still used.
 - **A flaky test is reported as a new failure on every run.** Its error was never seen on the tracked branch. If its message contains values that change on every run other than numbers and hexadecimal ids, like random names, every failure looks new: please [open an issue](https://github.com/tashikomaaa/notmyfault/issues) with a few of its messages. See [Errors](how-it-works.md#errors).
 - **Two different tests share one history.** They have the same identity. See [Test identity](how-it-works.md#test-identity).
 - **A new test inherited the history of a deleted one.** The job summary of the run said so under *Renamed*: both were in the same file, the only test gone and the only test added, with similar names. [Reset the history](recipes.md#reset-the-history) if the verdicts of that test are wrong.
-- **A renamed test lost its history.** The rename was not unambiguous: several tests changed in the same file at once, or the names differ too much. See [Renamed tests](how-it-works.md#renamed-tests).
+- **A renamed test lost its history.** The rename was not unambiguous: several tests changed in the same file at once, or the names differ too much. See [Renamed tests](how-it-works.md#renamed-and-moved-tests).
 - **Tests of different environments mix.** Use a key per environment, see [Recipes](recipes.md#the-same-tests-in-several-environments).
 
 Still stuck? [Open an issue](https://github.com/tashikomaaa/notmyfault/issues) with the notmyfault step logs and, if possible, the JUnit report.

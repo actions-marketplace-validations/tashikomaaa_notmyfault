@@ -615,11 +615,34 @@ describe("run", () => {
 
     const merged = await simulate({ "computes the totals": "fail", pays: "pass" });
     expect(merged.logs).toContain("renamed  unit › checkout › computes totals → unit › checkout › computes the totals");
-    expect(merged.summary).toContain("✏️ **Renamed:** the history of 1 test followed its new name.");
+    expect(merged.summary).toContain("✏️ **Renamed:** the history of 1 test followed it to its new name.");
     // The rename applies in that very run: the failure is compared with the history of the old name.
     expect(merged.summary).toContain("**New failure.** Passed the last 2 runs on `main`.");
     expect(storedHistory().tests).toMatchObject({ "unit › checkout › computes the totals": { outcomes: "ppf" } });
     expect(storedHistory().tests["unit › checkout › computes totals"]).toBeUndefined();
+  });
+
+  it("follows a test moved to another file on the tracked branch", async () => {
+    const suite = (file: string, tests: string) =>
+      `<testsuite name="${file}">${tests.split(",").map((test) => `<testcase classname="${file}" name="${test}"/>`).join("")}</testsuite>`;
+    const write = (xml: string) => writeFileSync(join(root, "workspace", "reports", "junit.xml"), `<testsuites>${xml}</testsuites>`);
+    const runs = ["pass", "fail", "pass", "fail", "pass", "pass", "fail", "pass"] as const;
+    for (const outcome of runs) {
+      write(`${suite("cart.test.ts", "adds up")}${suite("payments.test.ts", "pays")}`.replace("<testcase classname=\"payments.test.ts\" name=\"pays\"/>", outcome === "fail" ? '<testcase classname="payments.test.ts" name="pays"><failure message="bank timeout"/></testcase>' : '<testcase classname="payments.test.ts" name="pays"/>'));
+      await simulate({}, { reports: {}, inputs: { junit: "reports/junit.xml" } });
+    }
+    expect(storedHistory().tests["payments.test.ts › pays"]!.outcomes).toBe("pfpfppfp");
+
+    // The flaky test moves to a file of its own: its history moves with it, in that very run.
+    write(`${suite("cart.test.ts", "adds up")}<testsuite name="bank.test.ts"><testcase classname="bank.test.ts" name="pays"><failure message="bank timeout"/></testcase></testsuite>`);
+    const moved = await simulate({}, { reports: {}, inputs: { junit: "reports/junit.xml" } });
+    expect(moved.logs).toContain("moved    payments.test.ts › pays → bank.test.ts › pays");
+    expect(moved.summary).toContain("✏️ **Renamed:** the history of 1 test followed it to its new file.");
+    expect(moved.summary).toContain("- <code>payments.test.ts › pays</code> → <code>bank.test.ts › pays</code> _(moved)_");
+    // The failure of the moved test is read against the history it kept: flaky, not new.
+    expect(moved.summary).toContain("**Probably flaky.**");
+    expect(storedHistory().tests["bank.test.ts › pays"]!.outcomes).toBe("pfpfppfpf");
+    expect(storedHistory().tests["payments.test.ts › pays"]).toBeUndefined();
   });
 
   it("keeps working when the history cannot be read", async () => {

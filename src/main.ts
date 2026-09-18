@@ -228,7 +228,7 @@ async function evaluate(loaded: LoadedSuite[], platform: Platform, settings: Set
     const commit = tracked && !context.pullRequest?.fromFork ? await describeCommit(suites, platform, settings) : undefined;
     for (const suite of suites) await recordHistory(store, suite.key, suite.results, platform, settings, now, commit);
   }
-  for (const { renames } of suites) for (const { from, to } of renames) io.info(`renamed  ${from} → ${to}`);
+  for (const { renames } of suites) for (const { from, to, moved } of renames) io.info(`${moved ? "moved  " : "renamed"}  ${from} → ${to}`);
   if (settings.flakyIssues && isTracked(context, settings) && !context.pullRequest?.fromFork) {
     await manageFlakyIssues(suites, platform, settings, now);
   }

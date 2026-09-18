@@ -40,7 +40,7 @@ Reports show a shorter title, the class name (or suite name) and the test name.
 
 Because identity is based on names, moving a test to another file or suite starts a new history, and tests with names that change on every run cannot be followed.
 
-### Renamed tests
+### Renamed and moved tests
 
 A run on a tracked branch follows a renamed test when it is unambiguous. Within the same file or suite, the part of the identity before the last ` › `:
 
@@ -48,9 +48,17 @@ A run on a tracked branch follows a renamed test when it is unambiguous. Within 
 - exactly one test is new, never run on a tracked branch before;
 - and the last parts of their names are at least 60% similar, measured by edit distance: `computes totals` and `computes the totals` are, `computes totals` and `rejects expired cards` are not.
 
-The history of the old test then moves to the new name, already for the analysis of that run, along with what pull requests remembered about it, and its [flaky test issue](#flaky-test-issues), if any, gets the new name in its title and description. The job summary lists each rename.
+A test that **moves to another file or suite** is followed too, on its name alone:
 
-Pull request runs never follow renames: until the rename reaches the tracked branch, the new test has no history. A deleted test must never pass its flakiness on to an unrelated new one, so anything less certain is left alone. If a rename was wrong, [reset the history](recipes.md#reset-the-history).
+- it keeps exactly the same name, the part after the last ` › `;
+- no other test that left or appeared in the run carries that name;
+- and the file it left gained no test, while the file it joined lost none, so that a rename in place is never read as a move.
+
+Splitting a large suite into several files then keeps every history. The job summary marks these as *(moved)*.
+
+The history of the old test moves to the new identity, already for the analysis of that run, along with what pull requests remembered about it, and its [flaky test issue](#flaky-test-issues), if any, gets the new name in its title and description. The job summary lists each rename and move, and the logs say `renamed` or `moved`.
+
+Pull request runs never follow renames or moves: until the change reaches the tracked branch, the new test has no history. A deleted test must never pass its flakiness on to an unrelated new one, so anything less certain is left alone. If a rename was wrong, [reset the history](recipes.md#reset-the-history).
 
 ## The history
 
@@ -120,7 +128,7 @@ The branch always holds **a single commit without parent**, authored by `github-
 | `failedOn` | The last 20 commits the test failed on, on any branch, as 12-character SHA prefixes |
 | `evidence` | Up to 10 proofs of flakiness: `retry` (passed after a retry in the same run) or `rerun` (passed on a commit it had failed on) |
 | `lastSeen` | Last day the test was recorded |
-| `lastRun` | Number of the last run on a tracked branch the test was part of, to tell [renamed tests](#renamed-tests) and [missing tests](verdicts.md#missing-tests) |
+| `lastRun` | Number of the last run on a tracked branch the test was part of, to tell [renamed tests](#renamed-and-moved-tests) and [missing tests](verdicts.md#missing-tests) |
 | `errors` | Fingerprints of the last 10 distinct failure messages seen on tracked branches, see [Errors](#errors) |
 | `lastFailure` | Last day the test failed, or passed only after a retry, on a tracked branch |
 | `durations` | Durations of the last 10 runs on tracked branches, in milliseconds, when reports give them |
@@ -143,7 +151,7 @@ To find the pull request of a commit, notmyfault asks the API once, in the run w
 | Appends the duration of every test to `durations` | yes | no |
 | Sets `failingSince` when a test starts failing, removes it when it passes | yes | no |
 | Creates an entry for a test that only passed | yes | no |
-| Follows [renamed tests](#renamed-tests) | yes | no |
+| Follows [renamed tests](#renamed-and-moved-tests) | yes | no |
 
 Runs that teach nothing new do not write anything. Pull requests from forks never write, because their token is read-only.
 
@@ -231,7 +239,7 @@ The last failure is `lastFailure`, or the date of the latest proof of flakiness 
 ## Limits
 
 - **GitHub Actions, GitLab CI/CD, Forgejo and Gitea Actions** have integrations, see [Forgejo and Gitea Actions](forgejo.md). Other CI systems run it without comments, issues or checks, see [Any other CI system](any-ci.md). On GitLab, a few things work differently, see [Differences with GitHub](gitlab.md#differences-with-github).
-- **Names are identities**: tests moved to another file or suite start over, renames are only followed when unambiguous, tests with dynamic names are not followed, and two test cases sharing a name inside one suite are read as attempts of the same test.
+- **Names are identities**: renames and moves are only followed when unambiguous, tests with dynamic names are not followed, and two test cases sharing a name inside one suite are read as attempts of the same test.
 - **Retries** are only visible when the runner reports them, see [Test runners](test-runners.md#detecting-retries).
 - **One comment per step.** Jobs sharing a key overwrite each other's comment. Collect their reports in one job instead, with [`suites`](configuration.md#suites) when they need separate histories, see [Recipes](recipes.md#sharded-tests).
 - **Tested on Linux runners.** macOS and Windows runners have `git` and should work, but are not covered by the test suite yet.

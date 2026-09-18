@@ -981,11 +981,13 @@ function renderSuitesSummary(suites, context) {
   for (const suite of suites) {
     const of = suites.length > 1 ? ` of ${suite.name}` : "";
     if (suite.renames?.length) {
+      const moved = suite.renames.filter((rename) => rename.moved).length;
+      const what = moved === suite.renames.length ? "new file" : moved > 0 ? "new name or file" : "new name";
       lines.push(
         "",
-        `\u270F\uFE0F **Renamed:** the history of ${plural(suite.renames.length, "test")}${of} followed ${suite.renames.length === 1 ? "its" : "their"} new name. If a rename is wrong, the new test inherited the history of another one: see [Test identity](${PROJECT_URL}/blob/main/docs/how-it-works.md#test-identity).`,
+        `\u270F\uFE0F **Renamed:** the history of ${plural(suite.renames.length, "test")}${of} followed ${suite.renames.length === 1 ? "it to its" : "them to their"} ${what}. If a match is wrong, the new test inherited the history of another one: see [Test identity](${PROJECT_URL}/blob/main/docs/how-it-works.md#test-identity).`,
         "",
-        ...suite.renames.map(({ from, to }) => `- ${code(from)} \u2192 ${code(to)}`)
+        ...suite.renames.map(({ from, to, moved: isMoved }) => `- ${code(from)} \u2192 ${code(to)}${isMoved ? " _(moved)_" : ""}`)
       );
     }
     if (suite.slowest?.length) {
@@ -1662,10 +1664,20 @@ function detectRenames(history, results) {
     if (result.outcome !== "skipped" && !known) group(result.id).added.push(result.id);
   }
   const renames = [];
+  const paired = /* @__PURE__ */ new Set();
   for (const { missing, added } of groups.values()) {
     if (missing.length !== 1 || added.length !== 1) continue;
     const [from, to] = [missing[0], added[0]];
-    if (similarity(lastPart(from), lastPart(to)) >= MIN_SIMILARITY) renames.push({ from, to });
+    if (similarity(lastPart(from), lastPart(to)) < MIN_SIMILARITY) continue;
+    renames.push({ from, to });
+    paired.add(from).add(to);
+  }
+  const groupsWithout = (kind) => [...groups.values()].filter((entry) => entry[kind].length === 0);
+  const gone = byName(groupsWithout("added").flatMap((entry) => entry.missing), paired);
+  const fresh = byName(groupsWithout("missing").flatMap((entry) => entry.added), paired);
+  for (const [name, from] of gone) {
+    const to = fresh.get(name);
+    if (from && to && prefix(from) !== prefix(to)) renames.push({ from, to, moved: true });
   }
   return renames.sort((a, b) => a.to.localeCompare(b.to));
 }
@@ -1684,6 +1696,15 @@ function applyRenames(history, renames) {
     history.tests[to] = test;
     delete history.tests[from];
   }
+}
+function byName(ids, paired) {
+  const found = /* @__PURE__ */ new Map();
+  for (const id of ids) {
+    if (paired.has(id)) continue;
+    const name = lastPart(id);
+    found.set(name, found.has(name) ? void 0 : id);
+  }
+  return found;
 }
 function prefix(id) {
   const index = id.lastIndexOf(SEPARATOR2);
@@ -2210,7 +2231,7 @@ async function evaluate(loaded, platform, settings, store, now) {
     const commit = tracked && !context.pullRequest?.fromFork ? await describeCommit(suites, platform, settings) : void 0;
     for (const suite of suites) await recordHistory(store, suite.key, suite.results, platform, settings, now, commit);
   }
-  for (const { renames } of suites) for (const { from, to } of renames) io.info(`renamed  ${from} \u2192 ${to}`);
+  for (const { renames } of suites) for (const { from, to, moved } of renames) io.info(`${moved ? "moved  " : "renamed"}  ${from} \u2192 ${to}`);
   if (settings.flakyIssues && isTracked(context, settings) && !context.pullRequest?.fromFork) {
     await manageFlakyIssues(suites, platform, settings, now);
   }

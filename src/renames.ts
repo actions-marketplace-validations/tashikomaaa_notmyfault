@@ -4,6 +4,8 @@ import type { TestResult } from "./junit";
 export interface Rename {
   from: string;
   to: string;
+  /** Set when the test kept its name and changed file or suite. */
+  moved?: boolean;
 }
 
 /** Names at least this similar, on their last part, can be the same test renamed. */
@@ -11,10 +13,15 @@ const MIN_SIMILARITY = 0.6;
 const SEPARATOR = " › ";
 
 /**
- * Tests renamed in a run on a tracked branch: within a file or suite, exactly
- * one test ran in the previous run and not in this one, exactly one test is
- * new, and their names are similar. Anything less certain is left alone: a
- * deleted test must not pass its flakiness on to an unrelated new one.
+ * Tests renamed or moved in a run on a tracked branch:
+ *
+ * - renamed: within a file or suite, exactly one test ran in the previous run and not in this one, exactly one test
+ *   is new, and their names are similar;
+ * - moved: a test with exactly the same name left one file or suite and appeared in another, no other test of the
+ *   run shares that name, the file it left gained no test and the file it joined lost none, so that a rename in
+ *   place is never read as a move.
+ *
+ * Anything less certain is left alone: a deleted test must not pass its flakiness on to an unrelated new one.
  */
 export function detectRenames(history: History, results: TestResult[]): Rename[] {
   const previousRun = history.runs;
@@ -37,10 +44,22 @@ export function detectRenames(history: History, results: TestResult[]): Rename[]
   }
 
   const renames: Rename[] = [];
+  const paired = new Set<string>();
   for (const { missing, added } of groups.values()) {
     if (missing.length !== 1 || added.length !== 1) continue;
     const [from, to] = [missing[0]!, added[0]!];
-    if (similarity(lastPart(from), lastPart(to)) >= MIN_SIMILARITY) renames.push({ from, to });
+    if (similarity(lastPart(from), lastPart(to)) < MIN_SIMILARITY) continue;
+    renames.push({ from, to });
+    paired.add(from).add(to);
+  }
+
+  // Moved: the same name in another file or suite, as when a large suite is split.
+  const groupsWithout = (kind: "missing" | "added") => [...groups.values()].filter((entry) => entry[kind].length === 0);
+  const gone = byName(groupsWithout("added").flatMap((entry) => entry.missing), paired);
+  const fresh = byName(groupsWithout("missing").flatMap((entry) => entry.added), paired);
+  for (const [name, from] of gone) {
+    const to = fresh.get(name);
+    if (from && to && prefix(from) !== prefix(to)) renames.push({ from, to, moved: true });
   }
   return renames.sort((a, b) => a.to.localeCompare(b.to));
 }
@@ -63,6 +82,17 @@ export function applyRenames(history: History, renames: Rename[]): void {
     history.tests[to] = test;
     delete history.tests[from];
   }
+}
+
+/** The only test of each name, by name: names carried by several tests are left out, being ambiguous. */
+function byName(ids: string[], paired: ReadonlySet<string>): Map<string, string | undefined> {
+  const found = new Map<string, string | undefined>();
+  for (const id of ids) {
+    if (paired.has(id)) continue;
+    const name = lastPart(id);
+    found.set(name, found.has(name) ? undefined : id);
+  }
+  return found;
 }
 
 function prefix(id: string): string {

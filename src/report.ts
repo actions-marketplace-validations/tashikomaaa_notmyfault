@@ -107,11 +107,13 @@ export function renderSuitesSummary(suites: SuiteReport[], context: ReportContex
   for (const suite of suites) {
     const of = suites.length > 1 ? ` of ${suite.name}` : "";
     if (suite.renames?.length) {
+      const moved = suite.renames.filter((rename) => rename.moved).length;
+      const what = moved === suite.renames.length ? "new file" : moved > 0 ? "new name or file" : "new name";
       lines.push(
         "",
-        `✏️ **Renamed:** the history of ${plural(suite.renames.length, "test")}${of} followed ${suite.renames.length === 1 ? "its" : "their"} new name. If a rename is wrong, the new test inherited the history of another one: see [Test identity](${PROJECT_URL}/blob/main/docs/how-it-works.md#test-identity).`,
+        `✏️ **Renamed:** the history of ${plural(suite.renames.length, "test")}${of} followed ${suite.renames.length === 1 ? "it to its" : "them to their"} ${what}. If a match is wrong, the new test inherited the history of another one: see [Test identity](${PROJECT_URL}/blob/main/docs/how-it-works.md#test-identity).`,
         "",
-        ...suite.renames.map(({ from, to }) => `- ${code(from)} → ${code(to)}`),
+        ...suite.renames.map(({ from, to, moved: isMoved }) => `- ${code(from)} → ${code(to)}${isMoved ? " _(moved)_" : ""}`),
       );
     }
     if (suite.slowest?.length) {
