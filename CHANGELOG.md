@@ -4,21 +4,19 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
-### Changed
-
-- Gitea Actions are checked like Forgejo: the history, comments, flaky test issues with their owners, deleted test files and the pull request a streak started with all work on Gitea 1.27 ([#30](https://github.com/tashikomaaa/notmyfault/issues/30)).
+## [1.11.0] - 2026-09-18
 
 ### Added
 
 - `assign-owners: true` assigns each flaky test issue, when it is created, to the owners of the test file who are users, on GitHub, GitLab, Forgejo and Gitea. Teams stay mentioned ([#28](https://github.com/tashikomaaa/notmyfault/issues/28)).
-
 - Tests moved to another file or suite keep their history, when their name is the only clue needed: nothing else left or appeared under that name, the file they left gained no test and the file they joined lost none. The job summary marks them as moved ([#27](https://github.com/tashikomaaa/notmyfault/issues/27)).
-
 - Tests whose file a pull request deletes are listed as deleted rather than missing, from the files the platform reports as removed: they are not counted by the `missing` output and never make notmyfault comment on their own ([#26](https://github.com/tashikomaaa/notmyfault/issues/26)).
-
-### Added
-
 - notmyfault is published on [npm](https://www.npmjs.com/package/notmyfault), with provenance: `npx notmyfault@1` runs it in any CI system ([#22](https://github.com/tashikomaaa/notmyfault/issues/22)).
+- The dashboard of the demo repositories is published at [notmyfault.aldwin.fr/dashboard](https://notmyfault.aldwin.fr/dashboard/), rebuilt every day ([#29](https://github.com/tashikomaaa/notmyfault/issues/29)).
+
+### Changed
+
+- Gitea Actions are checked like Forgejo: the history, comments, flaky test issues with their owners, deleted test files and the pull request a streak started with all work on Gitea 1.27 ([#30](https://github.com/tashikomaaa/notmyfault/issues/30)).
 
 ## [1.10.0] - 2026-09-17
 
@@ -135,7 +133,8 @@ All notable changes to this project are documented here. The format follows [Kee
 - Pull request comment kept up to date, job summary with the most unreliable tests, and step outputs.
 - Quarantine mode, so that known flaky tests stop blocking merges.
 
-[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.11.0...HEAD
+[1.11.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.7.0...v1.8.0
