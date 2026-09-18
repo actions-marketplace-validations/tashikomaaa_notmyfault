@@ -165,6 +165,20 @@ describe("templates/notmyfault.gitlab-ci.yml", () => {
     expect(script).toContain('case "$NOTMYFAULT_REF" in *[!A-Za-z0-9._-]*)');
   });
 
+  it("keeps every command a string GitLab can read", () => {
+    // A plain YAML scalar holding ": " is read as a mapping, and GitLab refuses the job.
+    for (const file of ["templates/notmyfault.gitlab-ci.yml", "templates/notmyfault/template.yml"]) {
+      let inScript = false;
+      for (const line of read(file).split("\n")) {
+        if (/^\s*script:\s*$/.test(line)) inScript = true;
+        else if (/^\s*[\w.-]+:/.test(line)) inScript = false;
+        const command = inScript ? /^\s+- (.*)$/.exec(line)?.[1] : undefined;
+        if (!command || command.startsWith("'") || command.startsWith('"')) continue;
+        expect(`${file} | ${command}`).not.toContain(": ");
+      }
+    }
+  });
+
   it("is pinned to the version it was built with", () => {
     const script = read("templates/notmyfault.gitlab-ci.yml");
     const version = (JSON.parse(read("package.json")) as { version: string }).version;

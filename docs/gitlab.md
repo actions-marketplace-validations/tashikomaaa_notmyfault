@@ -72,7 +72,7 @@ The [template](../templates/notmyfault.gitlab-ci.yml) defines a hidden job, `.no
 
 ```yaml
 include:
-  - remote: https://raw.githubusercontent.com/tashikomaaa/notmyfault/v1.12.0/templates/notmyfault.gitlab-ci.yml
+  - remote: https://raw.githubusercontent.com/tashikomaaa/notmyfault/v1.12.1/templates/notmyfault.gitlab-ci.yml
 ```
 
 Set `NOTMYFAULT_KEY` to name the history of the suite. It defaults to the name of the job running notmyfault, `notmyfault` here, which would not tell several suites apart.

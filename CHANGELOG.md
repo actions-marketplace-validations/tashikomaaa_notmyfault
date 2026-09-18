@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.12.1] - 2026-09-18
+
+### Fixed
+
+- The GitLab template of 1.12.0 was refused by GitLab: one of the commands added to check the checksum held a colon, which YAML reads as a key rather than as part of the command. Pipelines including the template or the component at `v1` failed with `jobs:notmyfault:script config should be a string`. A test now reads every command of the templates the way YAML does.
+
 ## [1.12.0] - 2026-09-18
 
 ### Security
@@ -145,7 +151,8 @@ A pass over everything notmyfault reads, prints and publishes ([#31](https://git
 - Pull request comment kept up to date, job summary with the most unreliable tests, and step outputs.
 - Quarantine mode, so that known flaky tests stop blocking merges.
 
-[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.12.0...HEAD
+[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.12.1...HEAD
+[1.12.1]: https://github.com/tashikomaaa/notmyfault/compare/v1.12.0...v1.12.1
 [1.12.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.9.0...v1.10.0

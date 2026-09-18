@@ -13,7 +13,7 @@ What needs the API of a code host is left out: comments on pull requests, flaky 
 After the tests, in the same job, run notmyfault from the repository clone, with the JUnit reports:
 
 ```sh
-NOTMYFAULT_JUNIT="reports/*.xml" npx notmyfault@1.12.0
+NOTMYFAULT_JUNIT="reports/*.xml" npx notmyfault@1.12.1
 ```
 
 The [package](https://www.npmjs.com/package/notmyfault) is the same bundle as the action, with no dependencies, published with provenance. `notmyfault@1` follows every 1.x release; pinning an exact version, as above, keeps runs identical and is what we recommend.
@@ -21,7 +21,7 @@ The [package](https://www.npmjs.com/package/notmyfault) is the same bundle as th
 Without npm, or to avoid downloading anything at run time, take the file attached to each [release](https://github.com/tashikomaaa/notmyfault/releases) and check the checksum published beside it, since release assets can be replaced. Its build provenance can be checked too, see [Supply chain](security.md#supply-chain):
 
 ```sh
-release=https://github.com/tashikomaaa/notmyfault/releases/download/v1.12.0
+release=https://github.com/tashikomaaa/notmyfault/releases/download/v1.12.1
 curl -fsSL -o /tmp/notmyfault.mjs "$release/notmyfault.mjs"
 curl -fsSL "$release/notmyfault.mjs.sha256" | sed "s| notmyfault.mjs| /tmp/notmyfault.mjs|" | sha256sum -c -
 NOTMYFAULT_JUNIT="reports/*.xml" node /tmp/notmyfault.mjs
@@ -41,7 +41,7 @@ pipeline {
       steps {
         sh 'npm ci'
         sh 'npx vitest run --reporter=default --reporter=junit --outputFile.junit=reports/junit.xml || true'
-        sh 'NOTMYFAULT_MODE=quarantine npx notmyfault@1.12.0'
+        sh 'NOTMYFAULT_MODE=quarantine npx notmyfault@1.12.1'
       }
     }
   }
@@ -69,7 +69,7 @@ jobs:
       - run: npx vitest run --reporter=default --reporter=junit --outputFile.junit=reports/junit.xml
       - run:
           when: always
-          command: npx notmyfault@1.12.0
+          command: npx notmyfault@1.12.1
       - store_test_results:
           path: reports
       - store_artifacts:
