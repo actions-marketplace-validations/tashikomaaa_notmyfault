@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
+- `assign-owners: true` assigns each flaky test issue, when it is created, to the owners of the test file who are users, on GitHub, GitLab, Forgejo and Gitea. Teams stay mentioned ([#28](https://github.com/tashikomaaa/notmyfault/issues/28)).
+
 - Tests moved to another file or suite keep their history, when their name is the only clue needed: nothing else left or appeared under that name, the file they left gained no test and the file they joined lost none. The job summary marks them as moved ([#27](https://github.com/tashikomaaa/notmyfault/issues/27)).
 
 - Tests whose file a pull request deletes are listed as deleted rather than missing, from the files the platform reports as removed: they are not counted by the `missing` output and never make notmyfault comment on their own ([#26](https://github.com/tashikomaaa/notmyfault/issues/26)).

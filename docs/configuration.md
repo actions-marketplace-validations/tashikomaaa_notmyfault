@@ -25,6 +25,7 @@
 | [`annotations`](#annotations) | `true` | Annotate failed tests next to their code |
 | [`flaky-issues`](#flaky-issues) | `false` | Open an issue for each flaky test |
 | [`mention-owners`](#mention-owners) | `false` | Mention the owners of each flaky test in its issue |
+| [`assign-owners`](#assign-owners) | `false` | Assign each flaky test issue to its owners |
 | [`missing-tests`](#missing-tests) | `true` | Report tests of the latest tracked run missing from this run |
 | [`check`](#check) | `false` | Report the run as a check of its own |
 | [`check-name`](#check-name) | `notmyfault` | Name of that check |
@@ -146,6 +147,12 @@ With [`flaky-issues`](#flaky-issues), when `true`, each flaky test issue mention
 The file is looked for where the platform does: `.github/CODEOWNERS`, `CODEOWNERS` and `docs/CODEOWNERS` on GitHub, `CODEOWNERS`, `docs/CODEOWNERS` and `.gitlab/CODEOWNERS` on GitLab, including GitLab sections. The owners of a file are those of the last pattern matching it. Only owners that can be mentioned, starting with `@`, are listed, users and teams alike.
 
 The test file is found the way [annotations](verdicts.md#annotations) find it, from the report. Mentions notify people, which is why it is off by default: owners are notified when the issue is created, not again on each update.
+
+### `assign-owners`
+
+With [`flaky-issues`](#flaky-issues), when `true`, each flaky test issue is assigned, when it is created, to the owners of the test file who are **users**: teams and groups can be mentioned but not assigned, see [`mention-owners`](#mention-owners). Owners the platform does not know, or who cannot be assigned, are left out.
+
+Only the creation assigns: whatever you change afterwards is kept, so an issue you hand over to someone else stays theirs. It works on GitHub, GitLab and Forgejo or Gitea.
 
 ### `missing-tests`
 

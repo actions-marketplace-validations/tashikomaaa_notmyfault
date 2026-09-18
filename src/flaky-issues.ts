@@ -37,10 +37,12 @@ export interface IssueContext {
   pullRequest?: string;
   /** The owners to mention in the issue of a test that ran, from CODEOWNERS. */
   owners?: (result: TestResult) => string[];
+  /** Whether the owners who are users are assigned the issues created. */
+  assignOwners?: boolean;
 }
 
 export type IssueAction =
-  | { kind: "create"; title: string; body: string }
+  | { kind: "create"; title: string; body: string; assignees: string[] }
   | { kind: "update"; issue: number; body: string; reopen: boolean; title?: string }
   | { kind: "close"; issue: number; comment: string };
 
@@ -116,7 +118,7 @@ export function planFlakyIssues(
         postponed++;
       } else {
         created++;
-        actions.push({ kind: "create", title: issueTitle(result?.title ?? id), body: body() });
+        actions.push({ kind: "create", title: issueTitle(result?.title ?? id), body: body(), assignees: assignees(result, context) });
       }
     }
   }
@@ -165,6 +167,12 @@ function renderFlakyIssue(
   if (result?.outcome === "failed" || result?.outcome === "flaky") lines.push("", latestFailure(result, context));
   lines.push("", `Until it is fixed, [quarantine mode](${QUARANTINE_URL}) keeps it from blocking ${context.pullRequest ?? "pull request"}s.`);
   return lines.join("\n");
+}
+
+/** Owners who are users, without the teams and groups, which cannot be assigned. */
+function assignees(result: TestResult | undefined, context: IssueContext): string[] {
+  if (!context.assignOwners || !result || !context.owners) return [];
+  return context.owners(result).filter((owner) => !owner.includes("/")).map((owner) => owner.slice(1));
 }
 
 function owners(result: TestResult | undefined, context: IssueContext): string[] {

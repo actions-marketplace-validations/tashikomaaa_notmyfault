@@ -47,6 +47,9 @@ inputs:
   mention-owners:
     description: Mention the owners of each flaky test, from CODEOWNERS, in its issue.
     default: "false"
+  assign-owners:
+    description: Assign the issue of each flaky test to the owners who are users, from CODEOWNERS, when it is created.
+    default: "false"
   missing-tests:
     description: Report tests that ran in the latest run on a tracked branch but are missing from this run.
     default: "true"

@@ -29,6 +29,21 @@ const issue = (number: number, id: string, state: Issue["state"] = "open", key =
 const failing = (id: string, message?: string): TestResult => ({ id, title: id, outcome: "failed", ...(message ? { message } : {}) });
 
 describe("planFlakyIssues", () => {
+  it("assigns the owners who are users when asked, and mentions the teams", () => {
+    const result = failing("checkout › pays");
+    const suites = [suite({ "checkout › pays": FLAKY }, [result])];
+    const owners = () => ["@acme/payments", "@ana", "@bruno"];
+    const [create] = planFlakyIssues(suites, [], { ...CONTEXT, owners, assignOwners: true }).actions;
+    if (create?.kind !== "create") throw new Error("expected a created issue");
+    expect(create.assignees).toEqual(["ana", "bruno"]);
+    expect(create.body).toContain("- **Owners:** @acme/payments @ana @bruno");
+
+    // Without assign-owners, the owners are only mentioned.
+    const [mentioned] = planFlakyIssues(suites, [], { ...CONTEXT, owners }).actions;
+    expect(mentioned).toMatchObject({ kind: "create", assignees: [] });
+  });
+
+
   it("opens an issue for each test proven flaky that failed in the last 30 days", () => {
     const suites = [
       suite({

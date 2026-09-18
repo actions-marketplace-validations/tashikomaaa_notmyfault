@@ -81,6 +81,8 @@ export interface Forge {
   changeOf(sha: string): Promise<{ number: number; url: string } | undefined>;
   /** Paths the pull or merge request deletes, where the platform tells. */
   deletedFiles?(pullRequest: number): Promise<string[]>;
+  /** Assigns an issue to the given users, ignoring those the platform does not know. */
+  assign?(issue: number, users: string[]): Promise<void>;
   /** Reports the run as a completed check of a commit, where the platform has checks. Resolves to its URL. */
   createCheck?(check: CheckReport): Promise<string>;
   /**

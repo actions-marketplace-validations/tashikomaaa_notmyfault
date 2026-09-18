@@ -46,7 +46,7 @@ Every input and output works as on GitHub, see [Configuration](configuration.md)
 - **Pull request comments**, created and kept up to date.
 - **Flaky test issues** with `flaky-issues: true`, labeled `flaky-test`.
 - **Since when a test fails**, with the pull request its first failing commit came from.
-- **Owners** of flaky tests with `mention-owners: true`, from `.forgejo/CODEOWNERS`, `.gitea/CODEOWNERS`, `docs/CODEOWNERS` or `CODEOWNERS`.
+- **Owners** of flaky tests with `mention-owners: true`, from `.forgejo/CODEOWNERS`, `.gitea/CODEOWNERS`, `docs/CODEOWNERS` or `CODEOWNERS`, and `assign-owners: true` to assign them.
 - **Outputs**, missing tests, quarantine mode, badges and history pages.
 
 ## Differences with GitHub

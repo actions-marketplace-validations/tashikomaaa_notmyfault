@@ -35,6 +35,8 @@ class FakeGitHub {
   /** Pull requests associated with each commit. */
   pulls: Record<string, unknown[]> = {};
   checks: Record<string, unknown>[] = [];
+  /** Assignees added to each issue. */
+  assignees: Record<number, string[]> = {};
   requests: string[] = [];
   status = 200;
   private server: Server | undefined;
@@ -57,7 +59,10 @@ class FakeGitHub {
         const route = (method: string, pattern: RegExp) => (req.method === method ? pattern.exec(path) : null);
         let match: RegExpExecArray | null;
 
-        if ((match = route("GET", /^\/pulls\/(\d+)\/files$/))) {
+        if ((match = route("POST", /^\/issues\/(\d+)\/assignees$/))) {
+          this.assignees[Number(match[1])] = body.assignees as string[];
+          reply(201, {});
+        } else if ((match = route("GET", /^\/pulls\/(\d+)\/files$/))) {
           reply(200, Number(match[1]) === PULL_REQUEST ? this.deleted.map((filename) => ({ filename, status: "removed" })) : []);
         } else if (route("POST", /^\/check-runs$/)) {
           this.checks.push(body);
@@ -549,6 +554,18 @@ describe("run", () => {
     const inputs = { "flaky-issues": "true", "mention-owners": "true" };
     await simulate({ pays: "fail: at checkout.test.ts:12:5" }, { inputs });
     expect(api.issues[0]!.body).toContain("- **Suite:** `ci-test`\n- **Owners:** @acme/payments @ana\n");
+
+    expect(api.assignees).toEqual({});
+
+    // With assign-owners, the users among them are assigned when the issue is created.
+    rmSync(join(root, "remote", "acme", "shop.git"), { recursive: true, force: true });
+    execFileSync("git", ["init", "--quiet", "--bare", join(root, "remote", "acme", "shop.git")]);
+    api.issues.length = 0;
+    await simulate({ pays: "fail: at checkout.test.ts:12:5" }, { sha: "e".repeat(40) });
+    await simulate({ pays: "pass" }, { sha: "e".repeat(40) });
+    await simulate({ pays: "fail: at checkout.test.ts:12:5" }, { inputs: { ...inputs, "assign-owners": "true" } });
+    expect(api.issues).toHaveLength(1);
+    expect(api.assignees[api.issues[0]!.number]).toEqual(["ana"]);
 
     // No CODEOWNERS: no owners, and the log says why.
     rmSync(join(root, "workspace", ".github"), { recursive: true });

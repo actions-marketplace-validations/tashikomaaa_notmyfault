@@ -85,6 +85,11 @@ export class GitHubClient implements Forge {
     return pull && { number: pull.number, url: pull.html_url };
   }
 
+  async assign(issue: number, users: string[]): Promise<void> {
+    // GitHub silently drops the users who cannot be assigned, which is what we want here.
+    await this.request("POST", `/repos/${this.repository}/issues/${issue}/assignees`, { assignees: users });
+  }
+
   async deletedFiles(pull: number): Promise<string[]> {
     const deleted: string[] = [];
     let path: string | undefined = `/repos/${this.repository}/pulls/${pull}/files?per_page=100`;

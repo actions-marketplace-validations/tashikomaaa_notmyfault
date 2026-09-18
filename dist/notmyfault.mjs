@@ -166,6 +166,9 @@ var GitHubClient = class {
     const pull = merged.find((candidate) => candidate.merge_commit_sha === sha) ?? merged[0];
     return pull && { number: pull.number, url: pull.html_url };
   }
+  async assign(issue, users) {
+    await this.request("POST", `/repos/${this.repository}/issues/${issue}/assignees`, { assignees: users });
+  }
   async deletedFiles(pull) {
     const deleted = [];
     let path = `/repos/${this.repository}/pulls/${pull}/files?per_page=100`;
@@ -341,6 +344,9 @@ var ForgejoClient = class {
   async ensureLabel(name, color, description) {
     if ((await this.labels()).some((label) => label.name === name)) return;
     await this.request("POST", `/repos/${this.repository}/labels`, { name, color: `#${color}`, description });
+  }
+  async assign(issue, users) {
+    await this.request("PATCH", `/repos/${this.repository}/issues/${issue}`, { assignees: users });
   }
   async deletedFiles(pull) {
     const files = await this.list(`/repos/${this.repository}/pulls/${pull}/files?limit=50`);
@@ -1523,7 +1529,7 @@ function planFlakyIssues(suites, issues, context) {
         postponed++;
       } else {
         created++;
-        actions.push({ kind: "create", title: issueTitle(result?.title ?? id), body: body() });
+        actions.push({ kind: "create", title: issueTitle(result?.title ?? id), body: body(), assignees: assignees(result, context) });
       }
     }
   }
@@ -1561,6 +1567,10 @@ function renderFlakyIssue(key, id, test, stats, result, context) {
   if (result?.outcome === "failed" || result?.outcome === "flaky") lines.push("", latestFailure(result, context));
   lines.push("", `Until it is fixed, [quarantine mode](${QUARANTINE_URL}) keeps it from blocking ${context.pullRequest ?? "pull request"}s.`);
   return lines.join("\n");
+}
+function assignees(result, context) {
+  if (!context.assignOwners || !result || !context.owners) return [];
+  return context.owners(result).filter((owner) => !owner.includes("/")).map((owner) => owner.slice(1));
 }
 function owners(result, context) {
   const found = result && context.owners ? context.owners(result) : [];
@@ -2310,6 +2320,7 @@ function readSettings(platform) {
     ...io.booleanInput("check", false) ? { check: io.input("check-name", "notmyfault") } : {},
     rerunFlaky: io.booleanInput("rerun-flaky", false),
     mentionOwners: io.booleanInput("mention-owners", false),
+    assignOwners: io.booleanInput("assign-owners", false),
     record: io.booleanInput("record", !context.local),
     window: io.integerInput("window", 50, 5)
   };
@@ -2485,7 +2496,8 @@ async function manageFlakyIssues(suites, platform, settings, now) {
       ...runUrl ? { runUrl } : {},
       runName: platform.text.runName,
       pullRequest: platform.text.pullRequest,
-      ...settings.mentionOwners ? codeOwners(platform) : {}
+      ...settings.mentionOwners || settings.assignOwners ? codeOwners(platform) : {},
+      assignOwners: settings.assignOwners
     });
     if (actions.some((action) => action.kind === "create")) {
       await client.ensureLabel(FLAKY_LABEL.name, FLAKY_LABEL.color, FLAKY_LABEL.description);
@@ -2493,7 +2505,8 @@ async function manageFlakyIssues(suites, platform, settings, now) {
     const done = { created: 0, updated: 0, closed: 0 };
     for (const action of actions) {
       if (action.kind === "create") {
-        await client.createIssue(action.title, action.body, [FLAKY_LABEL.name]);
+        const issue = await client.createIssue(action.title, action.body, [FLAKY_LABEL.name]);
+        if (action.assignees.length > 0 && client.assign) await client.assign(issue, action.assignees);
         done.created++;
       } else if (action.kind === "update") {
         await client.updateIssue(action.issue, {
@@ -2925,6 +2938,15 @@ var GitLabClient = class {
       if (!(error instanceof ApiError) || error.status !== 404) throw error;
       await this.request("POST", `/projects/${this.project}/labels`, { name, color: `#${color}`, description });
     }
+  }
+  /** GitLab assigns by user id: unknown user names are left out. */
+  async assign(issue, users) {
+    const ids = [];
+    for (const user of users) {
+      const found = await this.list(`/users?username=${encodeURIComponent(user)}`);
+      if (found[0]) ids.push(found[0].id);
+    }
+    if (ids.length > 0) await this.request("PUT", `/projects/${this.project}/issues/${issue}`, { assignee_ids: ids });
   }
   async deletedFiles(mergeRequest) {
     const diffs = await this.list(

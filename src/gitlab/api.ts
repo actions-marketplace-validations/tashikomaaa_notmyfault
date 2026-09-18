@@ -76,6 +76,16 @@ export class GitLabClient implements Forge {
     }
   }
 
+  /** GitLab assigns by user id: unknown user names are left out. */
+  async assign(issue: number, users: string[]): Promise<void> {
+    const ids: number[] = [];
+    for (const user of users) {
+      const found = await this.list<{ id: number }>(`/users?username=${encodeURIComponent(user)}`);
+      if (found[0]) ids.push(found[0].id);
+    }
+    if (ids.length > 0) await this.request("PUT", `/projects/${this.project}/issues/${issue}`, { assignee_ids: ids });
+  }
+
   async deletedFiles(mergeRequest: number): Promise<string[]> {
     const diffs = await this.list<{ old_path: string; deleted_file?: boolean }>(
       `/projects/${this.project}/merge_requests/${mergeRequest}/diffs?per_page=100`,

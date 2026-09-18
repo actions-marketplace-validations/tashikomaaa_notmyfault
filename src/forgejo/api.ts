@@ -54,6 +54,10 @@ export class ForgejoClient implements Forge {
     await this.request("POST", `/repos/${this.repository}/labels`, { name, color: `#${color}`, description });
   }
 
+  async assign(issue: number, users: string[]): Promise<void> {
+    await this.request("PATCH", `/repos/${this.repository}/issues/${issue}`, { assignees: users });
+  }
+
   async deletedFiles(pull: number): Promise<string[]> {
     const files = await this.list<{ filename: string; status: string }>(`/repos/${this.repository}/pulls/${pull}/files?limit=50`);
     return files.filter((file) => file.status === "deleted" || file.status === "removed").map((file) => file.filename);
