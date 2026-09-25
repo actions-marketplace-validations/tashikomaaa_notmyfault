@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ActionIO } from "../src/actions";
+import { ActionIO } from "../src/github/io";
 import { findFiles, run, sanitizeKey } from "../src/main";
 
 interface Comment {
@@ -30,6 +30,13 @@ class FakeGitHub {
   comments: Comment[] = [];
   issues: FakeIssue[] = [];
   labels: string[] = [];
+  /** Files the pull request deletes. */
+  deleted: string[] = [];
+  /** Pull requests associated with each commit. */
+  pulls: Record<string, unknown[]> = {};
+  checks: Record<string, unknown>[] = [];
+  /** Assignees added to each issue. */
+  assignees: Record<number, string[]> = {};
   requests: string[] = [];
   status = 200;
   private server: Server | undefined;
@@ -52,7 +59,17 @@ class FakeGitHub {
         const route = (method: string, pattern: RegExp) => (req.method === method ? pattern.exec(path) : null);
         let match: RegExpExecArray | null;
 
-        if ((match = route("GET", /^\/issues\/(\d+)\/comments$/))) {
+        if ((match = route("POST", /^\/issues\/(\d+)\/assignees$/))) {
+          this.assignees[Number(match[1])] = body.assignees as string[];
+          reply(201, {});
+        } else if ((match = route("GET", /^\/pulls\/(\d+)\/files$/))) {
+          reply(200, Number(match[1]) === PULL_REQUEST ? this.deleted.map((filename) => ({ filename, status: "removed" })) : []);
+        } else if (route("POST", /^\/check-runs$/)) {
+          this.checks.push(body);
+          reply(201, { html_url: `https://github.com/acme/shop/runs/${this.checks.length}` });
+        } else if ((match = route("GET", /^\/commits\/(\w+)\/pulls$/))) {
+          reply(200, this.pulls[match[1]!] ?? []);
+        } else if ((match = route("GET", /^\/issues\/(\d+)\/comments$/))) {
           reply(200, Number(match[1]) === PULL_REQUEST ? this.comments : []);
         } else if ((match = route("POST", /^\/issues\/(\d+)\/comments$/))) {
           if (Number(match[1]) === PULL_REQUEST) {
@@ -161,7 +178,7 @@ async function simulate(outcomes: Outcomes, options: RunOptions = {}) {
           repository: { default_branch: "main" },
           pull_request: {
             number: PULL_REQUEST,
-            head: { repo: { full_name: options.fork ? "someone/shop" : "acme/shop" } },
+            head: { sha: "f".repeat(40), repo: { full_name: options.fork ? "someone/shop" : "acme/shop" } },
             base: { repo: { full_name: "acme/shop" } },
           },
         }
@@ -212,7 +229,7 @@ function parseOutputs(raw: string): Record<string, string> {
   return outputs;
 }
 
-function storedHistory(key = "ci-test"): { runs: number; tests: Record<string, { outcomes: string; evidence?: unknown[] }> } {
+function storedHistory(key = "ci-test"): { runs: number; tests: Record<string, { outcomes: string; evidence?: unknown[]; failingSince?: object }> } {
   const bare = join(root, "remote", "acme", "shop.git");
   return JSON.parse(
     execFileSync("git", ["-C", bare, "show", `notmyfault-history:history/${key}.json`], {
@@ -279,6 +296,40 @@ describe("run", () => {
     expect(later.outputs).toMatchObject({ "new-failures": "0", "flaky-failures": "1" });
   });
 
+  it("tells since which commit and pull request a test has been failing", async () => {
+    for (let run = 0; run < 3; run++) await simulate({ search: "pass" });
+    const breaking = "b".repeat(40);
+    api.pulls[breaking] = [
+      { number: 11, html_url: "https://github.com/acme/shop/pull/11", merged_at: null, merge_commit_sha: null },
+      { number: 12, html_url: "https://github.com/acme/shop/pull/12", merged_at: "2026-09-01T12:00:00Z", merge_commit_sha: breaking },
+    ];
+    await simulate({ search: "fail" }, { sha: breaking });
+    await simulate({ search: "fail" });
+    // Only the run starting the streak asks which pull request the commit came from.
+    expect(api.requests.filter((request) => request.includes("/pulls"))).toEqual([`GET /repos/acme/shop/commits/${breaking}/pulls?per_page=100`]);
+    expect(storedHistory().tests["unit › checkout › search"]).toMatchObject({
+      failingSince: {
+        sha: "bbbbbbbbbbbb",
+        change: { ref: "#12", url: "https://github.com/acme/shop/pull/12" },
+      },
+    });
+
+    const pr = await simulate({ search: "fail" }, { event: "pull_request" });
+    expect(pr.logs).toContain("broken   checkout › search (failing since bbbbbbb)");
+    expect(api.comments[0]!.body).toContain(
+      "**Already failing on `main`.** Failed the last 2 runs there. Failing since `bbbbbbb` from [#12](https://github.com/acme/shop/pull/12), on 2026-09-01.",
+    );
+
+    // Passing on main ends the streak; the next one starts afresh, even when the API fails.
+    await simulate({ search: "pass" });
+    expect(storedHistory().tests["unit › checkout › search"]!).not.toHaveProperty("failingSince");
+    api.status = 500;
+    const again = await simulate({ search: "fail" }, { sha: "c".repeat(40) });
+    expect(again.logs).toContain(`Could not tell which pull request commit ccccccc came from: GitHub API 500`);
+    expect(storedHistory().tests["unit › checkout › search"]).toMatchObject({ failingSince: { sha: "cccccccccccc" } });
+    expect(storedHistory().tests["unit › checkout › search"]!.failingSince).not.toHaveProperty("change");
+  });
+
   it("does not excuse a flaky test failing with an error never seen on main", async () => {
     const main = ["pass", "fail: timeout after 100ms", "pass", "fail: timeout after 250ms", "pass", "pass", "fail: timeout after 90ms", "pass"] as const;
     for (const pays of main) await simulate({ pays });
@@ -307,6 +358,102 @@ describe("run", () => {
     expect(api.comments).toHaveLength(1);
     expect(api.comments[0]!.body).toMatch(/^### <img [^>]+> All 2 tests passed$/m);
     expect(api.comments[0]!.body).toContain("- <code>checkout › search</code>, failed the last 2 runs there");
+  });
+
+  it("warns about tests that ran on main but not in a pull request", async () => {
+    const reports = (unit: Outcomes, e2e?: Outcomes) => ({ "reports/unit.xml": unit, ...(e2e ? { "reports/e2e.xml": e2e } : {}) });
+    await simulate({}, { reports: reports({ totals: "pass", pays: "pass" }, { login: "pass" }) });
+    rmSync(join(root, "workspace", "reports"), { recursive: true, force: true });
+
+    const pr = await simulate({}, { event: "pull_request", reports: reports({ totals: "pass" }) });
+    expect(pr.code).toBe(0);
+    expect(pr.outputs).toMatchObject({ failed: "0", missing: "2" });
+    expect(pr.logs).toContain("missing  unit › checkout › login");
+    expect(pr.logs).toContain("missing  unit › checkout › pays");
+    // Nothing failed, but the comment warns about it.
+    expect(api.comments).toHaveLength(1);
+    expect(api.comments[0]!.body).toContain("👻 **Missing:** 2 tests of the latest run on `main` did not run here.");
+
+    const quiet = await simulate({}, { event: "pull_request", reports: reports({ totals: "pass" }), inputs: { "missing-tests": "false" } });
+    expect(quiet.outputs).toMatchObject({ missing: "0" });
+    expect(api.comments[0]!.body).not.toContain("Missing");
+  });
+
+  it("reports the run as a check of its own, failing only on failures not tolerated", async () => {
+    for (const pays of ["pass", "fail", "pass", "fail", "pass", "pass", "fail", "pass"] as const) await simulate({ pays, totals: "pass" });
+    const inputs = { check: "true" };
+
+    const flaky = await simulate({ pays: "fail", totals: "pass" }, { event: "pull_request", inputs });
+    expect(flaky.code).toBe(0);
+    expect(flaky.logs).toContain('Check "notmyfault" passed: https://github.com/acme/shop/runs/1');
+    expect(api.checks[0]).toMatchObject({
+      name: "notmyfault",
+      head_sha: "f".repeat(40),
+      status: "completed",
+      conclusion: "success",
+      details_url: expect.stringMatching(/\/actions\/runs\/\d+$/),
+      output: { title: "1 test failed, none of them look like your fault" },
+    });
+    expect((api.checks[0]!.output as { summary: string }).summary).toContain(
+      "🛡️ **Check:** every failure is tolerated (`flaky`), so this check passes.",
+    );
+
+    // Report mode: the step passes, the check fails.
+    const real = await simulate({ pays: "pass", totals: "fail" }, { event: "pull_request", inputs: { ...inputs, "check-name": "no new failure" } });
+    expect(real.code).toBe(0);
+    expect(api.checks[1]).toMatchObject({ name: "no new failure", conclusion: "failure", output: { title: "1 test failed, 1 looks related to this change" } });
+
+    // Runs on the tracked branch get a check on their commit.
+    const sha = "d".repeat(40);
+    await simulate({ pays: "pass", totals: "pass" }, { sha, inputs });
+    expect(api.checks[2]).toMatchObject({ head_sha: sha, conclusion: "success", output: { title: "All 2 tests passed" } });
+
+    api.status = 403;
+    const denied = await simulate({ pays: "pass", totals: "pass" }, { inputs });
+    expect(denied.logs).toContain('::warning::Could not create the check "notmyfault". Does the job have "checks: write" permission?');
+    const fork = await simulate({ pays: "pass", totals: "pass" }, { event: "pull_request", fork: true, inputs });
+    expect(fork.logs).toContain("Pull request from a fork: the token is read-only, no check is created.");
+  });
+
+  it("tells tests deleted with their file from tests that stopped running", async () => {
+    const suite = (name: string, classname: string, cases: string) => `<testsuites><testsuite name="${name}">${cases.split(",").map((test) => `<testcase classname="${classname}" name="${test}"/>`).join("")}</testsuite></testsuites>`;
+    const write = (path: string, xml: string) => writeFileSync(join(root, "workspace", path), xml);
+    const inputs = { junit: "", suites: "unit: reports/unit.xml\ne2e: reports/e2e.xml" };
+
+    write("reports/unit.xml", suite("unit", "checkout", "totals,pays"));
+    write("reports/e2e.xml", suite("e2e", "login", "signs in"));
+    await simulate({}, { inputs });
+
+    // The pull request deletes the file of the e2e test, and stops running "pays" without touching its file.
+    write("reports/unit.xml", suite("unit", "checkout", "totals"));
+    write("reports/e2e.xml", suite("e2e", "checkout", "totals"));
+    api.deleted = ["test/login.e2e.ts"];
+    const pr = await simulate({}, { event: "pull_request", inputs });
+
+    expect(pr.outputs).toMatchObject({ missing: "1" });
+    expect(pr.logs).toContain("missing  unit › checkout › pays");
+    expect(pr.logs).toContain("deleted  e2e › login (1 test(s), with test/login.e2e.ts)");
+    const comment = api.comments[0]!.body;
+    expect(comment).toContain("👻 **Missing:** 1 test of the latest run on `main` did not run here.");
+    expect(comment).toContain("🗑️ **Deleted:** 1 test no longer runs, with the file <code>test/login.e2e.ts</code> this change removes.");
+  });
+
+  it("never republishes the token a test printed in its failure", async () => {
+    // A test that fails while printing its configuration puts the token in the report notmyfault reads.
+    const pr = await simulate({ pays: "fail: POST /pay failed, Authorization: Bearer secret-token" }, { event: "pull_request" });
+    expect(pr.code).toBe(0);
+    const comment = api.comments[0]!.body;
+    // The message is kept, with the token replaced (the stars are HTML-escaped like the rest of the message).
+    expect(comment).toContain("Authorization: Bearer &#42;&#42;&#42;");
+    expect(comment).not.toContain("secret-token");
+    expect(pr.summary).not.toContain("secret-token");
+
+    // A test whose name carries the token, for instance one generated from the environment.
+    const named = await simulate({ "pays with secret-token": "fail" }, { event: "pull_request" });
+    expect(named.code).toBe(0);
+    expect(api.comments.at(-1)!.body).not.toContain("secret-token");
+    expect(named.summary).not.toContain("secret-token");
+    expect(JSON.stringify(storedHistory().tests)).not.toContain("secret-token");
   });
 
   it("stays quiet on green pull requests without a previous comment", async () => {
@@ -414,6 +561,36 @@ describe("run", () => {
     ]);
   });
 
+  it("mentions the owners of a flaky test in its issue, from CODEOWNERS", async () => {
+    mkdirSync(join(root, "workspace", ".github"));
+    writeFileSync(join(root, "workspace", ".github", "CODEOWNERS"), "* @acme/everyone\ncheckout.test.ts @acme/payments @ana\n");
+    writeFileSync(join(root, "workspace", "checkout.test.ts"), "");
+    // Proven flaky by a re-run, then failing again: its issue is created from a report telling where the test lives.
+    await simulate({ pays: "fail: at checkout.test.ts:12:5" }, { sha: "c".repeat(40) });
+    await simulate({ pays: "pass" }, { sha: "c".repeat(40) });
+    const inputs = { "flaky-issues": "true", "mention-owners": "true" };
+    await simulate({ pays: "fail: at checkout.test.ts:12:5" }, { inputs });
+    expect(api.issues[0]!.body).toContain("- **Suite:** `ci-test`\n- **Owners:** @acme/payments @ana\n");
+
+    expect(api.assignees).toEqual({});
+
+    // With assign-owners, the users among them are assigned when the issue is created.
+    rmSync(join(root, "remote", "acme", "shop.git"), { recursive: true, force: true });
+    execFileSync("git", ["init", "--quiet", "--bare", join(root, "remote", "acme", "shop.git")]);
+    api.issues.length = 0;
+    await simulate({ pays: "fail: at checkout.test.ts:12:5" }, { sha: "e".repeat(40) });
+    await simulate({ pays: "pass" }, { sha: "e".repeat(40) });
+    await simulate({ pays: "fail: at checkout.test.ts:12:5" }, { inputs: { ...inputs, "assign-owners": "true" } });
+    expect(api.issues).toHaveLength(1);
+    expect(api.assignees[api.issues[0]!.number]).toEqual(["ana"]);
+
+    // No CODEOWNERS: no owners, and the log says why.
+    rmSync(join(root, "workspace", ".github"), { recursive: true });
+    const without = await simulate({ pays: "fail: at checkout.test.ts:12:5" }, { inputs });
+    expect(without.logs).toContain("No CODEOWNERS file in .github/CODEOWNERS, CODEOWNERS, docs/CODEOWNERS: flaky test issues mention no owners.");
+    expect(api.issues[0]!.body).not.toContain("Owners");
+  });
+
   it("warns and carries on when issues cannot be written", async () => {
     await simulate({ pays: "fail" }, { sha: "d".repeat(40) });
     api.status = 403;
@@ -441,6 +618,15 @@ describe("run", () => {
     expect(invalid.logs).toContain('::error::Input "quarantine" expects "YYYY-MM-DD test name # reason" per line');
   });
 
+  it("points to the companion workflow when asked to re-run on GitHub", async () => {
+    for (const pays of ["pass", "fail", "pass", "fail", "pass", "fail", "pass"] as const) await simulate({ pays });
+    const result = await simulate({ pays: "fail" }, { event: "pull_request", inputs: { "rerun-flaky": "true" } });
+    expect(result.code).toBe(0);
+    expect(result.logs).toContain(
+      '::warning::Input "rerun-flaky" is ignored: only GitLab lets a job start its pipeline again. On GitHub, use a companion workflow instead',
+    );
+  });
+
   it("flags runs where only flaky tests failed, for a workflow re-running them", async () => {
     for (const pays of ["pass", "fail", "pass", "fail", "pass", "fail", "pass"] as const) await simulate({ pays, totals: "pass" });
     const marker = "::notice title=notmyfault%3A only flaky tests failed::Every failed test is known or probably flaky";
@@ -463,11 +649,34 @@ describe("run", () => {
 
     const merged = await simulate({ "computes the totals": "fail", pays: "pass" });
     expect(merged.logs).toContain("renamed  unit › checkout › computes totals → unit › checkout › computes the totals");
-    expect(merged.summary).toContain("✏️ **Renamed:** the history of 1 test followed its new name.");
+    expect(merged.summary).toContain("✏️ **Renamed:** the history of 1 test followed it to its new name.");
     // The rename applies in that very run: the failure is compared with the history of the old name.
     expect(merged.summary).toContain("**New failure.** Passed the last 2 runs on `main`.");
     expect(storedHistory().tests).toMatchObject({ "unit › checkout › computes the totals": { outcomes: "ppf" } });
     expect(storedHistory().tests["unit › checkout › computes totals"]).toBeUndefined();
+  });
+
+  it("follows a test moved to another file on the tracked branch", async () => {
+    const suite = (file: string, tests: string) =>
+      `<testsuite name="${file}">${tests.split(",").map((test) => `<testcase classname="${file}" name="${test}"/>`).join("")}</testsuite>`;
+    const write = (xml: string) => writeFileSync(join(root, "workspace", "reports", "junit.xml"), `<testsuites>${xml}</testsuites>`);
+    const runs = ["pass", "fail", "pass", "fail", "pass", "pass", "fail", "pass"] as const;
+    for (const outcome of runs) {
+      write(`${suite("cart.test.ts", "adds up")}${suite("payments.test.ts", "pays")}`.replace("<testcase classname=\"payments.test.ts\" name=\"pays\"/>", outcome === "fail" ? '<testcase classname="payments.test.ts" name="pays"><failure message="bank timeout"/></testcase>' : '<testcase classname="payments.test.ts" name="pays"/>'));
+      await simulate({}, { reports: {}, inputs: { junit: "reports/junit.xml" } });
+    }
+    expect(storedHistory().tests["payments.test.ts › pays"]!.outcomes).toBe("pfpfppfp");
+
+    // The flaky test moves to a file of its own: its history moves with it, in that very run.
+    write(`${suite("cart.test.ts", "adds up")}<testsuite name="bank.test.ts"><testcase classname="bank.test.ts" name="pays"><failure message="bank timeout"/></testcase></testsuite>`);
+    const moved = await simulate({}, { reports: {}, inputs: { junit: "reports/junit.xml" } });
+    expect(moved.logs).toContain("moved    payments.test.ts › pays → bank.test.ts › pays");
+    expect(moved.summary).toContain("✏️ **Renamed:** the history of 1 test followed it to its new file.");
+    expect(moved.summary).toContain("- <code>payments.test.ts › pays</code> → <code>bank.test.ts › pays</code> _(moved)_");
+    // The failure of the moved test is read against the history it kept: flaky, not new.
+    expect(moved.summary).toContain("**Probably flaky.**");
+    expect(storedHistory().tests["bank.test.ts › pays"]!.outcomes).toBe("pfpfppfpf");
+    expect(storedHistory().tests["payments.test.ts › pays"]).toBeUndefined();
   });
 
   it("keeps working when the history cannot be read", async () => {

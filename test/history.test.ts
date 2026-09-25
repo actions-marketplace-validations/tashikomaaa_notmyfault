@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   emptyHistory,
   errorFingerprint,
+  MAX_TESTS,
   parseHistory,
   recordRun,
   serializeHistory,
@@ -42,6 +43,63 @@ describe("errorFingerprint", () => {
 });
 
 describe("recordRun", () => {
+  it("treats a test named __proto__ as a test, not as the prototype of every object", () => {
+    const history = emptyHistory();
+    recordRun(history, [test("__proto__", "failed"), test("checkout › pays", "passed")], options({ tracked: false }));
+    // Nothing leaks onto Object.prototype, and no passing test inherits a failure of it.
+    expect(({} as { failedOn?: unknown }).failedOn).toBeUndefined();
+    expect(({} as { outcomes?: unknown }).outcomes).toBeUndefined();
+    expect(history.tests["checkout › pays"]).toBeUndefined();
+    expect(history.tests.__proto__).toMatchObject({ failedOn: ["aaaaaaaaaaaa"] });
+
+    // And on a tracked branch, where every test is recorded, the others keep their own history.
+    const tracked = emptyHistory();
+    recordRun(tracked, [test("__proto__", "passed"), test("checkout › pays", "passed")], options());
+    recordRun(tracked, [test("__proto__", "failed"), test("checkout › pays", "passed")], options({ sha: "b".repeat(40) }));
+    expect(tracked.tests["checkout › pays"]!.outcomes).toBe("pp");
+    expect(tracked.tests["checkout › pays"]!.evidence).toBeUndefined();
+    expect(JSON.parse(serializeHistory(tracked)).tests.__proto__.outcomes).toBe("pf");
+  });
+
+  it("remembers where a failure streak on tracked branches started, until the test passes", () => {
+    const history = emptyHistory();
+    const commit = { url: "https://github.com/o/r/commit/bbb", change: { ref: "#42", url: "https://github.com/o/r/pull/42" } };
+    recordRun(history, [test("t", "passed")], options({ commit }));
+    expect(history.tests.t!.failingSince).toBeUndefined();
+
+    recordRun(history, [test("t", "failed")], options({ sha: "b".repeat(40), commit, now: new Date("2026-09-17T08:00:00Z") }));
+    const since = { sha: "bbbbbbbbbbbb", at: "2026-09-17T08:00:00.000Z", ...commit };
+    expect(history.tests.t!.failingSince).toEqual(since);
+
+    // The streak goes on: its start does not move, and pull request runs never touch it.
+    recordRun(history, [test("t", "failed")], options({ sha: "c".repeat(40), commit: { url: "https://github.com/o/r/commit/ccc" } }));
+    recordRun(history, [test("t", "failed")], options({ sha: "d".repeat(40), tracked: false }));
+    expect(history.tests.t!.failingSince).toEqual(since);
+
+    recordRun(history, [test("t", "flaky")], options());
+    expect(history.tests.t!.failingSince).toBeUndefined();
+  });
+
+  it("remembers the total test time of the last tracked runs", () => {
+    const history = emptyHistory();
+    const timed = (id: string, outcome: Outcome, duration: number): TestResult => ({ ...test(id, outcome), duration });
+    recordRun(history, [timed("a", "passed", 1200), timed("b", "failed", 300), { ...timed("c", "skipped", 99) }], options());
+    recordRun(history, [test("a", "passed")], options());
+    recordRun(history, [timed("a", "passed", 1000)], options({ tracked: false }));
+    expect(history.runDurations).toEqual([1500]);
+    expect(parseHistory(serializeHistory(history)).runDurations).toEqual([1500]);
+  });
+
+  it("does not guess where a streak recorded before failingSince started", () => {
+    const history = emptyHistory();
+    history.tests.t = { outcomes: "pff", lastSeen: "2026-09-16" };
+    recordRun(history, [test("t", "failed")], options());
+    expect(history.tests.t!.failingSince).toBeUndefined();
+    // A test failing on its very first tracked run starts a streak.
+    recordRun(history, [test("u", "failed")], options());
+    expect(history.tests.u!.failingSince).toMatchObject({ sha: "aaaaaaaaaaaa" });
+  });
+
   it("appends outcomes on tracked branches and keeps a bounded window", () => {
     const history = emptyHistory();
     for (const outcome of ["passed", "failed", "flaky", "passed", "passed", "passed"] as Outcome[]) {
@@ -155,5 +213,60 @@ describe("parseHistory", () => {
     expect(parseHistory(undefined)).toEqual(emptyHistory());
     expect(parseHistory("{not json")).toEqual(emptyHistory());
     expect(parseHistory(JSON.stringify({ version: 99, tests: {} }))).toEqual(emptyHistory());
+  });
+
+  it("keeps of a stored test only the fields it writes itself", () => {
+    const stored = {
+      version: 1,
+      updatedAt: "2026-09-16T12:00:00.000Z",
+      runs: "many",
+      tests: {
+        crafted: {
+          outcomes: "pf<b>",
+          lastSeen: "2026-09-16",
+          lastFailure: "yesterday",
+          failedOn: ["a41c07e9b2f3", "../../etc/passwd"],
+          evidence: [{ at: "2026-09-10T08:00:00Z", sha: "3f2a1b9c0d4e", kind: "retry" }, { at: "soon", sha: "x", kind: "wish" }],
+          durations: [12, Number.NaN, -1, "slow"],
+          lastRun: 1.5,
+          failingSince: { sha: "a41c07e9b2f3", at: "2026-09-10T08:00:00Z", url: "javascript:alert(1)" },
+          note: "dropped",
+        },
+        broken: "not a test",
+      },
+    };
+    const history = parseHistory(JSON.stringify(stored));
+    expect(history.runs).toBe(0);
+    expect(Object.keys(history.tests)).toEqual(["crafted"]);
+    const crafted = history.tests.crafted!;
+    expect(crafted).not.toHaveProperty("note");
+    expect(crafted.outcomes).toBe("pf");
+    expect(crafted.lastFailure).toBeUndefined();
+    expect(crafted.failedOn).toEqual(["a41c07e9b2f3"]);
+    expect(crafted.evidence).toEqual([{ at: "2026-09-10T08:00:00Z", sha: "3f2a1b9c0d4e", kind: "retry" }]);
+    expect(crafted.durations).toEqual([12]);
+    expect(crafted.lastRun).toBeUndefined();
+    // A link a browser would run as code is not a link.
+    expect(crafted.failingSince).toEqual({ sha: "a41c07e9b2f3", at: "2026-09-10T08:00:00Z" });
+  });
+
+  it("reads a test named __proto__ as a test, and leaves every other object alone", () => {
+    // Written by hand: in an object literal, __proto__ would set the prototype instead of a key.
+    const history = parseHistory('{"version":1,"tests":{"__proto__":{"outcomes":"f","lastSeen":"2026-09-16"}}}');
+    expect(({} as { outcomes?: unknown }).outcomes).toBeUndefined();
+    expect(history.tests["__proto__"]?.outcomes).toBe("f");
+  });
+});
+
+describe("the size of the history", () => {
+  it("forgets the tests seen longest ago past the cap", () => {
+    const history = emptyHistory();
+    const flood = Array.from({ length: MAX_TESTS + 10 }, (_, i) => test(`generated ${i}`, "failed"));
+    recordRun(history, [test("real", "failed")], options({ now: new Date("2026-09-10T12:00:00Z") }));
+    recordRun(history, flood, options());
+    expect(Object.keys(history.tests)).toHaveLength(MAX_TESTS);
+    // The oldest go first, so a flood of made-up names cannot push out what ran today.
+    expect(history.tests.real).toBeUndefined();
+    expect(history.tests["generated 9999"]).toBeDefined();
   });
 });

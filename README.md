@@ -14,7 +14,7 @@
 
 </div>
 
-notmyfault is a GitHub Action that remembers how every test behaves on your default branch. When a pull request turns red, it tells you which failures are **new**, which tests are **known to be flaky** and which were **already broken** before you touched anything.
+notmyfault is a GitHub Action, also available for [GitLab CI/CD](docs/gitlab.md), that remembers how every test behaves on your default branch. When a pull request turns red, it tells you which failures are **new**, which tests are **known to be flaky** and which were **already broken** before you touched anything.
 
 <p align="center">
   <a href="https://github.com/tashikomaaa/notmyfault-demo/pull/1">
@@ -38,7 +38,9 @@ notmyfault is a GitHub Action that remembers how every test behaves on your defa
 - **Stop flaky tests from blocking merges.** [Quarantine mode](docs/quarantine.md) fails the check only for failures that look real.
 - **Get them fixed.** An [issue per flaky test](docs/configuration.md#flaky-issues), a [badge](docs/recipes.md#show-a-flaky-tests-badge), a [report you can publish](docs/recipes.md#publish-the-history-with-github-pages), and [automatic re-runs](docs/recipes.md#re-run-flaky-failures-automatically).
 - **Nothing to host.** No server, no account, no SaaS: the history lives on a branch of your own repository.
+- **GitHub, GitLab, Forgejo or Gitea.** The same verdicts in merge requests, with the Code Quality widget, from a [GitLab CI/CD template](docs/gitlab.md), and in [Forgejo and Gitea Actions](docs/forgejo.md).
 - **Nothing to audit but this repository.** Zero runtime dependencies, one bundled file, rebuilt and verified by CI.
+- **Any CI.** `npx notmyfault` runs it in Jenkins, CircleCI, Buildkite and the others, see [Any other CI system](docs/any-ci.md).
 - **Any test runner.** Everything that writes JUnit XML: Vitest, Jest, pytest, Go, Maven, Gradle, cargo-nextest, Playwright, PHPUnit, RSpec, .NET…
 
 ## Quick start
@@ -71,6 +73,19 @@ jobs:
 
 Runs on `main` build the history, pull requests are compared with it. The [getting started guide](docs/getting-started.md) walks through it, and [Test runners](docs/test-runners.md) shows how to produce JUnit XML with other runners.
 
+On GitLab, include the template and add a job after your tests, see [GitLab CI/CD](docs/gitlab.md):
+
+```yaml
+include:
+  - remote: https://raw.githubusercontent.com/tashikomaaa/notmyfault/v1/templates/notmyfault.gitlab-ci.yml
+
+notmyfault:
+  extends: .notmyfault
+  needs: [test]
+  variables:
+    NOTMYFAULT_JUNIT: reports/junit.xml
+```
+
 ## How it decides
 
 | | Verdict | Meaning |
@@ -86,7 +101,7 @@ Every rule and threshold is documented in [Reading the report](docs/verdicts.md)
 
 | | |
 |---|---|
-| **Guides** | [Getting started](docs/getting-started.md) · [Quarantine flaky tests](docs/quarantine.md) · [Test runners](docs/test-runners.md) · [Recipes](docs/recipes.md) |
+| **Guides** | [Getting started](docs/getting-started.md) · [GitLab CI/CD](docs/gitlab.md) · [Forgejo and Gitea](docs/forgejo.md) · [Any CI](docs/any-ci.md) · [Quarantine flaky tests](docs/quarantine.md) · [Dashboard](docs/dashboard.md) · [Test runners](docs/test-runners.md) · [Recipes](docs/recipes.md) |
 | **Reference** | [Reading the report](docs/verdicts.md) · [Configuration](docs/configuration.md) · [How it works](docs/how-it-works.md) · [Permissions and security](docs/security.md) |
 | **Help** | [Troubleshooting](docs/troubleshooting.md) · [FAQ](docs/faq.md) |
 

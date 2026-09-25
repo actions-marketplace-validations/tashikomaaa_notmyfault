@@ -1,22 +1,8 @@
-export class GitHubApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly path: string,
-    body: string,
-  ) {
-    super(`GitHub API ${status} on ${path}: ${body.slice(0, 200)}`);
-  }
-}
+import { ApiError, type CheckReport, type Forge, type Issue } from "../platform";
 
 interface IssueComment {
   id: number;
   body?: string;
-}
-
-export interface Issue {
-  number: number;
-  state: "open" | "closed";
-  body: string;
 }
 
 interface IssueItem {
@@ -27,7 +13,7 @@ interface IssueItem {
 }
 
 /** Minimal REST client for the few endpoints the action needs. */
-export class GitHubClient {
+export class GitHubClient implements Forge {
   constructor(
     private readonly token: string,
     private readonly apiUrl: string,
@@ -86,9 +72,48 @@ export class GitHubClient {
     try {
       await this.request("GET", `/repos/${this.repository}/labels/${encodeURIComponent(name)}`);
     } catch (error) {
-      if (!(error instanceof GitHubApiError) || error.status !== 404) throw error;
+      if (!(error instanceof ApiError) || error.status !== 404) throw error;
       await this.request("POST", `/repos/${this.repository}/labels`, { name, color, description });
     }
+  }
+
+  async changeOf(sha: string): Promise<{ number: number; url: string } | undefined> {
+    const response = await this.request("GET", `/repos/${this.repository}/commits/${sha}/pulls?per_page=100`);
+    const pulls = (await response.json()) as { number: number; html_url: string; merged_at: string | null; merge_commit_sha: string | null }[];
+    const merged = pulls.filter((pull) => pull.merged_at !== null);
+    const pull = merged.find((candidate) => candidate.merge_commit_sha === sha) ?? merged[0];
+    return pull && { number: pull.number, url: pull.html_url };
+  }
+
+  async assign(issue: number, users: string[]): Promise<void> {
+    // GitHub silently drops the users who cannot be assigned, which is what we want here.
+    await this.request("POST", `/repos/${this.repository}/issues/${issue}/assignees`, { assignees: users });
+  }
+
+  async deletedFiles(pull: number): Promise<string[]> {
+    const deleted: string[] = [];
+    let path: string | undefined = `/repos/${this.repository}/pulls/${pull}/files?per_page=100`;
+    while (path) {
+      const response = await this.request("GET", path);
+      for (const file of (await response.json()) as { filename: string; status: string }[]) {
+        if (file.status === "removed") deleted.push(file.filename);
+      }
+      path = nextPage(response.headers.get("link"), this.apiUrl);
+    }
+    return deleted;
+  }
+
+  async createCheck(check: CheckReport): Promise<string> {
+    const response = await this.request("POST", `/repos/${this.repository}/check-runs`, {
+      name: check.name,
+      head_sha: check.sha,
+      status: "completed",
+      conclusion: check.success ? "success" : "failure",
+      completed_at: new Date().toISOString(),
+      ...(check.detailsUrl ? { details_url: check.detailsUrl } : {}),
+      output: { title: check.title, summary: check.summary },
+    });
+    return ((await response.json()) as { html_url: string }).html_url;
   }
 
   private async findComment(issue: number, marker: string): Promise<IssueComment | undefined> {
@@ -115,13 +140,27 @@ export class GitHubClient {
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-    if (!response.ok) throw new GitHubApiError(response.status, path, await response.text());
+    if (!response.ok) throw new ApiError(response.status, path, await response.text(), "GitHub");
     return response;
   }
 }
 
+/** The next page of a Link header, only when it stays on the API host: the server chooses this URL. */
 function nextPage(link: string | null, apiUrl: string): string | undefined {
   const match = link?.match(/<([^>]+)>;\s*rel="next"/);
-  if (!match?.[1]) return undefined;
-  return match[1].startsWith(apiUrl) ? match[1].slice(apiUrl.length) : undefined;
+  return match?.[1] ? samePage(match[1], apiUrl) : undefined;
+}
+
+/** `url` as a path relative to `apiUrl`, or undefined when it points anywhere else. */
+export function samePage(url: string, apiUrl: string): string | undefined {
+  try {
+    const next = new URL(url);
+    const base = new URL(apiUrl);
+    if (next.origin !== base.origin || !next.pathname.startsWith(base.pathname)) return undefined;
+    // The base of a server without a path, like https://api.github.com, has "/" as its pathname: keep that slash.
+    const prefix = base.pathname === "/" ? base.origin.length : base.origin.length + base.pathname.length;
+    return next.href.slice(prefix);
+  } catch {
+    return undefined;
+  }
 }

@@ -1,10 +1,13 @@
 import { statSync } from "node:fs";
 import { glob, readFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { ActionIO } from "./actions";
+import { ActionIO } from "./github/io";
+import { forgejoPlatform } from "./forgejo/platform";
+import { githubPlatform } from "./github/platform";
 import {
   analyze,
   blockingFailures,
+  markDeleted,
   rankFlakyTests,
   rankSlowTests,
   failureTrends,
@@ -12,22 +15,23 @@ import {
   type FailureVerdict,
   type Verdict,
 } from "./analyze";
-import { readContext, runUrl, type RunContext } from "./context";
+import { ApiError, type Io, type Platform, type RunContext } from "./platform";
 import { GitStore } from "./git-store";
 import { badgePath, renderBadge } from "./badge";
 import { renderIndexPage, renderSuitePage, reportPath } from "./html-report";
 import { FLAKY_LABEL, planFlakyIssues } from "./flaky-issues";
 import { applyQuarantine, isActive, parseQuarantine, type QuarantineEntry } from "./quarantine";
 import { applyRenames, detectRenames, type Rename } from "./renames";
-import { GitHubApiError, GitHubClient } from "./github";
-import { emptyHistory, parseHistory, recordRun, serializeHistory, type History } from "./history";
+import { emptyHistory, FAIL, parseHistory, recordRun, serializeHistory, type History, type RecordOptions } from "./history";
 import { combineReports, parseJUnit, type TestResult } from "./junit";
 import { locate } from "./locate";
+import { ownersOf, readCodeowners } from "./codeowners";
 import {
   commentMarker,
   duration,
   plainExplanation,
   quarantineNote,
+  renderCheck,
   renderSuitesComment,
   renderSuitesSummary,
   type Mode,
@@ -48,12 +52,12 @@ const VERDICTS: readonly Verdict[] = ["new", "suspect", "broken", "flaky"];
 
 const BRANCH_README = `# notmyfault history
 
-This branch is maintained by the [notmyfault](https://github.com/tashikomaaa/notmyfault) GitHub Action.
+This branch is maintained by [notmyfault](https://github.com/tashikomaaa/notmyfault).
 It stores the recent outcome of each test, so failures can be told apart: new, flaky or already broken.
 
 - \`history/<key>.json\`: the history of a test suite.
 - \`badges/<key>.json\`: a [shields.io endpoint](https://shields.io/badges/endpoint-badge) counting its flaky tests.
-- \`reports/<key>.html\` and \`index.html\`: pages listing its unreliable tests, to publish with GitHub Pages.
+- \`reports/<key>.html\` and \`index.html\`: pages listing its unreliable tests, to publish as a static site.
 
 The branch is rewritten as a single commit on every update. Deleting it simply resets the history.
 `;
@@ -78,38 +82,72 @@ export interface Settings {
   comment: boolean;
   annotations: boolean;
   flakyIssues: boolean;
+  missingTests: boolean;
+  /** Name of the check to report the run as, if any. */
+  check?: string;
+  rerunFlaky: boolean;
+  mentionOwners: boolean;
+  assignOwners: boolean;
   record: boolean;
   window: number;
 }
 
-/** Runs the action and resolves to the process exit code. */
-export async function run(env: NodeJS.ProcessEnv = process.env, io = new ActionIO(env), now = new Date()): Promise<number> {
+/** Runs the action, on GitHub, Forgejo or Gitea, and resolves to the process exit code. */
+export async function run(env: NodeJS.ProcessEnv = process.env, io: Io = new ActionIO(env), now = new Date()): Promise<number> {
+  let platform: Platform;
   try {
-    const context = readContext(env);
-    const settings = readSettings(io, context);
-    io.mask(settings.token);
+    platform = env.FORGEJO_ACTIONS === "true" || env.GITEA_ACTIONS === "true" ? forgejoPlatform(env, io) : githubPlatform(env, io);
+  } catch (error) {
+    io.error(errorMessage(error));
+    return 1;
+  }
+  return runOn(platform, now);
+}
 
+/** Runs notmyfault on a platform and resolves to the process exit code. */
+export async function runOn(platform: Platform, now = new Date()): Promise<number> {
+  const { context, io } = platform;
+  try {
+    const settings = readSettings(platform);
+    io.mask(settings.token);
+    if (context.local && !settings.record) {
+      io.info(`Not in a CI system: the history is read, not recorded. Set ${io.inputName("record")}=true to record this run.`);
+    }
+
+    // A test that fails while printing its configuration can put the token in its message, which notmyfault
+    // republishes in comments, issues and artifacts: it never leaves this function.
+    const redact = (text: string) => (settings.token ? text.split(settings.token).join("***") : text);
     const loaded: LoadedSuite[] = [];
     for (const suite of settings.suites) {
       const results = await loadResults(suite, settings.suites.length > 1, context.workspace, io);
       if (!results) return 1;
+      for (const result of results) {
+        result.id = redact(result.id);
+        result.title = redact(result.title);
+        if (result.message) result.message = redact(result.message);
+      }
       loaded.push({ ...suite, results });
     }
 
     const store = new GitStore({
-      remoteUrl: `${context.serverUrl}/${context.repository}.git`,
+      remoteUrl: context.remoteUrl ?? `${context.serverUrl}/${context.repository}.git`,
       branch: settings.branch,
       token: settings.token,
-      tempDir: context.tempDir,
+      username: platform.gitUser(settings.token),
+      author: platform.gitAuthor,
+      pushOptions: platform.pushOptions,
+      ...(context.tempDir ? { tempDir: context.tempDir } : {}),
     });
     try {
-      return await evaluate(loaded, context, settings, store, io, now);
+      return await evaluate(loaded, platform, settings, store, now);
     } finally {
       await store.dispose();
     }
   } catch (error) {
     io.error(errorMessage(error));
     return 1;
+  } finally {
+    io.finish();
   }
 }
 
@@ -124,14 +162,8 @@ interface Suite extends LoadedSuite {
   renames: Rename[];
 }
 
-async function evaluate(
-  loaded: LoadedSuite[],
-  context: RunContext,
-  settings: Settings,
-  store: GitStore,
-  io: ActionIO,
-  now: Date,
-): Promise<number> {
+async function evaluate(loaded: LoadedSuite[], platform: Platform, settings: Settings, store: GitStore, now: Date): Promise<number> {
+  const { context, io } = platform;
   const suites: Suite[] = [];
   const tracked = isTracked(context, settings);
   for (const suite of loaded) {
@@ -139,7 +171,9 @@ async function evaluate(
     // On tracked branches, a renamed test keeps its history in this very run, or its failure would look new.
     const renames = tracked ? detectRenames(history, suite.results) : [];
     applyRenames(history, renames);
-    suites.push({ ...suite, history, renames, analysis: analyze(suite.results, history, now, EVIDENCE_TTL_DAYS) });
+    const analysis = analyze(suite.results, history, now, EVIDENCE_TTL_DAYS);
+    if (!settings.missingTests) analysis.missing = [];
+    suites.push({ ...suite, history, renames, analysis });
   }
   const named = suites.length > 1;
   for (const entry of settings.quarantine.filter((candidate) => !isActive(candidate, now))) {
@@ -148,6 +182,10 @@ async function evaluate(
     );
   }
   const quarantined = suites.reduce((total, suite) => total + applyQuarantine(suite.analysis, settings.quarantine, now), 0);
+  if (context.pullRequest && suites.some((suite) => suite.analysis.missing.length > 0)) {
+    const deleted = await deletedFiles(platform, settings);
+    for (const suite of suites) markDeleted(suite.analysis.missing, deleted);
+  }
   const sum = (count: (analysis: Analysis) => number) => suites.reduce((total, suite) => total + count(suite.analysis), 0);
   const failures = suites.flatMap((suite) => suite.analysis.failures);
   const blocking = suites.flatMap((suite) => blockingFailures(suite.analysis, settings.tolerated));
@@ -159,9 +197,9 @@ async function evaluate(
     tolerated: settings.tolerated,
     blocking: blocking.length,
     quarantined,
+    runLink: platform.text.runLink,
+    ...(context.runUrl ? { runUrl: context.runUrl } : {}),
   };
-  const url = runUrl(context);
-  if (url) reportContext.runUrl = url;
 
   for (const { key, analysis } of suites) {
     io.group(
@@ -170,16 +208,23 @@ async function evaluate(
     for (const failure of analysis.failures) {
       const reason = failure.usually ? ` (${failure.usually} on ${settings.trackedBranches.join(", ")}, but with a new error)` : "";
       const byHand = failure.quarantined ? ` (quarantined until ${failure.quarantined.until})` : "";
-      io.info(`${failure.verdict.padEnd(8)} ${failure.test.title}${reason}${byHand}`);
+      const since =
+        failure.verdict === "broken" && failure.failingSince ? ` (failing since ${failure.failingSince.sha.slice(0, 7)})` : "";
+      io.info(`${failure.verdict.padEnd(8)} ${failure.test.title}${since}${reason}${byHand}`);
     }
     for (const test of analysis.retried) io.info(`retried  ${test.title}`);
     for (const fixed of analysis.fixed) io.info(`fixed    ${fixed.test.title}`);
     for (const slow of analysis.slower) io.info(`slower   ${slow.test.title} (${duration(slow.duration)}, usually ${duration(slow.usual)})`);
+    for (const group of analysis.missing) {
+      if (group.deletedFile) io.info(`deleted  ${group.group} (${group.ids.length} test(s), with ${group.deletedFile})`);
+      else if (group.whole && group.group && group.ids.length > 1) io.info(`missing  ${group.group} (all ${group.ids.length} tests)`);
+      else for (const id of group.ids) io.info(`missing  ${id}`);
+    }
     io.endGroup();
   }
 
   // Emitted first, so that the limit on notices never drops it.
-  const onlyFlaky = failures.length > 0 && failures.every((failure) => failure.verdict === "flaky");
+  const onlyFlaky = platform.rerunNotice && failures.length > 0 && failures.every((failure) => failure.verdict === "flaky");
   if (onlyFlaky) {
     io.annotation(
       "notice",
@@ -189,11 +234,17 @@ async function evaluate(
   }
   if (settings.annotations) annotate(failures, reportContext, context.workspace, io, onlyFlaky ? 1 : 0);
   if (settings.record) {
-    for (const suite of suites) await recordHistory(store, suite.key, suite.results, context, settings, io, now);
+    const commit = tracked && !context.pullRequest?.fromFork ? await describeCommit(suites, platform, settings) : undefined;
+    for (const suite of suites) await recordHistory(store, suite.key, suite.results, platform, settings, now, commit);
   }
-  for (const { renames } of suites) for (const { from, to } of renames) io.info(`renamed  ${from} → ${to}`);
+  for (const { renames } of suites) for (const { from, to, moved } of renames) io.info(`${moved ? "moved  " : "renamed"}  ${from} → ${to}`);
   if (settings.flakyIssues && isTracked(context, settings) && !context.pullRequest?.fromFork) {
-    await manageFlakyIssues(suites, context, settings, reportContext.runUrl, io, now);
+    await manageFlakyIssues(suites, platform, settings, now);
+  }
+
+  if (settings.rerunFlaky && rerunWorthIt(failures, blocking, settings)) {
+    const url = await rerun(platform, settings);
+    if (url) reportContext.rerunUrl = url;
   }
 
   const reports: SuiteReport[] = suites.map((suite) => {
@@ -210,9 +261,10 @@ async function evaluate(
   });
   io.appendSummary(renderSuitesSummary(reports, reportContext));
   if (settings.comment && context.pullRequest) {
-    const noteworthy = sum((a) => a.failures.length + a.retried.length + a.fixed.length) > 0;
-    await comment(context, settings, renderSuitesComment(reports, reportContext), noteworthy, io);
+    const noteworthy = sum((a) => a.failures.length + a.retried.length + a.fixed.length + missingCount(a)) > 0;
+    await comment(platform, settings, renderSuitesComment(reports, reportContext), noteworthy);
   }
+  if (settings.check) await reportCheck(settings.check, platform, settings, renderCheck(reports, reportContext), blocking.length === 0);
 
   const count = (verdicts: Verdict[]) => failures.filter((f) => verdicts.includes(f.verdict)).length;
   io.setOutput("total", sum((a) => a.total));
@@ -223,6 +275,7 @@ async function evaluate(
   io.setOutput("retried", sum((a) => a.retried.length));
   io.setOutput("fixed", sum((a) => a.fixed.length));
   io.setOutput("slower", sum((a) => a.slower.length));
+  io.setOutput("missing", sum(missingCount));
   io.setOutput("quarantined", quarantined);
   io.setOutput("blocking", blocking.length);
 
@@ -234,25 +287,28 @@ async function evaluate(
   return 0;
 }
 
-export function readSettings(io: ActionIO, context: RunContext): Settings {
-  const suites = readSuites(io, `${context.workflow}-${context.job}`);
+export function readSettings(platform: Platform): Settings {
+  const { context, io } = platform;
+  const suites = readSuites(io, context.defaultKey);
 
   const mode = io.input("mode", "report");
   if (mode !== "report" && mode !== "quarantine") {
-    throw new Error(`Input "mode" must be "report" or "quarantine", got "${mode}"`);
+    throw new Error(`${io.describeInput("mode")} must be "report" or "quarantine", got "${mode}"`);
   }
 
   const tolerated = new Set<Verdict>();
   for (const value of splitList(io.input("tolerate", "flaky"))) {
     if (!VERDICTS.includes(value as Verdict)) {
-      throw new Error(`Input "tolerate" accepts ${VERDICTS.join(", ")}; got "${value}"`);
+      throw new Error(`${io.describeInput("tolerate")} accepts ${VERDICTS.join(", ")}; got "${value}"`);
     }
     tolerated.add(value as Verdict);
   }
-  const quarantine = parseQuarantine(io.input("quarantine"));
+  const quarantine = parseQuarantine(io.input("quarantine"), io.describeInput("quarantine"));
 
-  const token = io.input("token");
-  if (!token) throw new Error('Input "token" is empty. Pass `token: ${{ github.token }}`.');
+  const token = io.input("token") || context.defaultToken || "";
+  // Over SSH or from a local path, git authenticates on its own.
+  const needsToken = /^https?:\/\//.test(context.remoteUrl ?? `${context.serverUrl}/`);
+  if (!token && needsToken) throw new Error(platform.text.tokenMissing);
 
   return {
     suites,
@@ -266,31 +322,40 @@ export function readSettings(io: ActionIO, context: RunContext): Settings {
     comment: io.booleanInput("comment", true),
     annotations: io.booleanInput("annotations", true),
     flakyIssues: io.booleanInput("flaky-issues", false),
-    record: io.booleanInput("record", true),
+    missingTests: io.booleanInput("missing-tests", true),
+    ...(io.booleanInput("check", false) ? { check: io.input("check-name", "notmyfault") } : {}),
+    rerunFlaky: io.booleanInput("rerun-flaky", false),
+    mentionOwners: io.booleanInput("mention-owners", false),
+    assignOwners: io.booleanInput("assign-owners", false),
+    record: io.booleanInput("record", !context.local),
     window: io.integerInput("window", 50, 5),
   };
 }
 
 /** Either one suite from "junit" and "key", or several, one "name: glob" per line of "suites". */
-function readSuites(io: ActionIO, defaultKey: string): SuiteSettings[] {
+function readSuites(io: Io, defaultKey: string): SuiteSettings[] {
   const list = io.input("suites");
   if (!list) {
     const patterns = splitList(io.input("junit"));
     if (patterns.length === 0) {
-      throw new Error('Input "junit" is required: a glob matching your JUnit XML reports. Or list several suites in "suites".');
+      throw new Error(
+        `${io.describeInput("junit")} is required: a glob matching your JUnit XML reports. Or list several suites in ${io.inputName("suites")}.`,
+      );
     }
     return [{ key: sanitizeKey(io.input("key", defaultKey)), patterns }];
   }
   if (io.input("junit") || io.input("key")) {
-    throw new Error('Inputs "junit" and "key" cannot be used with "suites": name each suite and its reports in "suites".');
+    throw new Error(
+      `${io.describeInputs(["junit", "key"])} cannot be used with ${io.inputName("suites")}: name each suite and its reports in ${io.inputName("suites")}.`,
+    );
   }
   const suites: SuiteSettings[] = [];
   for (const line of list.split("\n").map((part) => part.trim()).filter(Boolean)) {
     const match = /^([^:]+):(.*)$/.exec(line);
     const patterns = splitList(match?.[2] ?? "");
-    if (!match || patterns.length === 0) throw new Error(`Input "suites" expects one "name: glob" per line, got "${line}"`);
+    if (!match || patterns.length === 0) throw new Error(`${io.describeInput("suites")} expects one "name: glob" per line, got "${line}"`);
     const key = sanitizeKey(match[1]!);
-    if (suites.some((suite) => suite.key === key)) throw new Error(`Input "suites" names the suite "${key}" twice.`);
+    if (suites.some((suite) => suite.key === key)) throw new Error(`${io.describeInput("suites")} names the suite "${key}" twice.`);
     suites.push({ key, patterns });
   }
   return suites;
@@ -309,7 +374,7 @@ async function loadResults(
   suite: SuiteSettings,
   named: boolean,
   workspace: string,
-  io: ActionIO,
+  io: Io,
 ): Promise<TestResult[] | undefined> {
   const of = named ? ` for ${suite.key}` : "";
   const files = await findFiles(suite.patterns, workspace);
@@ -350,7 +415,7 @@ export async function findFiles(patterns: string[], workspace: string): Promise<
 }
 
 /** Annotates each failed test the report locates in the workspace, most actionable verdicts first. */
-function annotate(failures: FailureVerdict[], context: ReportContext, workspace: string, io: ActionIO, noticesAlready: number): void {
+function annotate(failures: FailureVerdict[], context: ReportContext, workspace: string, io: Io, noticesAlready: number): void {
   const isFile = (path: string) => statSync(join(workspace, path), { throwIfNoEntry: false })?.isFile() ?? false;
   const emitted = { error: 0, notice: noticesAlready };
   for (const failure of failures) {
@@ -365,7 +430,7 @@ function annotate(failures: FailureVerdict[], context: ReportContext, workspace:
   }
 }
 
-async function loadHistory(store: GitStore, path: string, settings: Settings, io: ActionIO): Promise<History> {
+async function loadHistory(store: GitStore, path: string, settings: Settings, io: Io): Promise<History> {
   try {
     return parseHistory(await store.read(path));
   } catch (error) {
@@ -382,13 +447,14 @@ async function recordHistory(
   store: GitStore,
   key: string,
   results: TestResult[],
-  context: RunContext,
+  platform: Platform,
   settings: Settings,
-  io: ActionIO,
   now: Date,
+  commit?: RecordOptions["commit"],
 ): Promise<void> {
+  const { context, io } = platform;
   if (context.pullRequest?.fromFork) {
-    io.info("Pull request from a fork: the token is read-only, history is not recorded.");
+    io.info(`${capitalize(platform.text.pullRequest)} from a fork: the token is read-only, history is not recorded.`);
     return;
   }
   const tracked = isTracked(context, settings);
@@ -407,11 +473,12 @@ async function recordHistory(
           now,
           window: settings.window,
           retentionDays: RETENTION_DAYS,
+          ...(commit ? { commit } : {}),
         });
         return changed ? serializeHistory(history) : undefined;
       },
       {
-        message: `Record ${key} (run ${context.runId || "local"}, attempt ${context.runAttempt})`,
+        message: `Record ${key} (${context.runDescription})`,
         extraFiles: { "README.md": BRANCH_README, ".nojekyll": "" },
         derivedFiles: (content, existingPaths) => {
           const history = parseHistory(content);
@@ -428,31 +495,40 @@ async function recordHistory(
     );
     io.info(pushed ? `History updated on branch "${settings.branch}".` : "Nothing new to record.");
   } catch (error) {
-    io.warning(
-      `Could not record history on branch "${settings.branch}". Does the job have "contents: write" permission? ${errorMessage(error)}`,
-    );
+    io.warning(`Could not record history on branch "${settings.branch}". ${platform.text.recordDenied} ${errorMessage(error)}`);
   }
 }
 
 /** Whether the run happened on a tracked branch, whose runs build the history. */
-function isTracked(context: RunContext, settings: Settings): boolean {
-  return (
-    !context.eventName.startsWith("pull_request") &&
-    context.ref === `refs/heads/${context.refName}` &&
-    settings.trackedBranches.includes(context.refName)
+/**
+ * Links to the commit of a tracked run, and to the pull or merge request it came from, remembered by tests that
+ * start failing in this run. The API is only asked when one does.
+ */
+async function describeCommit(suites: Suite[], platform: Platform, settings: Settings): Promise<RecordOptions["commit"]> {
+  const { context, io, text } = platform;
+  const startsFailing = suites.some((suite) =>
+    suite.results.some((result) => result.outcome === "failed" && !suite.history.tests[result.id]?.outcomes.endsWith(FAIL)),
   );
+  if (!startsFailing) return undefined;
+  const commit: NonNullable<RecordOptions["commit"]> = { url: platform.commitUrl(context.sha) };
+  try {
+    const change = await platform.forge(settings.token).changeOf(context.sha);
+    if (change) commit.change = { ref: `${text.changePrefix}${change.number}`, url: change.url };
+  } catch (error) {
+    io.info(`Could not tell which ${text.pullRequest} commit ${context.sha.slice(0, 7)} came from: ${errorMessage(error)}`);
+  }
+  return commit;
+}
+
+function isTracked(context: RunContext, settings: Settings): boolean {
+  return context.branch !== undefined && settings.trackedBranches.includes(context.branch);
 }
 
 /** Opens, updates and closes an issue per flaky test, from the history including this run. */
-async function manageFlakyIssues(
-  suites: Suite[],
-  context: RunContext,
-  settings: Settings,
-  runUrl: string | undefined,
-  io: ActionIO,
-  now: Date,
-): Promise<void> {
-  const client = new GitHubClient(settings.token, context.apiUrl, context.repository);
+async function manageFlakyIssues(suites: Suite[], platform: Platform, settings: Settings, now: Date): Promise<void> {
+  const { context, io } = platform;
+  const runUrl = context.runUrl;
+  const client = platform.forge(settings.token);
   try {
     const after = suites.map((suite) => {
       const history = structuredClone(suite.history);
@@ -465,6 +541,10 @@ async function manageFlakyIssues(
       evidenceTtlDays: EVIDENCE_TTL_DAYS,
       sha: context.sha,
       ...(runUrl ? { runUrl } : {}),
+      runName: platform.text.runName,
+      pullRequest: platform.text.pullRequest,
+      ...(settings.mentionOwners || settings.assignOwners ? codeOwners(platform) : {}),
+      assignOwners: settings.assignOwners,
     });
     if (actions.some((action) => action.kind === "create")) {
       await client.ensureLabel(FLAKY_LABEL.name, FLAKY_LABEL.color, FLAKY_LABEL.description);
@@ -472,7 +552,8 @@ async function manageFlakyIssues(
     const done = { created: 0, updated: 0, closed: 0 };
     for (const action of actions) {
       if (action.kind === "create") {
-        await client.createIssue(action.title, action.body, [FLAKY_LABEL.name]);
+        const issue = await client.createIssue(action.title, action.body, [FLAKY_LABEL.name]);
+        if (action.assignees.length > 0 && client.assign) await client.assign(issue, action.assignees);
         done.created++;
       } else if (action.kind === "update") {
         await client.updateIssue(action.issue, {
@@ -490,27 +571,131 @@ async function manageFlakyIssues(
     const later = postponed > 0 ? ` ${postponed} more flaky test(s) will get an issue on the next runs.` : "";
     io.info(`Flaky test issues: ${done.created} created, ${done.updated} updated, ${done.closed} closed.${later}`);
   } catch (error) {
-    const hint = error instanceof GitHubApiError && error.status === 403 ? ' Does the job have "issues: write" permission?' : "";
+    const hint = error instanceof ApiError && error.denied ? ` ${platform.text.issuesDenied}` : "";
     io.warning(`Could not update flaky test issues.${hint} ${errorMessage(error)}`);
   }
 }
 
-async function comment(context: RunContext, settings: Settings, body: string, create: boolean, io: ActionIO): Promise<void> {
+/** Tests of the latest tracked run missing from this one, without the ones whose file the change deletes. */
+function missingCount(analysis: Analysis): number {
+  return analysis.missing.filter((group) => !group.deletedFile).reduce((total, group) => total + group.ids.length, 0);
+}
+
+/** Paths the pull or merge request deletes, to tell tests removed on purpose from tests that stopped running. */
+async function deletedFiles(platform: Platform, settings: Settings): Promise<string[]> {
+  const { context, io, text } = platform;
+  const forge = platform.forge(settings.token);
+  if (!forge.deletedFiles || !context.pullRequest) return [];
+  try {
+    return await forge.deletedFiles(context.pullRequest.number);
+  } catch (error) {
+    io.info(`Could not read the files of the ${text.pullRequest}: ${errorMessage(error)}`);
+    return [];
+  }
+}
+
+/** Who owns the file of a test, from the CODEOWNERS file of the workspace. */
+function codeOwners(platform: Platform): { owners?: (result: TestResult) => string[] } {
+  const { context, io } = platform;
+  const codeowners = readCodeowners(context.workspace, platform.codeownersPaths);
+  if (!codeowners) {
+    io.info(`No CODEOWNERS file in ${platform.codeownersPaths.join(", ")}: flaky test issues mention no owners.`);
+    return {};
+  }
+  const isFile = (path: string) => statSync(join(context.workspace, path), { throwIfNoEntry: false })?.isFile() ?? false;
+  return {
+    owners: (result) => {
+      const location = locate(result, context.workspace, isFile);
+      return location ? ownersOf(location.file, codeowners.rules) : [];
+    },
+  };
+}
+
+async function comment(platform: Platform, settings: Settings, body: string, create: boolean): Promise<void> {
+  const { context, io, text } = platform;
   const pullRequest = context.pullRequest;
   if (!pullRequest) return;
-  const client = new GitHubClient(settings.token, context.apiUrl, context.repository);
   try {
-    const result = await client.upsertComment(pullRequest.number, commentMarker(settings.commentKey), body, create);
-    if (result !== "skipped") io.info(`Pull request comment ${result}.`);
+    const result = await platform.forge(settings.token).upsertComment(pullRequest.number, commentMarker(settings.commentKey), body, create);
+    if (result !== "skipped") io.info(`${capitalize(text.pullRequest)} comment ${result}.`);
   } catch (error) {
     const hint =
-      error instanceof GitHubApiError && error.status === 403
-        ? pullRequest.fromFork
-          ? " Tokens are read-only on pull requests from forks; the job summary has the full report."
-          : ' Does the job have "pull-requests: write" permission?'
-        : "";
-    io.warning(`Could not comment on the pull request.${hint} ${errorMessage(error)}`);
+      error instanceof ApiError && error.denied ? ` ${pullRequest.fromFork ? text.commentFromFork : text.commentDenied}` : "";
+    io.warning(`Could not comment on the ${text.pullRequest}.${hint} ${errorMessage(error)}`);
   }
+}
+
+/**
+ * Whether a new pipeline could turn this one green: flaky tests failed, and nothing else stands in the way. In report
+ * mode, the tests fail the pipeline, so every failure must be flaky. In quarantine mode, every failure that blocks.
+ */
+function rerunWorthIt(failures: FailureVerdict[], blocking: FailureVerdict[], settings: Settings): boolean {
+  const flaky = (failure: FailureVerdict) => failure.verdict === "flaky";
+  if (settings.mode === "report") return failures.length > 0 && failures.every(flaky);
+  return blocking.length > 0 && blocking.every(flaky);
+}
+
+async function rerun(platform: Platform, settings: Settings): Promise<string | undefined> {
+  const { context, io, text } = platform;
+  const forge = platform.forge(settings.token);
+  if (!forge.rerun) {
+    io.warning(
+      `${io.describeInput("rerun-flaky")} is ignored: only GitLab lets a job start its pipeline again. On GitHub, use a companion workflow instead: https://github.com/tashikomaaa/notmyfault/blob/main/docs/recipes.md#re-run-flaky-failures-automatically`,
+    );
+    return undefined;
+  }
+  try {
+    const url = await forge.rerun({
+      sha: context.sha,
+      ...(context.pullRequest ? { mergeRequest: context.pullRequest.number } : context.branch ? { branch: context.branch } : {}),
+    });
+    io.info(
+      url
+        ? `Only flaky tests failed: started a new pipeline for this commit, ${url}`
+        : "Only flaky tests failed, but this commit already had another pipeline, or moved on: not re-running.",
+    );
+    return url;
+  } catch (error) {
+    const hint = error instanceof ApiError && error.denied ? ` ${text.rerunDenied}` : "";
+    io.warning(`Could not start a new pipeline.${hint} ${errorMessage(error)}`);
+    return undefined;
+  }
+}
+
+async function reportCheck(
+  name: string,
+  platform: Platform,
+  settings: Settings,
+  output: { title: string; summary: string },
+  success: boolean,
+): Promise<void> {
+  const { context, io, text } = platform;
+  const forge = platform.forge(settings.token);
+  if (!forge.createCheck) {
+    io.warning(`${io.describeInput("check")} is ignored: checks only exist on GitHub. The notmyfault job or step is the check here.`);
+    return;
+  }
+  if (context.pullRequest?.fromFork) {
+    io.info(`${capitalize(text.pullRequest)} from a fork: the token is read-only, no check is created.`);
+    return;
+  }
+  try {
+    const url = await forge.createCheck({
+      name,
+      sha: context.pullRequest?.headSha ?? context.sha,
+      success,
+      ...output,
+      ...(context.runUrl ? { detailsUrl: context.runUrl } : {}),
+    });
+    io.info(`Check "${name}" ${success ? "passed" : "failed"}: ${url}`);
+  } catch (error) {
+    const hint = error instanceof ApiError && error.denied ? ` ${text.checkDenied}` : "";
+    io.warning(`Could not create the check "${name}".${hint} ${errorMessage(error)}`);
+  }
+}
+
+function capitalize(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function splitList(value: string): string[] {

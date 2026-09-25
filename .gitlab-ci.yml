@@ -1,0 +1,17 @@
+# Only runs where this repository is mirrored on GitLab: publishes each release
+# of the CI/CD component in templates/notmyfault/ to the CI/CD Catalog.
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+
+release:
+  # Pinned: this job holds a token that can create releases.
+  image: registry.gitlab.com/gitlab-org/cli:v1.101.0
+  variables:
+    # glab signs in with the job token.
+    GLAB_ENABLE_CI_AUTOLOGIN: "true"
+  script:
+    # The Catalog wants versions without the v of the tags. A release created in a job is published to it.
+    - version="${CI_COMMIT_TAG#v}"
+    - glab release create "$version" --ref "$CI_COMMIT_SHA" --name "notmyfault $version" --notes "See https://github.com/tashikomaaa/notmyfault/releases/tag/$CI_COMMIT_TAG"

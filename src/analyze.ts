@@ -1,4 +1,4 @@
-import { errorFingerprint, FAIL, RETRY, type FlakyEvidence, type History, type TestHistory } from "./history";
+import { errorFingerprint, FAIL, RETRY, type FailingSince, type FlakyEvidence, type History, type TestHistory } from "./history";
 import type { TestResult } from "./junit";
 
 /**
@@ -18,6 +18,8 @@ export interface TestStats {
   retries: number;
   /** Consecutive failures at the end of the tracked history. */
   trailingFailures: number;
+  /** Where those trailing failures started, when known. */
+  failingSince?: FailingSince;
   /** Share of failed runs on tracked branches before those trailing failures. */
   failureRate: number;
   /** Failures in a row after which a test proven flaky counts as broken: a streak too unlikely to be bad luck. */
@@ -52,6 +54,49 @@ export interface SlowerTest {
   usual: number;
 }
 
+/** Tests of the latest run on the tracked branch that are not in this run, by file or suite. */
+export interface MissingTests {
+  /** The file or suite: the identity of the tests before their last "›". */
+  group: string;
+  /** Identities of the missing tests. */
+  ids: string[];
+  /** Whether every test of the group in the latest run on the tracked branch is missing. */
+  whole: boolean;
+  /** The file the change deletes, when the missing tests lived in it. */
+  deletedFile?: string;
+}
+
+/**
+ * Marks the missing tests whose file the change deletes. Test identities start with the file for most runners, and
+ * with a class or a module name for the others: a deleted path matches when it is one of the parts of the identity,
+ * or ends with it, extensions aside. Names that are not paths only match files that look like test files, so that
+ * deleting `src/cart.ts` does not excuse the tests of a class named `cart`.
+ */
+export function markDeleted(missing: MissingTests[], deleted: string[]): void {
+  const candidates = deleted.map((path) => ({ path, name: withoutExtension(path), isTest: TEST_FILE.test(path) }));
+  for (const group of missing) {
+    const parts = group.group.split(SEPARATOR).filter(Boolean);
+    const file = candidates.find(({ path, name, isTest }) =>
+      parts.some((part) => {
+        // Dotted module and class names map to directories: tests.test_pay is tests/test_pay.
+        const asPath = part.replace(/\./g, "/");
+        if (path === part || path.endsWith(`/${part}`)) return true;
+        return isTest && (name === asPath || name.endsWith(`/${asPath}`));
+      }),
+    );
+    if (file) group.deletedFile = file.path;
+  }
+}
+
+/** Everything after the first dot of the file name: `checkout.e2e.ts` is `checkout`. */
+function withoutExtension(path: string): string {
+  const slash = path.lastIndexOf("/");
+  const dot = path.indexOf(".", slash + 1);
+  return dot === -1 ? path : path.slice(0, dot);
+}
+
+const TEST_FILE = /(^|\/)(tests?|specs?|__tests__)\/|(^|\/|\.|_|-)(test|tests|spec|specs)[._-]|[._-](test|tests|spec|specs)\./i;
+
 export interface FailureTrend {
   id: string;
   /** Share of failed runs, in percent, among the TREND_WINDOW runs ending at each run, oldest first. */
@@ -81,13 +126,18 @@ export interface Analysis {
   fixed: FixedTest[];
   /** Passing tests that took much longer than usual on the tracked branch. */
   slower: SlowerTest[];
+  /** Tests that ran in the latest run on the tracked branch but are not in this run. */
+  missing: MissingTests[];
 }
 
 export interface RankedTest extends TestStats {
   id: string;
+  /** Test time its failures and retries cost over the remembered runs, in milliseconds, when durations are known. */
+  cost?: number;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const SEPARATOR = " › ";
 /** Isolated failures needed to call a test flaky without direct evidence. */
 const LIKELY_FLAKY_ISOLATED_FAILURES = 3;
 /** A flaky test is broken once its failure streak had less than this chance to happen by bad luck. */
@@ -101,7 +151,16 @@ const SLOWER_MIN_RUNS = 5;
 const VERDICT_ORDER: Record<Verdict, number> = { new: 0, suspect: 1, broken: 2, flaky: 3 };
 
 export function analyze(results: TestResult[], history: History, now: Date, evidenceTtlDays: number): Analysis {
-  const analysis: Analysis = { total: results.length, passed: 0, skipped: 0, failures: [], retried: [], fixed: [], slower: [] };
+  const analysis: Analysis = {
+    total: results.length,
+    passed: 0,
+    skipped: 0,
+    failures: [],
+    retried: [],
+    fixed: [],
+    slower: [],
+    missing: missingTests(results, history),
+  };
   const checkFixed = (test: TestResult) => {
     const tested = history.tests[test.id];
     if (!tested?.outcomes.endsWith(FAIL)) return;
@@ -156,6 +215,28 @@ export function analyze(results: TestResult[], history: History, now: Date, evid
   return analysis;
 }
 
+/**
+ * Tests that were part of the latest run on the tracked branch and are not in these results, not even skipped:
+ * deleted, renamed, or no longer discovered. Histories written before lastRun existed tell nothing.
+ */
+export function missingTests(results: TestResult[], history: History): MissingTests[] {
+  const present = new Set(results.map((result) => result.id));
+  const groups = new Map<string, { ids: string[]; latest: number }>();
+  for (const [id, test] of Object.entries(history.tests)) {
+    if (history.runs === 0 || test.lastRun !== history.runs) continue;
+    const index = id.lastIndexOf(SEPARATOR);
+    const name = index === -1 ? "" : id.slice(0, index);
+    const group = groups.get(name) ?? { ids: [], latest: 0 };
+    group.latest++;
+    if (!present.has(id)) group.ids.push(id);
+    groups.set(name, group);
+  }
+  return [...groups]
+    .filter(([, group]) => group.ids.length > 0)
+    .map(([name, group]) => ({ group: name, ids: group.ids.sort(), whole: group.ids.length === group.latest }))
+    .sort((a, b) => a.group.localeCompare(b.group));
+}
+
 export function computeStats(history: TestHistory | undefined, now: Date, evidenceTtlDays: number): TestStats {
   const outcomes = history?.outcomes ?? "";
   const cutoff = now.getTime() - evidenceTtlDays * DAY_MS;
@@ -177,6 +258,7 @@ export function computeStats(history: TestHistory | undefined, now: Date, eviden
   };
   const latest = evidence[evidence.length - 1];
   if (latest) stats.latestEvidence = latest;
+  if (trailing > 0 && history?.failingSince) stats.failingSince = history.failingSince;
   return stats;
 }
 
@@ -213,10 +295,27 @@ export function rankFlakyTests(history: History, now: Date, evidenceTtlDays: num
   const ranked: RankedTest[] = [];
   for (const [id, test] of Object.entries(history.tests)) {
     const stats = computeStats(test, now, evidenceTtlDays);
-    if (stats.confirmed || stats.isolatedFailures >= LIKELY_FLAKY_ISOLATED_FAILURES) ranked.push({ id, ...stats });
+    if (!stats.confirmed && stats.isolatedFailures < LIKELY_FLAKY_ISOLATED_FAILURES) continue;
+    const cost = estimateCost(test, history);
+    ranked.push(cost === undefined ? { id, ...stats } : { id, ...stats, cost });
   }
   const score = (t: RankedTest) => (t.failures + t.retries) / Math.max(t.runs, 1) + (t.confirmed ? 1 : 0);
-  return ranked.sort((a, b) => score(b) - score(a) || a.id.localeCompare(b.id)).slice(0, limit);
+  // The costliest first when durations tell, the most unreliable otherwise.
+  return ranked.sort((a, b) => (b.cost ?? -1) - (a.cost ?? -1) || score(b) - score(a) || a.id.localeCompare(b.id)).slice(0, limit);
+}
+
+/**
+ * Estimated test time lost to the failures and retries of a test over its remembered runs on tracked branches, in
+ * milliseconds: each failure costs a re-run of the whole suite, each retry another run of the test, at their median
+ * durations. Undefined when the reports give no durations to estimate them with.
+ */
+export function estimateCost(test: TestHistory, history: History): number | undefined {
+  const failures = count(test.outcomes, FAIL);
+  const retries = count(test.outcomes, RETRY);
+  const suite = history.runDurations?.length ? median(history.runDurations) : undefined;
+  const own = test.durations?.length ? median(test.durations) : undefined;
+  if ((failures > 0 && suite === undefined) || (retries > 0 && own === undefined)) return undefined;
+  return failures * (suite ?? 0) + retries * (own ?? 0);
 }
 
 /**

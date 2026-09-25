@@ -1,9 +1,10 @@
 import { appendFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { EOL } from "node:os";
+import type { AnnotationLevel, Io } from "../platform";
 
 /** Tiny replacement for @actions/core, driven by an injectable environment. */
-export class ActionIO {
+export class ActionIO implements Io {
   constructor(
     private readonly env: NodeJS.ProcessEnv = process.env,
     private readonly write: (line: string) => void = (line) => process.stdout.write(line + EOL),
@@ -30,6 +31,18 @@ export class ActionIO {
       throw new Error(`Input "${name}" must be an integer >= ${min}, got "${value}"`);
     }
     return parsed;
+  }
+
+  inputName(name: string): string {
+    return `"${name}"`;
+  }
+
+  describeInput(name: string): string {
+    return `Input "${name}"`;
+  }
+
+  describeInputs(names: string[]): string {
+    return `Inputs ${names.map((name) => `"${name}"`).join(" and ")}`;
   }
 
   setOutput(name: string, value: string | number | boolean): void {
@@ -61,7 +74,7 @@ export class ActionIO {
   }
 
   /** A workflow annotation on a file, shown in the run summary and next to the code of pull requests. */
-  annotation(level: "error" | "warning" | "notice", message: string, properties: Record<string, string | number | undefined>): void {
+  annotation(level: AnnotationLevel, message: string, properties: Record<string, string | number | undefined>): void {
     const escapeProperty = (value: string) =>
       value.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A").replace(/:/g, "%3A").replace(/,/g, "%2C");
     const list = Object.entries(properties)
@@ -78,6 +91,9 @@ export class ActionIO {
   endGroup(): void {
     this.write("::endgroup::");
   }
+
+  /** Workflow commands are written as they come: nothing to write at the end. */
+  finish(): void {}
 
   private command(name: string, message: string): void {
     const escaped = message.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { GitStore } from "../src/git-store";
+import { GitStore, splitCredentials } from "../src/git-store";
 
 let root: string;
 let remoteUrl: string;
@@ -28,6 +28,24 @@ beforeEach(() => {
 afterEach(async () => {
   await Promise.all(stores.splice(0).map((s) => s.dispose()));
   rmSync(root, { recursive: true, force: true });
+});
+
+describe("splitCredentials", () => {
+  it("takes the user name and password out of a remote URL", () => {
+    expect(splitCredentials("https://bot:glpat-secret@gitlab.test/acme/shop.git")).toEqual({
+      url: "https://gitlab.test/acme/shop.git",
+      user: "bot",
+      password: "glpat-secret",
+    });
+    // A token given alone is the password git needs.
+    expect(splitCredentials("https://ghp_token@github.com/acme/shop.git")).toEqual({
+      url: "https://github.com/acme/shop.git",
+      user: "ghp_token",
+      password: "ghp_token",
+    });
+    expect(splitCredentials("https://github.com/acme/shop.git")).toEqual({ url: "https://github.com/acme/shop.git" });
+    expect(splitCredentials("git@github.com:acme/shop.git")).toEqual({ url: "git@github.com:acme/shop.git" });
+  });
 });
 
 describe("GitStore", () => {

@@ -655,6 +655,20 @@ pre code {
   background: var(--butter-deep);
 }
 
+/* GitLab */
+
+.gitlab .start-copy > p {
+  color: var(--ink-muted);
+}
+
+.gitlab .start-copy > .more {
+  color: var(--ink);
+}
+
+.gitlab .notes li::marker {
+  color: var(--butter-deep);
+}
+
 /* Quarantine */
 
 .quarantine {
@@ -833,7 +847,8 @@ pre code {
     font-size: 1rem;
   }
 
-  .nav ul li:first-child {
+  .nav ul li:first-child,
+  .nav ul li:nth-child(3) {
     display: none;
   }
 

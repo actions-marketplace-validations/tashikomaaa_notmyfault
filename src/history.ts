@@ -17,6 +17,18 @@ export interface FlakyEvidence {
   kind: "retry" | "rerun";
 }
 
+/** Where the current failure streak of a test on tracked branches started. */
+export interface FailingSince {
+  /** Commit of the first failed run of the streak (12-char prefix). */
+  sha: string;
+  /** ISO timestamp of that run. */
+  at: string;
+  /** Link to the commit. */
+  url?: string;
+  /** The pull or merge request the commit came from, e.g. { ref: "#42", url }. */
+  change?: { ref: string; url: string };
+}
+
 export interface TestHistory {
   /** Outcomes on tracked branches, oldest first, one char per run (p, f or r). */
   outcomes: string;
@@ -28,6 +40,8 @@ export interface TestHistory {
   errors?: string[];
   /** Last day (YYYY-MM-DD) the test failed, or passed only after a retry, on a tracked branch. */
   lastFailure?: string;
+  /** Set while the test keeps failing on tracked branches: where the streak started. */
+  failingSince?: FailingSince;
   /** Durations in milliseconds of the last runs on tracked branches, oldest first. */
   durations?: number[];
   /** Number of the last run on a tracked branch the test was part of, see {@link History.runs}. */
@@ -41,6 +55,8 @@ export interface History {
   updatedAt: string;
   /** Number of tracked-branch runs recorded so far. */
   runs: number;
+  /** Total duration in milliseconds of the tests of the last runs on tracked branches, oldest first. */
+  runDurations?: number[];
   tests: Record<string, TestHistory>;
 }
 
@@ -54,17 +70,25 @@ export interface RecordOptions {
   window: number;
   /** Tests not seen for this many days are forgotten. */
   retentionDays: number;
+  /** Links to the commit and to the change it came from, kept when a test starts failing. */
+  commit?: { url?: string; change?: { ref: string; url: string } };
 }
 
 export const MAX_FAILED_ON = 20;
 export const MAX_EVIDENCE = 10;
 const MAX_ERRORS = 10;
+const MAX_OUTCOMES = 500;
+const MAX_REF_LENGTH = 40;
+const MAX_URL_LENGTH = 2048;
+/** Tests remembered per suite: a crafted report must not grow the branch without bound. */
+export const MAX_TESTS = 20_000;
 export const MAX_DURATIONS = 10;
 const MAX_FINGERPRINTED_LENGTH = 200;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function emptyHistory(): History {
-  return { version: HISTORY_VERSION, updatedAt: new Date(0).toISOString(), runs: 0, tests: {} };
+  // Without a prototype, a test named __proto__ or constructor is a key like any other.
+  return { version: HISTORY_VERSION, updatedAt: new Date(0).toISOString(), runs: 0, tests: Object.create(null) as History["tests"] };
 }
 
 /**
@@ -91,15 +115,111 @@ export function parseHistory(json: string | undefined): History {
     if (data.version !== HISTORY_VERSION || typeof data.tests !== "object" || data.tests === null) {
       return emptyHistory();
     }
+    const tests: History["tests"] = Object.create(null);
+    // The file comes from a branch other runs write: every field is checked before it is used or rendered.
+    for (const [id, test] of Object.entries(data.tests as Record<string, unknown>)) {
+      const parsed = parseTest(test);
+      if (parsed) tests[id] = parsed;
+    }
     return {
       version: HISTORY_VERSION,
-      updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : emptyHistory().updatedAt,
-      runs: typeof data.runs === "number" ? data.runs : 0,
-      tests: data.tests,
+      updatedAt: isoDate(data.updatedAt) ?? emptyHistory().updatedAt,
+      runs: count(data.runs),
+      ...(Array.isArray(data.runDurations) ? { runDurations: data.runDurations.filter(isDuration).slice(-MAX_DURATIONS) } : {}),
+      tests,
     };
   } catch {
     return emptyHistory();
   }
+}
+
+/** Keeps of a stored test only what has the shape notmyfault writes, so nothing else reaches the analysis or a page. */
+function parseTest(value: unknown): TestHistory | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const raw = value as Record<string, unknown>;
+  const outcomes = typeof raw.outcomes === "string" ? raw.outcomes.replace(/[^pfr]/g, "").slice(-MAX_OUTCOMES) : "";
+  const test: TestHistory = { outcomes, lastSeen: day(raw.lastSeen) ?? new Date(0).toISOString().slice(0, 10) };
+  const failedOn = list(raw.failedOn, (sha) => hex(sha)).slice(-MAX_FAILED_ON);
+  if (failedOn.length > 0) test.failedOn = failedOn;
+  const evidence = list(raw.evidence, parseEvidence).slice(-MAX_EVIDENCE);
+  if (evidence.length > 0) test.evidence = evidence;
+  const errors = list(raw.errors, (value) => hex(value)).slice(-MAX_ERRORS);
+  if (errors.length > 0) test.errors = errors;
+  const lastFailure = day(raw.lastFailure);
+  if (lastFailure) test.lastFailure = lastFailure;
+  const durations = list(raw.durations, (ms) => (isDuration(ms) ? ms : undefined)).slice(-MAX_DURATIONS);
+  if (durations.length > 0) test.durations = durations;
+  if (typeof raw.lastRun === "number" && Number.isInteger(raw.lastRun) && raw.lastRun >= 0) test.lastRun = raw.lastRun;
+  const failingSince = parseFailingSince(raw.failingSince);
+  if (failingSince) test.failingSince = failingSince;
+  return test;
+}
+
+function parseEvidence(value: unknown): FlakyEvidence | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const raw = value as Record<string, unknown>;
+  const at = isoDate(raw.at);
+  const sha = hex(raw.sha);
+  if (!at || !sha || (raw.kind !== "retry" && raw.kind !== "rerun")) return undefined;
+  return { at, sha, kind: raw.kind };
+}
+
+function parseFailingSince(value: unknown): FailingSince | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const raw = value as Record<string, unknown>;
+  const at = isoDate(raw.at);
+  const sha = hex(raw.sha);
+  if (!at || !sha) return undefined;
+  const since: FailingSince = { sha, at };
+  const url = webUrl(raw.url);
+  if (url) since.url = url;
+  const change = raw.change as Record<string, unknown> | undefined;
+  const changeUrl = change ? webUrl(change.url) : undefined;
+  if (change && changeUrl && typeof change.ref === "string" && change.ref.length <= MAX_REF_LENGTH) {
+    since.change = { ref: change.ref, url: changeUrl };
+  }
+  return since;
+}
+
+function list<T>(value: unknown, parse: (item: unknown) => T | undefined): T[] {
+  if (!Array.isArray(value)) return [];
+  const parsed: T[] = [];
+  for (const item of value.slice(-MAX_FAILED_ON * 2)) {
+    const kept = parse(item);
+    if (kept !== undefined) parsed.push(kept);
+  }
+  return parsed;
+}
+
+function hex(value: unknown): string | undefined {
+  return typeof value === "string" && /^[0-9a-f]{1,64}$/.test(value) ? value : undefined;
+}
+
+function day(value: unknown): string | undefined {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : undefined;
+}
+
+function isoDate(value: unknown): string | undefined {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}T[\d:.]+Z?$/.test(value) ? value : undefined;
+}
+
+/** Links rendered in pages and comments: only addresses a browser can safely follow. */
+function webUrl(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length > MAX_URL_LENGTH) return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isDuration(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function count(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0;
 }
 
 export function serializeHistory(history: History): string {
@@ -130,6 +250,17 @@ export function recordRun(history: History, results: TestResult[], options: Reco
 
     if (options.tracked) {
       const code = result.outcome === "failed" ? FAIL : result.outcome === "flaky" ? RETRY : PASS;
+      if (code !== FAIL) {
+        delete test.failingSince;
+      } else if (!test.outcomes.endsWith(FAIL)) {
+        // A streak recorded before failingSince existed stays without one: its start is unknown.
+        test.failingSince = {
+          sha,
+          at: options.now.toISOString(),
+          ...(options.commit?.url ? { url: options.commit.url } : {}),
+          ...(options.commit?.change ? { change: options.commit.change } : {}),
+        };
+      }
       test.outcomes = (test.outcomes + code).slice(-options.window);
       test.lastRun = history.runs + 1;
       testChanged = true;
@@ -158,7 +289,14 @@ export function recordRun(history: History, results: TestResult[], options: Reco
     }
   }
 
-  if (options.tracked) history.runs += 1;
+  if (options.tracked) {
+    history.runs += 1;
+    const timed = results.filter((result) => result.outcome !== "skipped" && result.duration !== undefined);
+    if (timed.length > 0) {
+      const total = timed.reduce((sum, result) => sum + result.duration!, 0);
+      history.runDurations = [...(history.runDurations ?? []), total].slice(-MAX_DURATIONS);
+    }
+  }
   changed = prune(history, options) || changed;
   if (changed) history.updatedAt = options.now.toISOString();
   return changed;
@@ -190,5 +328,16 @@ function prune(history: History, options: RecordOptions): boolean {
       changed = true;
     }
   }
-  return changed;
+  return forget(history) || changed;
+}
+
+/** Past MAX_TESTS, the tests seen longest ago go: a report full of made-up names cannot grow the branch for ever. */
+function forget(history: History): boolean {
+  const ids = Object.keys(history.tests);
+  if (ids.length <= MAX_TESTS) return false;
+  const oldest = ids
+    .sort((a, b) => history.tests[a]!.lastSeen.localeCompare(history.tests[b]!.lastSeen) || a.localeCompare(b))
+    .slice(0, ids.length - MAX_TESTS);
+  for (const id of oldest) delete history.tests[id];
+  return true;
 }

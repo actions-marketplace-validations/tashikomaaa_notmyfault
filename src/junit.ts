@@ -18,7 +18,7 @@ export interface TestResult {
   message?: string;
   /** Duration in milliseconds, when the report gives it. */
   duration?: number;
-  /** What the report tells about where a failed test lives, to annotate it. */
+  /** What the report tells about where the test lives, to annotate it or find its owners. */
   hints?: LocationHints;
 }
 
@@ -33,7 +33,12 @@ export interface LocationHints {
 }
 
 const MAX_MESSAGE_LENGTH = 300;
+const MAX_NAME_LENGTH = 500;
 const MAX_REFERENCES = 20;
+// Reports are written by test runners, and on a fork by whoever opened the pull request: control characters and
+// terminal escapes would let a name rewrite a log line, so they never leave this module.
+const ANSI = /\u001b\[[0-9;?]*[ -\/]*[@-~]/g;
+const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g;
 // A path ending with an extension, then a line number: "test/cart.test.ts:14:25", "(OrderTest.java:42)".
 const REFERENCE = /(?:^|[\s(['"])((?:[\w@.-]+\/|\/)*[\w@-][\w@.-]*\.[a-z][a-z0-9]{0,5}):(\d+)/gi;
 
@@ -132,7 +137,10 @@ function toResult(testcase: XmlElement, suite: Suite): TestResult | undefined {
   if (message) result.message = message;
   const seconds = Number(testcase.attrs.time);
   if (testcase.attrs.time?.trim() && Number.isFinite(seconds) && seconds >= 0) result.duration = Math.round(seconds * 1000);
-  if (outcome === "failed") result.hints = locationHints(testcase, suite, failures);
+  if (outcome !== "skipped") {
+    const hints = locationHints(testcase, suite, failures);
+    if (hints.file || hints.names.length > 0 || hints.references.length > 0) result.hints = hints;
+  }
   return result;
 }
 
@@ -181,7 +189,7 @@ function mergeAttempt(previous: TestResult, next: TestResult): TestResult {
 
 function firstMessage(element: XmlElement | undefined): string | undefined {
   if (!element) return undefined;
-  const raw = element.attrs.message || element.text;
+  const raw = (element.attrs.message || element.text).replace(ANSI, "").replace(CONTROL, "");
   const line = raw
     .split("\n")
     .map((part) => part.trim())
@@ -191,7 +199,8 @@ function firstMessage(element: XmlElement | undefined): string | undefined {
 }
 
 function normalize(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
+  const clean = value.replace(ANSI, "").replace(CONTROL, "").replace(/\s+/g, " ").trim();
+  return clean.length > MAX_NAME_LENGTH ? `${clean.slice(0, MAX_NAME_LENGTH - 1)}…` : clean;
 }
 
 function joinDistinct(parts: string[]): string {

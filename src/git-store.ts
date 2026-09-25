@@ -11,6 +11,12 @@ export interface GitStoreOptions {
   token?: string;
   /** Where to create the scratch repository. Defaults to the OS temp dir. */
   tempDir?: string;
+  /** User name sent with the token. GitHub accepts any, GitLab wants gitlab-ci-token for job tokens. */
+  username?: string;
+  /** Author of the commits. Defaults to the GitHub Actions bot. */
+  author?: { name: string; email: string };
+  /** Sent with each push, e.g. ci.skip so GitLab starts no pipeline for the branch. */
+  pushOptions?: string[];
 }
 
 export class GitError extends Error {
@@ -35,12 +41,31 @@ const RETRYABLE_PUSH = /stale info|fetch first|non-fast-forward|cannot lock ref|
  */
 export class GitStore {
   private dir: string | undefined;
+  /** The remote without its user name and password, which git would show in the process list. */
+  private readonly remoteUrl: string;
+  private readonly urlToken: string | undefined;
 
-  constructor(private readonly options: GitStoreOptions) {}
+  constructor(private readonly options: GitStoreOptions) {
+    const { url, user, password } = splitCredentials(options.remoteUrl);
+    this.remoteUrl = url;
+    this.urlToken = password;
+    if (password && !options.token) this.options = { ...options, token: password, username: user || options.username };
+  }
 
   async read(path: string): Promise<string | undefined> {
     const head = await this.fetchHead();
     return head ? this.readFile(head, path) : undefined;
+  }
+
+  /** Every file of the branch whose path starts with `prefix`, by path. Empty when the branch does not exist. */
+  async readAll(prefix: string): Promise<Record<string, string>> {
+    const head = await this.fetchHead();
+    if (!head) return {};
+    const files: Record<string, string> = {};
+    for (const path of await this.listFiles(head)) {
+      if (path.startsWith(prefix)) files[path] = await this.git(["cat-file", "blob", `${head}:${path}`]);
+    }
+    return files;
   }
 
   /**
@@ -74,8 +99,9 @@ export class GitStore {
         const output = await this.git([
           "push",
           "--porcelain",
+          ...(this.options.pushOptions ?? []).map((option) => `--push-option=${option}`),
           `--force-with-lease=refs/heads/${this.options.branch}:${head ?? ""}`,
-          this.options.remoteUrl,
+          this.remoteUrl,
           `${commit}:refs/heads/${this.options.branch}`,
         ]);
         // Another writer may have pushed the exact same commit (same content,
@@ -104,7 +130,7 @@ export class GitStore {
         "--quiet",
         "--depth=1",
         "--no-tags",
-        this.options.remoteUrl,
+        this.remoteUrl,
         `refs/heads/${this.options.branch}`,
       ]);
     } catch (error) {
@@ -135,10 +161,10 @@ export class GitStore {
     const tree = (await this.git(["write-tree"], env)).trim();
     return (
       await this.git(["commit-tree", tree, "-m", message], {
-        GIT_AUTHOR_NAME: BOT_NAME,
-        GIT_AUTHOR_EMAIL: BOT_EMAIL,
-        GIT_COMMITTER_NAME: BOT_NAME,
-        GIT_COMMITTER_EMAIL: BOT_EMAIL,
+        GIT_AUTHOR_NAME: this.options.author?.name ?? BOT_NAME,
+        GIT_AUTHOR_EMAIL: this.options.author?.email ?? BOT_EMAIL,
+        GIT_COMMITTER_NAME: this.options.author?.name ?? BOT_NAME,
+        GIT_COMMITTER_EMAIL: this.options.author?.email ?? BOT_EMAIL,
       })
     ).trim();
   }
@@ -164,10 +190,11 @@ export class GitStore {
       GIT_CONFIG_NOSYSTEM: "1",
       GIT_CONFIG_GLOBAL: devNull,
     };
-    const { token, remoteUrl } = this.options;
+    const token = this.options.token ?? this.urlToken;
+    const remoteUrl = this.remoteUrl;
     if (token && /^https?:\/\//.test(remoteUrl)) {
       const origin = new URL(remoteUrl).origin;
-      const credentials = Buffer.from(`x-access-token:${token}`).toString("base64");
+      const credentials = Buffer.from(`${this.options.username ?? "x-access-token"}:${token}`).toString("base64");
       Object.assign(env, {
         GIT_CONFIG_COUNT: "1",
         GIT_CONFIG_KEY_0: `http.${origin}/.extraheader`,
@@ -175,6 +202,25 @@ export class GitStore {
       });
     }
     return env;
+  }
+}
+
+/**
+ * A git URL without its user name and password, which would otherwise be visible in the process list of the runner.
+ * The password is returned so that it can be sent through the environment instead.
+ */
+export function splitCredentials(remoteUrl: string): { url: string; user?: string; password?: string } {
+  if (!/^https?:\/\//.test(remoteUrl)) return { url: remoteUrl };
+  try {
+    const url = new URL(remoteUrl);
+    if (!url.username && !url.password) return { url: remoteUrl };
+    const user = decodeURIComponent(url.username);
+    const password = decodeURIComponent(url.password);
+    url.username = "";
+    url.password = "";
+    return { url: url.href, ...(user ? { user } : {}), ...(password ? { password } : { password: user }) };
+  } catch {
+    return { url: remoteUrl };
   }
 }
 

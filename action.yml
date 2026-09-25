@@ -44,6 +44,24 @@ inputs:
   flaky-issues:
     description: Open an issue for each flaky test, keep it up to date and close it once the test stops failing. Needs the issues write permission.
     default: "false"
+  mention-owners:
+    description: Mention the owners of each flaky test, from CODEOWNERS, in its issue.
+    default: "false"
+  assign-owners:
+    description: Assign the issue of each flaky test to the owners who are users, from CODEOWNERS, when it is created.
+    default: "false"
+  missing-tests:
+    description: Report tests that ran in the latest run on a tracked branch but are missing from this run.
+    default: "true"
+  check:
+    description: Report the run as a check of its own, failing only on failures not covered by tolerate, for branch protection to require. Needs the checks write permission.
+    default: "false"
+  check-name:
+    description: Name of the check.
+    default: notmyfault
+  rerun-flaky:
+    description: GitLab only. When only flaky tests stand in the way, start a new pipeline for the commit, once. On GitHub, use a companion workflow.
+    default: "false"
   record:
     description: Record this run in the history.
     default: "true"
@@ -68,6 +86,8 @@ outputs:
     description: Tests failing on a tracked branch that pass in this run.
   slower:
     description: Passing tests that took much longer than usual on a tracked branch.
+  missing:
+    description: Tests of the latest run on a tracked branch missing from this run.
   quarantined:
     description: Failures of tests quarantined by hand.
   blocking:

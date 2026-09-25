@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { computeStats, verdictFor, type TestStats } from "./analyze";
-import type { Issue } from "./github";
+import type { Issue } from "./platform";
 import type { History, TestHistory } from "./history";
 import type { TestResult } from "./junit";
 import type { Rename } from "./renames";
-import { code, escapeHtml } from "./report";
+import { code, escapeHtml, sinceCommit } from "./report";
 
 export const FLAKY_LABEL = { name: "flaky-test", color: "fcbd34", description: "A test notmyfault found flaky" };
 /** An issue is closed after this many days without a failure on the tracked branch. */
@@ -31,10 +31,18 @@ export interface IssueContext {
   evidenceTtlDays: number;
   sha: string;
   runUrl?: string;
+  /** What the run is called: "workflow run" by default, "CI job" on GitLab. */
+  runName?: string;
+  /** "pull request" by default, "merge request" on GitLab. */
+  pullRequest?: string;
+  /** The owners to mention in the issue of a test that ran, from CODEOWNERS. */
+  owners?: (result: TestResult) => string[];
+  /** Whether the owners who are users are assigned the issues created. */
+  assignOwners?: boolean;
 }
 
 export type IssueAction =
-  | { kind: "create"; title: string; body: string }
+  | { kind: "create"; title: string; body: string; assignees: string[] }
   | { kind: "update"; issue: number; body: string; reopen: boolean; title?: string }
   | { kind: "close"; issue: number; comment: string };
 
@@ -110,7 +118,7 @@ export function planFlakyIssues(
         postponed++;
       } else {
         created++;
-        actions.push({ kind: "create", title: issueTitle(result?.title ?? id), body: body() });
+        actions.push({ kind: "create", title: issueTitle(result?.title ?? id), body: body(), assignees: assignees(result, context) });
       }
     }
   }
@@ -143,6 +151,7 @@ function renderFlakyIssue(
     "",
     `- **Test:** ${code(result?.title ?? id)}`,
     `- **Suite:** \`${key}\``,
+    ...owners(result, context),
     `- **Verdict on ${where}:** ${verdict(stats)}`,
     `- **Runs on ${where}:** failed ${stats.failures} of the last ${plural(stats.runs, "run")}${retries}`,
     `- **Last failure:** ${lastFailureDay(test) ?? "unknown"}`,
@@ -156,12 +165,23 @@ function renderFlakyIssue(
 
   // Issues are only updated when their test fails, which gives the latest failure.
   if (result?.outcome === "failed" || result?.outcome === "flaky") lines.push("", latestFailure(result, context));
-  lines.push("", `Until it is fixed, [quarantine mode](${QUARANTINE_URL}) keeps it from blocking pull requests.`);
+  lines.push("", `Until it is fixed, [quarantine mode](${QUARANTINE_URL}) keeps it from blocking ${context.pullRequest ?? "pull request"}s.`);
   return lines.join("\n");
 }
 
+/** Owners who are users, without the teams and groups, which cannot be assigned. */
+function assignees(result: TestResult | undefined, context: IssueContext): string[] {
+  if (!context.assignOwners || !result || !context.owners) return [];
+  return context.owners(result).filter((owner) => !owner.includes("/")).map((owner) => owner.slice(1));
+}
+
+function owners(result: TestResult | undefined, context: IssueContext): string[] {
+  const found = result && context.owners ? context.owners(result) : [];
+  return found.length > 0 ? [`- **Owners:** ${found.join(" ")}`] : [];
+}
+
 function latestFailure(result: TestResult, context: IssueContext): string {
-  const run = context.runUrl ? `, in [this workflow run](${context.runUrl})` : "";
+  const run = context.runUrl ? `, in [this ${context.runName ?? "workflow run"}](${context.runUrl})` : "";
   const what = result.outcome === "flaky" ? "Latest retry" : "Latest failure";
   const message = result.message ? `<pre>${escapeHtml(result.message)}</pre>` : "_The report has no failure message._";
   return [`**${what}**, on commit \`${context.sha.slice(0, 12)}\`${run}:`, "", message].join("\n");
@@ -170,7 +190,7 @@ function latestFailure(result: TestResult, context: IssueContext): string {
 function verdict(stats: TestStats): string {
   switch (verdictFor(stats)) {
     case "broken":
-      return `already failing, failed the last ${plural(stats.trailingFailures, "run")}`;
+      return `already failing, failed the last ${plural(stats.trailingFailures, "run")}${stats.failingSince ? ` since ${sinceCommit(stats.failingSince)}` : ""}`;
     case "flaky":
       return stats.confirmed ? "known flaky" : "probably flaky";
     case "suspect":

@@ -1,9 +1,9 @@
 // src/main.ts
 import { statSync } from "node:fs";
 import { glob, readFile } from "node:fs/promises";
-import { isAbsolute, join as join2, relative, resolve } from "node:path";
+import { isAbsolute, join as join3, relative, resolve } from "node:path";
 
-// src/actions.ts
+// src/github/io.ts
 import { appendFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { EOL } from "node:os";
@@ -34,6 +34,15 @@ var ActionIO = class {
     }
     return parsed;
   }
+  inputName(name) {
+    return `"${name}"`;
+  }
+  describeInput(name) {
+    return `Input "${name}"`;
+  }
+  describeInputs(names2) {
+    return `Inputs ${names2.map((name) => `"${name}"`).join(" and ")}`;
+  }
   setOutput(name, value) {
     const file = this.env.GITHUB_OUTPUT;
     if (!file) return;
@@ -59,8 +68,8 @@ var ActionIO = class {
   /** A workflow annotation on a file, shown in the run summary and next to the code of pull requests. */
   annotation(level, message, properties) {
     const escapeProperty = (value) => value.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A").replace(/:/g, "%3A").replace(/,/g, "%2C");
-    const list = Object.entries(properties).filter(([, value]) => value !== void 0).map(([key, value]) => `${key}=${escapeProperty(String(value))}`).join(",");
-    this.command(`${level} ${list}`, message);
+    const list2 = Object.entries(properties).filter(([, value]) => value !== void 0).map(([key, value]) => `${key}=${escapeProperty(String(value))}`).join(",");
+    this.command(`${level} ${list2}`, message);
   }
   group(title) {
     this.command("group", title);
@@ -68,11 +77,350 @@ var ActionIO = class {
   endGroup() {
     this.write("::endgroup::");
   }
+  /** Workflow commands are written as they come: nothing to write at the end. */
+  finish() {
+  }
   command(name, message) {
     const escaped = message.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
     this.write(`::${name}::${escaped}`);
   }
 };
+
+// src/platform.ts
+var ApiError = class extends Error {
+  constructor(status, path, body, platform) {
+    super(`${platform} API ${status} on ${path}: ${body.slice(0, 200)}`);
+    this.status = status;
+    this.path = path;
+  }
+  status;
+  path;
+  /** The token is missing a permission, a scope or a role. */
+  get denied() {
+    return this.status === 401 || this.status === 403;
+  }
+};
+
+// src/github/api.ts
+var GitHubClient = class {
+  constructor(token, apiUrl, repository) {
+    this.token = token;
+    this.apiUrl = apiUrl;
+    this.repository = repository;
+  }
+  token;
+  apiUrl;
+  repository;
+  /**
+   * Updates the comment carrying `marker`, or creates one when `create` is true.
+   * Resolves to what happened.
+   */
+  async upsertComment(issue, marker, body, create) {
+    const existing = await this.findComment(issue, marker);
+    if (existing) {
+      await this.request("PATCH", `/repos/${this.repository}/issues/comments/${existing.id}`, { body });
+      return "updated";
+    }
+    if (!create) return "skipped";
+    await this.addComment(issue, body);
+    return "created";
+  }
+  async addComment(issue, body) {
+    await this.request("POST", `/repos/${this.repository}/issues/${issue}/comments`, { body });
+  }
+  /** Issues, open or closed, carrying `label`. Pull requests are left out. */
+  async listIssues(label) {
+    const issues = [];
+    let path = `/repos/${this.repository}/issues?labels=${encodeURIComponent(label)}&state=all&per_page=100`;
+    while (path) {
+      const response = await this.request("GET", path);
+      for (const item of await response.json()) {
+        if (!item.pull_request) issues.push({ number: item.number, state: item.state, body: item.body ?? "" });
+      }
+      path = nextPage(response.headers.get("link"), this.apiUrl);
+    }
+    return issues;
+  }
+  async createIssue(title, body, labels) {
+    const response = await this.request("POST", `/repos/${this.repository}/issues`, { title, body, labels });
+    return (await response.json()).number;
+  }
+  async updateIssue(issue, changes) {
+    await this.request("PATCH", `/repos/${this.repository}/issues/${issue}`, changes);
+  }
+  /** Creates the label unless it exists. */
+  async ensureLabel(name, color, description) {
+    try {
+      await this.request("GET", `/repos/${this.repository}/labels/${encodeURIComponent(name)}`);
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.status !== 404) throw error;
+      await this.request("POST", `/repos/${this.repository}/labels`, { name, color, description });
+    }
+  }
+  async changeOf(sha) {
+    const response = await this.request("GET", `/repos/${this.repository}/commits/${sha}/pulls?per_page=100`);
+    const pulls = await response.json();
+    const merged = pulls.filter((pull2) => pull2.merged_at !== null);
+    const pull = merged.find((candidate) => candidate.merge_commit_sha === sha) ?? merged[0];
+    return pull && { number: pull.number, url: pull.html_url };
+  }
+  async assign(issue, users) {
+    await this.request("POST", `/repos/${this.repository}/issues/${issue}/assignees`, { assignees: users });
+  }
+  async deletedFiles(pull) {
+    const deleted = [];
+    let path = `/repos/${this.repository}/pulls/${pull}/files?per_page=100`;
+    while (path) {
+      const response = await this.request("GET", path);
+      for (const file of await response.json()) {
+        if (file.status === "removed") deleted.push(file.filename);
+      }
+      path = nextPage(response.headers.get("link"), this.apiUrl);
+    }
+    return deleted;
+  }
+  async createCheck(check) {
+    const response = await this.request("POST", `/repos/${this.repository}/check-runs`, {
+      name: check.name,
+      head_sha: check.sha,
+      status: "completed",
+      conclusion: check.success ? "success" : "failure",
+      completed_at: (/* @__PURE__ */ new Date()).toISOString(),
+      ...check.detailsUrl ? { details_url: check.detailsUrl } : {},
+      output: { title: check.title, summary: check.summary }
+    });
+    return (await response.json()).html_url;
+  }
+  async findComment(issue, marker) {
+    let path = `/repos/${this.repository}/issues/${issue}/comments?per_page=100`;
+    while (path) {
+      const response = await this.request("GET", path);
+      const comments = await response.json();
+      const match = comments.find((comment2) => comment2.body?.startsWith(marker));
+      if (match) return match;
+      path = nextPage(response.headers.get("link"), this.apiUrl);
+    }
+    return void 0;
+  }
+  async request(method, path, body) {
+    const response = await fetch(`${this.apiUrl}${path}`, {
+      method,
+      headers: {
+        Accept: "application/vnd.github+json",
+        Authorization: `Bearer ${this.token}`,
+        "User-Agent": "notmyfault",
+        "X-GitHub-Api-Version": "2022-11-28",
+        ...body === void 0 ? {} : { "Content-Type": "application/json" }
+      },
+      ...body === void 0 ? {} : { body: JSON.stringify(body) }
+    });
+    if (!response.ok) throw new ApiError(response.status, path, await response.text(), "GitHub");
+    return response;
+  }
+};
+function nextPage(link2, apiUrl) {
+  const match = link2?.match(/<([^>]+)>;\s*rel="next"/);
+  return match?.[1] ? samePage(match[1], apiUrl) : void 0;
+}
+function samePage(url, apiUrl) {
+  try {
+    const next = new URL(url);
+    const base = new URL(apiUrl);
+    if (next.origin !== base.origin || !next.pathname.startsWith(base.pathname)) return void 0;
+    const prefix2 = base.pathname === "/" ? base.origin.length : base.origin.length + base.pathname.length;
+    return next.href.slice(prefix2);
+  } catch {
+    return void 0;
+  }
+}
+
+// src/github/context.ts
+import { readFileSync } from "node:fs";
+function readContext(env) {
+  const repository = required(env, "GITHUB_REPOSITORY");
+  const payload = readPayload(env.GITHUB_EVENT_PATH);
+  const pr = payload.pull_request;
+  const serverUrl = (env.GITHUB_SERVER_URL ?? "https://github.com").replace(/\/+$/, "");
+  const eventName = env.GITHUB_EVENT_NAME ?? "";
+  const refName = env.GITHUB_REF_NAME ?? "";
+  const runId = env.GITHUB_RUN_ID ?? "";
+  const runAttempt = env.GITHUB_RUN_ATTEMPT ?? "1";
+  const onBranch = !eventName.startsWith("pull_request") && env.GITHUB_REF === `refs/heads/${refName}`;
+  return {
+    repository,
+    apiProject: repository,
+    serverUrl,
+    apiUrl: (env.GITHUB_API_URL ?? "https://api.github.com").replace(/\/+$/, ""),
+    sha: required(env, "GITHUB_SHA"),
+    branch: onBranch ? refName : void 0,
+    runDescription: `run ${runId || "local"}, attempt ${runAttempt}`,
+    runUrl: runId ? `${serverUrl}/${repository}/actions/runs/${runId}${runAttempt !== "1" ? `/attempts/${runAttempt}` : ""}` : void 0,
+    workspace: env.GITHUB_WORKSPACE ?? process.cwd(),
+    tempDir: env.RUNNER_TEMP,
+    defaultBranch: payload.repository?.default_branch,
+    defaultKey: `${env.GITHUB_WORKFLOW ?? "workflow"}-${env.GITHUB_JOB ?? "job"}`,
+    pullRequest: typeof pr?.number === "number" ? {
+      number: pr.number,
+      fromFork: pr.head?.repo?.full_name !== (pr.base?.repo?.full_name ?? repository),
+      // GITHUB_SHA is the merge commit GitHub creates for the run: checks show on the head of the pull request.
+      ...pr.head?.sha ? { headSha: pr.head.sha } : {}
+    } : void 0,
+    defaultToken: void 0
+  };
+}
+function required(env, name) {
+  const value = env[name];
+  if (!value) throw new Error(`${name} is not set. notmyfault must run inside GitHub Actions.`);
+  return value;
+}
+function readPayload(path) {
+  if (!path) return {};
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+// src/github/platform.ts
+function githubPlatform(env, io = new ActionIO(env)) {
+  const context = readContext(env);
+  return {
+    name: "github",
+    context,
+    io,
+    forge: (token) => new GitHubClient(token, context.apiUrl, context.apiProject),
+    gitUser: () => "x-access-token",
+    gitAuthor: { name: "github-actions[bot]", email: "41898282+github-actions[bot]@users.noreply.github.com" },
+    pushOptions: [],
+    codeownersPaths: [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"],
+    commitUrl: (sha) => `${context.serverUrl}/${context.repository}/commit/${sha}`,
+    text: {
+      pullRequest: "pull request",
+      changePrefix: "#",
+      runLink: "Workflow run",
+      runName: "workflow run",
+      tokenMissing: 'Input "token" is empty. Pass `token: ${{ github.token }}`.',
+      recordDenied: 'Does the job have "contents: write" permission?',
+      commentDenied: 'Does the job have "pull-requests: write" permission?',
+      commentFromFork: "Tokens are read-only on pull requests from forks; the job summary has the full report.",
+      checkDenied: 'Does the job have "checks: write" permission?',
+      rerunDenied: "",
+      issuesDenied: 'Does the job have "issues: write" permission?'
+    },
+    rerunNotice: true
+  };
+}
+
+// src/forgejo/api.ts
+var ForgejoClient = class {
+  constructor(token, apiUrl, repository) {
+    this.token = token;
+    this.apiUrl = apiUrl;
+    this.repository = repository;
+  }
+  token;
+  apiUrl;
+  repository;
+  async upsertComment(issue, marker, body, create) {
+    const comments = await this.list(`/repos/${this.repository}/issues/${issue}/comments?limit=50`);
+    const existing = comments.find((comment2) => comment2.body?.startsWith(marker));
+    if (existing) {
+      await this.request("PATCH", `/repos/${this.repository}/issues/comments/${existing.id}`, { body });
+      return "updated";
+    }
+    if (!create) return "skipped";
+    await this.addComment(issue, body);
+    return "created";
+  }
+  async addComment(issue, body) {
+    await this.request("POST", `/repos/${this.repository}/issues/${issue}/comments`, { body });
+  }
+  async listIssues(label) {
+    const items = await this.list(`/repos/${this.repository}/issues?labels=${encodeURIComponent(label)}&state=all&type=issues&limit=50`);
+    return items.map((item) => ({ number: item.number, state: item.state, body: item.body ?? "" }));
+  }
+  async createIssue(title, body, labels) {
+    const known = await this.labels();
+    const ids = labels.map((name) => known.find((label) => label.name === name)?.id).filter((id) => id !== void 0);
+    const response = await this.request("POST", `/repos/${this.repository}/issues`, { title, body, labels: ids });
+    return (await response.json()).number;
+  }
+  async updateIssue(issue, changes) {
+    await this.request("PATCH", `/repos/${this.repository}/issues/${issue}`, changes);
+  }
+  async ensureLabel(name, color, description) {
+    if ((await this.labels()).some((label) => label.name === name)) return;
+    await this.request("POST", `/repos/${this.repository}/labels`, { name, color: `#${color}`, description });
+  }
+  async assign(issue, users) {
+    await this.request("PATCH", `/repos/${this.repository}/issues/${issue}`, { assignees: users });
+  }
+  async deletedFiles(pull) {
+    const files = await this.list(`/repos/${this.repository}/pulls/${pull}/files?limit=50`);
+    return files.filter((file) => file.status === "deleted" || file.status === "removed").map((file) => file.filename);
+  }
+  async changeOf(sha) {
+    try {
+      const response = await this.request("GET", `/repos/${this.repository}/commits/${sha}/pull`);
+      const pull = await response.json();
+      return pull.merged ? { number: pull.number, url: pull.html_url } : void 0;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return void 0;
+      throw error;
+    }
+  }
+  async labels() {
+    return this.list(`/repos/${this.repository}/labels?limit=50`);
+  }
+  async list(path) {
+    const items = [];
+    let next = path;
+    while (next) {
+      const response = await this.request("GET", next);
+      items.push(...await response.json());
+      const link2 = response.headers.get("link")?.match(/<([^>]+)>;\s*rel="next"/)?.[1];
+      next = link2 ? samePage(link2, this.apiUrl) : void 0;
+    }
+    return items;
+  }
+  async request(method, path, body) {
+    const response = await fetch(`${this.apiUrl}${path}`, {
+      method,
+      headers: {
+        Accept: "application/json",
+        Authorization: `token ${this.token}`,
+        "User-Agent": "notmyfault",
+        ...body === void 0 ? {} : { "Content-Type": "application/json" }
+      },
+      ...body === void 0 ? {} : { body: JSON.stringify(body) }
+    });
+    if (!response.ok) throw new ApiError(response.status, path, await response.text(), "Forgejo");
+    return response;
+  }
+};
+
+// src/forgejo/platform.ts
+function forgejoPlatform(env, io = new ActionIO(env)) {
+  const github = githubPlatform(env, io);
+  const { context } = github;
+  return {
+    ...github,
+    name: "forgejo",
+    forge: (token) => new ForgejoClient(token, context.apiUrl, context.apiProject),
+    gitAuthor: { name: "notmyfault", email: `notmyfault@noreply.${new URL(context.serverUrl).hostname || "localhost"}` },
+    codeownersPaths: [".forgejo/CODEOWNERS", ".gitea/CODEOWNERS", "docs/CODEOWNERS", "CODEOWNERS"],
+    text: {
+      ...github.text,
+      recordDenied: "Can the token push to the repository? Branch protection rules matching the history branch reject its pushes.",
+      commentDenied: "Can the token comment on pull requests?",
+      commentFromFork: "Tokens are read-only on pull requests from forks; the job summary has the full report.",
+      issuesDenied: "Can the token write issues?"
+    },
+    // No workflow_run event to re-run jobs from.
+    rerunNotice: false
+  };
+}
 
 // src/history.ts
 import { createHash } from "node:crypto";
@@ -83,11 +431,15 @@ var RETRY = "r";
 var MAX_FAILED_ON = 20;
 var MAX_EVIDENCE = 10;
 var MAX_ERRORS = 10;
+var MAX_OUTCOMES = 500;
+var MAX_REF_LENGTH = 40;
+var MAX_URL_LENGTH = 2048;
+var MAX_TESTS = 2e4;
 var MAX_DURATIONS = 10;
 var MAX_FINGERPRINTED_LENGTH = 200;
 var DAY_MS = 24 * 60 * 60 * 1e3;
 function emptyHistory() {
-  return { version: HISTORY_VERSION, updatedAt: (/* @__PURE__ */ new Date(0)).toISOString(), runs: 0, tests: {} };
+  return { version: HISTORY_VERSION, updatedAt: (/* @__PURE__ */ new Date(0)).toISOString(), runs: 0, tests: /* @__PURE__ */ Object.create(null) };
 }
 function errorFingerprint(message) {
   const normalized = message.toLowerCase().replace(/\b(?=[0-9a-f-]*\d)[0-9a-f]{7,}(?:-[0-9a-f]{4,})*\b/g, "#").replace(/\d+/g, "#").replace(/\s+/g, " ").trim().slice(0, MAX_FINGERPRINTED_LENGTH);
@@ -100,15 +452,98 @@ function parseHistory(json) {
     if (data.version !== HISTORY_VERSION || typeof data.tests !== "object" || data.tests === null) {
       return emptyHistory();
     }
+    const tests = /* @__PURE__ */ Object.create(null);
+    for (const [id, test] of Object.entries(data.tests)) {
+      const parsed = parseTest(test);
+      if (parsed) tests[id] = parsed;
+    }
     return {
       version: HISTORY_VERSION,
-      updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : emptyHistory().updatedAt,
-      runs: typeof data.runs === "number" ? data.runs : 0,
-      tests: data.tests
+      updatedAt: isoDate(data.updatedAt) ?? emptyHistory().updatedAt,
+      runs: count(data.runs),
+      ...Array.isArray(data.runDurations) ? { runDurations: data.runDurations.filter(isDuration).slice(-MAX_DURATIONS) } : {},
+      tests
     };
   } catch {
     return emptyHistory();
   }
+}
+function parseTest(value) {
+  if (typeof value !== "object" || value === null) return void 0;
+  const raw = value;
+  const outcomes = typeof raw.outcomes === "string" ? raw.outcomes.replace(/[^pfr]/g, "").slice(-MAX_OUTCOMES) : "";
+  const test = { outcomes, lastSeen: day(raw.lastSeen) ?? (/* @__PURE__ */ new Date(0)).toISOString().slice(0, 10) };
+  const failedOn = list(raw.failedOn, (sha) => hex(sha)).slice(-MAX_FAILED_ON);
+  if (failedOn.length > 0) test.failedOn = failedOn;
+  const evidence = list(raw.evidence, parseEvidence).slice(-MAX_EVIDENCE);
+  if (evidence.length > 0) test.evidence = evidence;
+  const errors = list(raw.errors, (value2) => hex(value2)).slice(-MAX_ERRORS);
+  if (errors.length > 0) test.errors = errors;
+  const lastFailure2 = day(raw.lastFailure);
+  if (lastFailure2) test.lastFailure = lastFailure2;
+  const durations = list(raw.durations, (ms) => isDuration(ms) ? ms : void 0).slice(-MAX_DURATIONS);
+  if (durations.length > 0) test.durations = durations;
+  if (typeof raw.lastRun === "number" && Number.isInteger(raw.lastRun) && raw.lastRun >= 0) test.lastRun = raw.lastRun;
+  const failingSince = parseFailingSince(raw.failingSince);
+  if (failingSince) test.failingSince = failingSince;
+  return test;
+}
+function parseEvidence(value) {
+  if (typeof value !== "object" || value === null) return void 0;
+  const raw = value;
+  const at = isoDate(raw.at);
+  const sha = hex(raw.sha);
+  if (!at || !sha || raw.kind !== "retry" && raw.kind !== "rerun") return void 0;
+  return { at, sha, kind: raw.kind };
+}
+function parseFailingSince(value) {
+  if (typeof value !== "object" || value === null) return void 0;
+  const raw = value;
+  const at = isoDate(raw.at);
+  const sha = hex(raw.sha);
+  if (!at || !sha) return void 0;
+  const since2 = { sha, at };
+  const url = webUrl(raw.url);
+  if (url) since2.url = url;
+  const change = raw.change;
+  const changeUrl = change ? webUrl(change.url) : void 0;
+  if (change && changeUrl && typeof change.ref === "string" && change.ref.length <= MAX_REF_LENGTH) {
+    since2.change = { ref: change.ref, url: changeUrl };
+  }
+  return since2;
+}
+function list(value, parse) {
+  if (!Array.isArray(value)) return [];
+  const parsed = [];
+  for (const item of value.slice(-MAX_FAILED_ON * 2)) {
+    const kept = parse(item);
+    if (kept !== void 0) parsed.push(kept);
+  }
+  return parsed;
+}
+function hex(value) {
+  return typeof value === "string" && /^[0-9a-f]{1,64}$/.test(value) ? value : void 0;
+}
+function day(value) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : void 0;
+}
+function isoDate(value) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}T[\d:.]+Z?$/.test(value) ? value : void 0;
+}
+function webUrl(value) {
+  if (typeof value !== "string" || value.length > MAX_URL_LENGTH) return void 0;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function isDuration(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+function count(value) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0;
 }
 function serializeHistory(history) {
   return `${JSON.stringify(history, null, 1)}
@@ -130,6 +565,16 @@ function recordRun(history, results, options) {
     }
     if (options.tracked) {
       const code2 = result.outcome === "failed" ? FAIL : result.outcome === "flaky" ? RETRY : PASS;
+      if (code2 !== FAIL) {
+        delete test.failingSince;
+      } else if (!test.outcomes.endsWith(FAIL)) {
+        test.failingSince = {
+          sha,
+          at: options.now.toISOString(),
+          ...options.commit?.url ? { url: options.commit.url } : {},
+          ...options.commit?.change ? { change: options.commit.change } : {}
+        };
+      }
       test.outcomes = (test.outcomes + code2).slice(-options.window);
       test.lastRun = history.runs + 1;
       testChanged = true;
@@ -154,7 +599,14 @@ function recordRun(history, results, options) {
       changed = true;
     }
   }
-  if (options.tracked) history.runs += 1;
+  if (options.tracked) {
+    history.runs += 1;
+    const timed = results.filter((result) => result.outcome !== "skipped" && result.duration !== void 0);
+    if (timed.length > 0) {
+      const total = timed.reduce((sum, result) => sum + result.duration, 0);
+      history.runDurations = [...history.runDurations ?? [], total].slice(-MAX_DURATIONS);
+    }
+  }
   changed = prune(history, options) || changed;
   if (changed) history.updatedAt = options.now.toISOString();
   return changed;
@@ -183,11 +635,39 @@ function prune(history, options) {
       changed = true;
     }
   }
-  return changed;
+  return forget(history) || changed;
+}
+function forget(history) {
+  const ids = Object.keys(history.tests);
+  if (ids.length <= MAX_TESTS) return false;
+  const oldest = ids.sort((a, b) => history.tests[a].lastSeen.localeCompare(history.tests[b].lastSeen) || a.localeCompare(b)).slice(0, ids.length - MAX_TESTS);
+  for (const id of oldest) delete history.tests[id];
+  return true;
 }
 
 // src/analyze.ts
+function markDeleted(missing, deleted) {
+  const candidates = deleted.map((path) => ({ path, name: withoutExtension(path), isTest: TEST_FILE.test(path) }));
+  for (const group of missing) {
+    const parts = group.group.split(SEPARATOR).filter(Boolean);
+    const file = candidates.find(
+      ({ path, name, isTest }) => parts.some((part) => {
+        const asPath = part.replace(/\./g, "/");
+        if (path === part || path.endsWith(`/${part}`)) return true;
+        return isTest && (name === asPath || name.endsWith(`/${asPath}`));
+      })
+    );
+    if (file) group.deletedFile = file.path;
+  }
+}
+function withoutExtension(path) {
+  const slash = path.lastIndexOf("/");
+  const dot = path.indexOf(".", slash + 1);
+  return dot === -1 ? path : path.slice(0, dot);
+}
+var TEST_FILE = /(^|\/)(tests?|specs?|__tests__)\/|(^|\/|\.|_|-)(test|tests|spec|specs)[._-]|[._-](test|tests|spec|specs)\./i;
 var DAY_MS2 = 24 * 60 * 60 * 1e3;
+var SEPARATOR = " \u203A ";
 var LIKELY_FLAKY_ISOLATED_FAILURES = 3;
 var UNLIKELY_STREAK_CHANCE = 0.01;
 var MIN_BROKEN_STREAK = 3;
@@ -197,7 +677,16 @@ var SLOWER_MIN_DIFFERENCE_MS = 500;
 var SLOWER_MIN_RUNS = 5;
 var VERDICT_ORDER = { new: 0, suspect: 1, broken: 2, flaky: 3 };
 function analyze(results, history, now, evidenceTtlDays) {
-  const analysis = { total: results.length, passed: 0, skipped: 0, failures: [], retried: [], fixed: [], slower: [] };
+  const analysis = {
+    total: results.length,
+    passed: 0,
+    skipped: 0,
+    failures: [],
+    retried: [],
+    fixed: [],
+    slower: [],
+    missing: missingTests(results, history)
+  };
   const checkFixed = (test) => {
     const tested = history.tests[test.id];
     if (!tested?.outcomes.endsWith(FAIL)) return;
@@ -249,17 +738,31 @@ function analyze(results, history, now, evidenceTtlDays) {
   analysis.slower.sort((a, b) => b.duration / b.usual - a.duration / a.usual || a.test.title.localeCompare(b.test.title));
   return analysis;
 }
+function missingTests(results, history) {
+  const present = new Set(results.map((result) => result.id));
+  const groups = /* @__PURE__ */ new Map();
+  for (const [id, test] of Object.entries(history.tests)) {
+    if (history.runs === 0 || test.lastRun !== history.runs) continue;
+    const index = id.lastIndexOf(SEPARATOR);
+    const name = index === -1 ? "" : id.slice(0, index);
+    const group = groups.get(name) ?? { ids: [], latest: 0 };
+    group.latest++;
+    if (!present.has(id)) group.ids.push(id);
+    groups.set(name, group);
+  }
+  return [...groups].filter(([, group]) => group.ids.length > 0).map(([name, group]) => ({ group: name, ids: group.ids.sort(), whole: group.ids.length === group.latest })).sort((a, b) => a.group.localeCompare(b.group));
+}
 function computeStats(history, now, evidenceTtlDays) {
   const outcomes = history?.outcomes ?? "";
   const cutoff = now.getTime() - evidenceTtlDays * DAY_MS2;
   const evidence = (history?.evidence ?? []).filter((e) => Date.parse(e.at) >= cutoff);
-  const retries = count(outcomes, RETRY);
+  const retries = count2(outcomes, RETRY);
   const trailing = trailingFailures(outcomes);
   const before = outcomes.slice(0, outcomes.length - trailing);
-  const failureRate = before.length === 0 ? 0 : count(before, FAIL) / before.length;
+  const failureRate = before.length === 0 ? 0 : count2(before, FAIL) / before.length;
   const stats = {
     runs: outcomes.length,
-    failures: count(outcomes, FAIL),
+    failures: count2(outcomes, FAIL),
     retries,
     trailingFailures: trailing,
     failureRate,
@@ -270,6 +773,7 @@ function computeStats(history, now, evidenceTtlDays) {
   };
   const latest = evidence[evidence.length - 1];
   if (latest) stats.latestEvidence = latest;
+  if (trailing > 0 && history?.failingSince) stats.failingSince = history.failingSince;
   return stats;
 }
 function verdictFor(stats) {
@@ -293,10 +797,20 @@ function rankFlakyTests(history, now, evidenceTtlDays, limit) {
   const ranked = [];
   for (const [id, test] of Object.entries(history.tests)) {
     const stats = computeStats(test, now, evidenceTtlDays);
-    if (stats.confirmed || stats.isolatedFailures >= LIKELY_FLAKY_ISOLATED_FAILURES) ranked.push({ id, ...stats });
+    if (!stats.confirmed && stats.isolatedFailures < LIKELY_FLAKY_ISOLATED_FAILURES) continue;
+    const cost = estimateCost(test, history);
+    ranked.push(cost === void 0 ? { id, ...stats } : { id, ...stats, cost });
   }
   const score2 = (t) => (t.failures + t.retries) / Math.max(t.runs, 1) + (t.confirmed ? 1 : 0);
-  return ranked.sort((a, b) => score2(b) - score2(a) || a.id.localeCompare(b.id)).slice(0, limit);
+  return ranked.sort((a, b) => (b.cost ?? -1) - (a.cost ?? -1) || score2(b) - score2(a) || a.id.localeCompare(b.id)).slice(0, limit);
+}
+function estimateCost(test, history) {
+  const failures = count2(test.outcomes, FAIL);
+  const retries = count2(test.outcomes, RETRY);
+  const suite = history.runDurations?.length ? median(history.runDurations) : void 0;
+  const own = test.durations?.length ? median(test.durations) : void 0;
+  if (failures > 0 && suite === void 0 || retries > 0 && own === void 0) return void 0;
+  return failures * (suite ?? 0) + retries * (own ?? 0);
 }
 function brokenStreak(failureRate) {
   let streak = MIN_BROKEN_STREAK;
@@ -312,7 +826,7 @@ function failureTrends(history, ids) {
     if (outcomes.length < TREND_MIN_RUNS) continue;
     const rates = [];
     for (let end = TREND_WINDOW; end <= outcomes.length; end++) {
-      rates.push(Math.round(count(outcomes.slice(end - TREND_WINDOW, end), FAIL) / TREND_WINDOW * 100));
+      rates.push(Math.round(count2(outcomes.slice(end - TREND_WINDOW, end), FAIL) / TREND_WINDOW * 100));
     }
     trends.push({ id, rates, firstRun: TREND_WINDOW });
   }
@@ -344,53 +858,10 @@ function trailingFailures(outcomes) {
   for (let i = outcomes.length - 1; i >= 0 && outcomes[i] === FAIL; i--) streak++;
   return streak;
 }
-function count(value, char) {
+function count2(value, char) {
   let n = 0;
   for (const c of value) if (c === char) n++;
   return n;
-}
-
-// src/context.ts
-import { readFileSync } from "node:fs";
-function readContext(env) {
-  const repository = required(env, "GITHUB_REPOSITORY");
-  const payload = readPayload(env.GITHUB_EVENT_PATH);
-  const pr = payload.pull_request;
-  return {
-    repository,
-    serverUrl: (env.GITHUB_SERVER_URL ?? "https://github.com").replace(/\/+$/, ""),
-    apiUrl: (env.GITHUB_API_URL ?? "https://api.github.com").replace(/\/+$/, ""),
-    sha: required(env, "GITHUB_SHA"),
-    ref: env.GITHUB_REF ?? "",
-    refName: env.GITHUB_REF_NAME ?? "",
-    eventName: env.GITHUB_EVENT_NAME ?? "",
-    runId: env.GITHUB_RUN_ID ?? "",
-    runAttempt: env.GITHUB_RUN_ATTEMPT ?? "1",
-    workflow: env.GITHUB_WORKFLOW ?? "workflow",
-    job: env.GITHUB_JOB ?? "job",
-    workspace: env.GITHUB_WORKSPACE ?? process.cwd(),
-    tempDir: env.RUNNER_TEMP,
-    defaultBranch: payload.repository?.default_branch,
-    pullRequest: typeof pr?.number === "number" ? { number: pr.number, fromFork: pr.head?.repo?.full_name !== (pr.base?.repo?.full_name ?? repository) } : void 0
-  };
-}
-function runUrl(context) {
-  if (!context.runId) return void 0;
-  const attempt = context.runAttempt && context.runAttempt !== "1" ? `/attempts/${context.runAttempt}` : "";
-  return `${context.serverUrl}/${context.repository}/actions/runs/${context.runId}${attempt}`;
-}
-function required(env, name) {
-  const value = env[name];
-  if (!value) throw new Error(`${name} is not set. notmyfault must run inside GitHub Actions.`);
-  return value;
-}
-function readPayload(path) {
-  if (!path) return {};
-  try {
-    return JSON.parse(readFileSync(path, "utf8"));
-  } catch {
-    return {};
-  }
 }
 
 // src/git-store.ts
@@ -413,12 +884,29 @@ var RETRYABLE_PUSH = /stale info|fetch first|non-fast-forward|cannot lock ref|fa
 var GitStore = class {
   constructor(options) {
     this.options = options;
+    const { url, user, password } = splitCredentials(options.remoteUrl);
+    this.remoteUrl = url;
+    this.urlToken = password;
+    if (password && !options.token) this.options = { ...options, token: password, username: user || options.username };
   }
   options;
   dir;
+  /** The remote without its user name and password, which git would show in the process list. */
+  remoteUrl;
+  urlToken;
   async read(path) {
     const head = await this.fetchHead();
     return head ? this.readFile(head, path) : void 0;
+  }
+  /** Every file of the branch whose path starts with `prefix`, by path. Empty when the branch does not exist. */
+  async readAll(prefix2) {
+    const head = await this.fetchHead();
+    if (!head) return {};
+    const files = {};
+    for (const path of await this.listFiles(head)) {
+      if (path.startsWith(prefix2)) files[path] = await this.git(["cat-file", "blob", `${head}:${path}`]);
+    }
+    return files;
   }
   /**
    * Rewrites `path` with the result of `update` (skipped when it returns
@@ -441,8 +929,9 @@ var GitStore = class {
         const output = await this.git([
           "push",
           "--porcelain",
+          ...(this.options.pushOptions ?? []).map((option) => `--push-option=${option}`),
           `--force-with-lease=refs/heads/${this.options.branch}:${head ?? ""}`,
-          this.options.remoteUrl,
+          this.remoteUrl,
           `${commit}:refs/heads/${this.options.branch}`
         ]);
         if (commit === head || !/^=\t/m.test(output)) return true;
@@ -467,7 +956,7 @@ var GitStore = class {
         "--quiet",
         "--depth=1",
         "--no-tags",
-        this.options.remoteUrl,
+        this.remoteUrl,
         `refs/heads/${this.options.branch}`
       ]);
     } catch (error) {
@@ -494,10 +983,10 @@ var GitStore = class {
     }
     const tree = (await this.git(["write-tree"], env)).trim();
     return (await this.git(["commit-tree", tree, "-m", message], {
-      GIT_AUTHOR_NAME: BOT_NAME,
-      GIT_AUTHOR_EMAIL: BOT_EMAIL,
-      GIT_COMMITTER_NAME: BOT_NAME,
-      GIT_COMMITTER_EMAIL: BOT_EMAIL
+      GIT_AUTHOR_NAME: this.options.author?.name ?? BOT_NAME,
+      GIT_AUTHOR_EMAIL: this.options.author?.email ?? BOT_EMAIL,
+      GIT_COMMITTER_NAME: this.options.author?.name ?? BOT_NAME,
+      GIT_COMMITTER_EMAIL: this.options.author?.email ?? BOT_EMAIL
     })).trim();
   }
   async repository() {
@@ -519,10 +1008,11 @@ var GitStore = class {
       GIT_CONFIG_NOSYSTEM: "1",
       GIT_CONFIG_GLOBAL: devNull
     };
-    const { token, remoteUrl } = this.options;
+    const token = this.options.token ?? this.urlToken;
+    const remoteUrl = this.remoteUrl;
     if (token && /^https?:\/\//.test(remoteUrl)) {
       const origin = new URL(remoteUrl).origin;
-      const credentials = Buffer.from(`x-access-token:${token}`).toString("base64");
+      const credentials = Buffer.from(`${this.options.username ?? "x-access-token"}:${token}`).toString("base64");
       Object.assign(env, {
         GIT_CONFIG_COUNT: "1",
         GIT_CONFIG_KEY_0: `http.${origin}/.extraheader`,
@@ -532,6 +1022,20 @@ var GitStore = class {
     return env;
   }
 };
+function splitCredentials(remoteUrl) {
+  if (!/^https?:\/\//.test(remoteUrl)) return { url: remoteUrl };
+  try {
+    const url = new URL(remoteUrl);
+    if (!url.username && !url.password) return { url: remoteUrl };
+    const user = decodeURIComponent(url.username);
+    const password = decodeURIComponent(url.password);
+    url.username = "";
+    url.password = "";
+    return { url: url.href, ...user ? { user } : {}, ...password ? { password } : { password: user } };
+  } catch {
+    return { url: remoteUrl };
+  }
+}
 function run(args, env, input) {
   return new Promise((resolve2, reject) => {
     const child = spawn("git", args, {
@@ -571,10 +1075,12 @@ function renderBadge(history, now, evidenceTtlDays) {
 }
 
 // src/report.ts
+var MAX_CHECK_SUMMARY = 65535;
 var MAX_ROWS = 30;
 var MAX_MESSAGES = 10;
 var MAX_FIXED = 10;
 var MAX_SLOWER = 10;
+var MAX_MISSING = 10;
 var MAX_CHART_TITLE = 60;
 var PROJECT_URL = "https://github.com/tashikomaaa/notmyfault";
 var BADGES_URL = "https://raw.githubusercontent.com/tashikomaaa/notmyfault/main/docs/assets";
@@ -588,16 +1094,29 @@ function commentMarker(key) {
 function renderSuitesComment(suites, context) {
   return [commentMarker(context.key), ...renderBody(suites, context)].join("\n");
 }
+function renderCheck(suites, context) {
+  const lines = renderBody(suites, { ...context, mode: "quarantine" }, "Check");
+  const title = lines[0].replace(/^### (<img [^>]*> )?/, "");
+  const summary = lines.slice(2).join("\n");
+  return {
+    title,
+    summary: summary.length > MAX_CHECK_SUMMARY ? `${summary.slice(0, MAX_CHECK_SUMMARY - 30)}
+
+_\u2026report truncated_` : summary
+  };
+}
 function renderSuitesSummary(suites, context) {
   const lines = renderBody(suites, context);
   for (const suite of suites) {
     const of = suites.length > 1 ? ` of ${suite.name}` : "";
     if (suite.renames?.length) {
+      const moved = suite.renames.filter((rename) => rename.moved).length;
+      const what = moved === suite.renames.length ? "new file" : moved > 0 ? "new name or file" : "new name";
       lines.push(
         "",
-        `\u270F\uFE0F **Renamed:** the history of ${plural(suite.renames.length, "test")}${of} followed ${suite.renames.length === 1 ? "its" : "their"} new name. If a rename is wrong, the new test inherited the history of another one: see [Test identity](${PROJECT_URL}/blob/main/docs/how-it-works.md#test-identity).`,
+        `\u270F\uFE0F **Renamed:** the history of ${plural(suite.renames.length, "test")}${of} followed ${suite.renames.length === 1 ? "it to its" : "them to their"} ${what}. If a match is wrong, the new test inherited the history of another one: see [Test identity](${PROJECT_URL}/blob/main/docs/how-it-works.md#test-identity).`,
         "",
-        ...suite.renames.map(({ from, to }) => `- ${code(from)} \u2192 ${code(to)}`)
+        ...suite.renames.map(({ from, to, moved: isMoved }) => `- ${code(from)} \u2192 ${code(to)}${isMoved ? " _(moved)_" : ""}`)
       );
     }
     if (suite.slowest?.length) {
@@ -615,16 +1134,23 @@ function renderSuitesSummary(suites, context) {
       );
     }
     if (suite.ranking?.length) {
+      const costs = suite.ranking.some((t) => t.cost !== void 0);
+      const total = suite.ranking.reduce((sum, t) => sum + (t.cost ?? 0), 0);
+      const costing = total > 0 ? `, costing about ${duration(total)} of test time` : "";
       lines.push(
         "",
-        `<details><summary>Most unreliable tests${of} on ${branches(context)}</summary>`,
+        `<details><summary>Most unreliable tests${of} on ${branches(context)}${costing}</summary>`,
         "",
-        "| Test | Failed runs | Passed on retry | Proven flaky |",
-        "|---|--:|--:|:-:|",
+        `| Test | Failed runs | Passed on retry | Proven flaky |${costs ? " Estimated cost |" : ""}`,
+        `|---|--:|--:|:-:|${costs ? "--:|" : ""}`,
         ...suite.ranking.map(
-          (t) => `| ${code(t.id)} | ${t.failures} / ${t.runs} | ${t.retries} | ${t.confirmed ? "yes" : "probably"} |`
+          (t) => `| ${code(t.id)} | ${t.failures} / ${t.runs} | ${t.retries} | ${t.confirmed ? "yes" : "probably"} |${costs ? ` ${t.cost === void 0 ? "" : duration(t.cost)} |` : ""}`
         ),
         "",
+        ...costs ? [
+          `_Each failure counts as a re-run of the suite, each retry as another run of the test, at their median durations. See [Cost of unreliable tests](${PROJECT_URL}/blob/main/docs/verdicts.md#cost-of-unreliable-tests)._`,
+          ""
+        ] : [],
         "</details>"
       );
     }
@@ -654,7 +1180,7 @@ function renderTrends(trends, of, context) {
   lines.push("</details>");
   return lines;
 }
-function renderBody(suites, context) {
+function renderBody(suites, context, decision = "Quarantine") {
   const all = combine(suites.map((suite) => suite.analysis));
   const lines = [`### ${headline(all)}`, ""];
   for (const suite of suites) {
@@ -672,7 +1198,13 @@ function renderBody(suites, context) {
     const byHand = context.quarantined ? `, and ${plural(context.quarantined, "failure")} quarantined by hand` : "";
     const tolerated = `${verdicts}${byHand}`;
     lines.push(
-      context.blocking === 0 ? `\u{1F6E1}\uFE0F **Quarantine:** every failure is tolerated (${tolerated}), so this check passes.` : `\u274C **Quarantine:** ${plural(context.blocking, "failure")} not tolerated (${tolerated}), so this check fails.`,
+      context.blocking === 0 ? `\u{1F6E1}\uFE0F **${decision}:** every failure is tolerated (${tolerated}), so this check passes.` : `\u274C **${decision}:** ${plural(context.blocking, "failure")} not tolerated (${tolerated}), so this check fails.`,
+      ""
+    );
+  }
+  if (context.rerunUrl) {
+    lines.push(
+      `\u{1F501} **Re-run:** only flaky tests stand in the way, so notmyfault started [a new pipeline](${context.rerunUrl}) for this commit. Passing there proves them flaky.`,
       ""
     );
   }
@@ -695,7 +1227,8 @@ function combine(analyses) {
     failures: analyses.flatMap((a) => a.failures),
     retried: analyses.flatMap((a) => a.retried),
     fixed: analyses.flatMap((a) => a.fixed),
-    slower: analyses.flatMap((a) => a.slower)
+    slower: analyses.flatMap((a) => a.slower),
+    missing: analyses.flatMap((a) => a.missing)
   };
 }
 function renderSuite(analysis, context) {
@@ -715,6 +1248,32 @@ function renderSuite(analysis, context) {
   }
   if (analysis.fixed.length > 0) lines.push(...renderFixed(analysis.fixed, context));
   if (analysis.slower.length > 0) lines.push(...renderSlower(analysis.slower, context));
+  const missing = analysis.missing.filter((group) => !group.deletedFile);
+  const deleted = analysis.missing.filter((group) => group.deletedFile);
+  if (missing.length > 0) lines.push(...renderMissing(missing, context));
+  if (deleted.length > 0) lines.push(...renderDeleted(deleted));
+  return lines;
+}
+function renderDeleted(deleted) {
+  const count3 = deleted.reduce((sum, group) => sum + group.ids.length, 0);
+  const files = [...new Set(deleted.map((group) => group.deletedFile))];
+  return [
+    `\u{1F5D1}\uFE0F **Deleted:** ${plural(count3, "test")} ${count3 === 1 ? "no longer runs" : "no longer run"}, with ${files.length === 1 ? "the file" : "the files"} ${files.slice(0, MAX_MISSING).map(code).join(", ")} this change removes.`,
+    ""
+  ];
+}
+function renderMissing(missing, context) {
+  const count3 = missing.reduce((sum, group) => sum + group.ids.length, 0);
+  const items = missing.flatMap(
+    (group) => group.whole && group.group && group.ids.length > 1 ? [`- ${code(group.group)}: all ${group.ids.length} tests`] : group.ids.map((id) => `- ${code(id)}`)
+  );
+  const lines = [
+    `\u{1F47B} **Missing:** ${plural(count3, "test")} of the latest run on ${branches(context)} did not run here. Deleted or renamed on purpose? Nothing to do. Otherwise, check that the test runner still finds ${count3 === 1 ? "it" : "them"}.`,
+    "",
+    ...items.slice(0, MAX_MISSING)
+  ];
+  if (items.length > MAX_MISSING) lines.push(`- _\u2026and ${items.length - MAX_MISSING} more_`);
+  lines.push("");
   return lines;
 }
 function headline(analysis) {
@@ -734,7 +1293,19 @@ function quarantineNote(quarantined, markdown = true) {
   return markdown ? `_${note}_` : note;
 }
 function plainExplanation(failure, context) {
-  return explain(failure, context).replace(/\*\*|`/g, "");
+  return explain(failure, context).replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|`/g, "");
+}
+function sinceCommit(since2) {
+  const sha = `\`${since2.sha.slice(0, 7)}\``;
+  const url = linkable(since2.url);
+  const commit = url ? `[${sha}](${url})` : sha;
+  if (!since2.change) return commit;
+  const ref = /^[\w#!.\-/ ]{1,40}$/.test(since2.change.ref) ? since2.change.ref : escapeHtml(since2.change.ref);
+  const changeUrl = linkable(since2.change.url);
+  return `${commit} from ${changeUrl ? `[${ref}](${changeUrl})` : ref}`;
+}
+function linkable(url) {
+  return url !== void 0 && /^https?:\/\/[^\s<>"'`()\\]+$/i.test(url) ? url : void 0;
 }
 function explain(failure, context) {
   const where = branches(context);
@@ -744,16 +1315,22 @@ function explain(failure, context) {
       return failure.trailingPasses > 0 ? `**New failure.** Passed the last ${plural(failure.trailingPasses, "run")} on ${where}.` : `**New failure.** No history for this test on ${where}.`;
     case "suspect":
       return `**Suspect.** Failed in isolation ${times(failure.isolatedFailures)} in the last ${plural(failure.runs, "run")} on ${where}.`;
-    case "broken":
-      return failure.trailingFailures === 1 ? `**Already failing on ${where}.** The latest run there failed too.` : `**Already failing on ${where}.** Failed the last ${failure.trailingFailures} runs there${failure.confirmed ? ", too many in a row to be flakiness" : ""}.`;
+    case "broken": {
+      const since2 = failure.failingSince;
+      if (failure.trailingFailures === 1) {
+        return `**Already failing on ${where}.** The latest run there failed too${since2 ? `, on ${sinceCommit(since2)}` : ""}.`;
+      }
+      const streak = `**Already failing on ${where}.** Failed the last ${failure.trailingFailures} runs there${failure.confirmed ? ", too many in a row to be flakiness" : ""}.`;
+      return since2 ? `${streak} Failing since ${sinceCommit(since2)}, on ${since2.at.slice(0, 10)}.` : streak;
+    }
     case "flaky": {
       const parts = [];
       if (failure.failures > 0) parts.push(`failed ${failure.failures} of the last ${plural(failure.runs, "run")} on ${where}`);
       if (failure.retries > 0) parts.push(`passed only after a retry ${plural(failure.retries, "time")}`);
       if (failure.latestEvidence) {
-        const day = failure.latestEvidence.at.slice(0, 10);
+        const day2 = failure.latestEvidence.at.slice(0, 10);
         parts.push(
-          failure.latestEvidence.kind === "rerun" ? `passed when the same commit was re-run on ${day}` : `passed after a retry on ${day}`
+          failure.latestEvidence.kind === "rerun" ? `passed when the same commit was re-run on ${day2}` : `passed after a retry on ${day2}`
         );
       }
       const detail = parts.length > 0 ? ` ${capitalize(parts.join("; "))}.` : "";
@@ -787,7 +1364,7 @@ function renderFixed(fixed, context) {
     `\u{1F6E0}\uFE0F **Fixed:** ${plural(fixed.length, "test")} failing on ${branches(context)} ${fixed.length === 1 ? "passes" : "pass"} in this run.`,
     "",
     ...fixed.slice(0, MAX_FIXED).map(
-      (f) => `- ${code(f.test.title)}, ${f.trailingFailures === 1 ? "failed the latest run" : `failed the last ${f.trailingFailures} runs`} there`
+      (f) => `- ${code(f.test.title)}, ${f.trailingFailures === 1 ? "failed the latest run" : `failed the last ${f.trailingFailures} runs`} there${f.failingSince ? `, since ${sinceCommit(f.failingSince)}` : ""}`
     )
   ];
   if (fixed.length > MAX_FIXED) lines.push(`- _\u2026and ${fixed.length - MAX_FIXED} more_`);
@@ -807,17 +1384,19 @@ function renderSlower(slower, context) {
 function duration(ms) {
   if (ms < 1e3) return `${ms} ms`;
   if (ms < 6e4) return `${(ms / 1e3).toFixed(1)} s`;
-  const minutes = Math.floor(ms / 6e4);
-  return `${minutes} min ${Math.round((ms - minutes * 6e4) / 1e3)} s`;
+  const seconds = Math.round(ms / 1e3);
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
+  const minutes = Math.round(ms / 6e4);
+  return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }
 function footer(retried, context) {
   const parts = [];
   if (retried.length > 0) {
-    const names = retried.slice(0, 5).map((t) => code(t.title)).join(", ");
+    const names2 = retried.slice(0, 5).map((t) => code(t.title)).join(", ");
     const more = retried.length > 5 ? ` and ${retried.length - 5} more` : "";
-    parts.push(`\u{1F501} Passed only after a retry: ${names}${more}`);
+    parts.push(`\u{1F501} Passed only after a retry: ${names2}${more}`);
   }
-  if (context.runUrl) parts.push(`[Workflow run](${context.runUrl})`);
+  if (context.runUrl) parts.push(`[${context.runLink ?? "Workflow run"}](${context.runUrl})`);
   parts.push(`Reported by [notmyfault](${PROJECT_URL})`);
   return `<sub>${parts.join(" \xB7 ")}</sub>`;
 }
@@ -859,32 +1438,48 @@ function escapeHtml(value) {
 
 // src/html-report.ts
 var PROJECT_URL2 = "https://github.com/tashikomaaa/notmyfault";
+var MAX_ROWS2 = 500;
 function reportPath(key) {
   return `reports/${key}.html`;
 }
 function renderSuitePage(key, history, context) {
-  const rows = Object.entries(history.tests).map(([id, test]) => ({ id, test, stats: computeStats(test, context.now, context.evidenceTtlDays) })).filter(({ test, stats }) => test.outcomes.includes(FAIL) || test.outcomes.includes(RETRY) || stats.confirmed);
-  rows.sort((a, b) => score(b.stats) - score(a.stats) || a.id.localeCompare(b.id));
+  const rows = unreliableTests(history, context);
+  sortByCost(rows);
+  const total = rows.reduce((sum, row) => sum + (row.cost ?? 0), 0);
+  const costing = total > 0 ? ` Their failures and retries cost about ${duration(total)} of test time.` : "";
   const stable = Object.keys(history.tests).length - rows.length;
+  const listed = rows.slice(0, MAX_ROWS2);
+  const beyond = rows.length - listed.length;
   const where = context.trackedBranches.map((branch) => `<code>${escapeHtml(branch)}</code>`).join(", ");
   const body = [
     `<p class="back"><a href="../index.html">All test suites</a></p>`,
     `<h1>${escapeHtml(key)}</h1>`,
-    `<p class="lede">${history.runs} runs recorded on ${where}, last updated ${formatTime(history.updatedAt)}. ${plural2(rows.length, "unreliable test")} listed, ${plural2(stable, "stable test")} not listed.</p>`
+    `<p class="lede">${history.runs} runs recorded on ${where}, last updated ${formatTime(history.updatedAt)}. ${plural2(rows.length, "unreliable test")} listed, ${plural2(stable, "stable test")} not listed.${costing}</p>`
   ];
   if (rows.length === 0) {
     body.push(`<p class="empty">No test failed or needed a retry in the remembered runs.</p>`);
   } else {
     body.push(
       `<div class="scroll"><table>`,
-      `<thead><tr><th>Test</th><th>Verdict</th><th>Remembered runs, oldest first</th><th>Failed</th><th>Retried</th><th>Last failure</th><th>Proof of flakiness</th><th>Median duration</th></tr></thead>`,
+      tableHeader(),
       `<tbody>`,
-      ...rows.map(({ id, test, stats }) => renderRow(id, test, stats)),
+      ...listed.map(({ id, test, stats, cost }) => renderRow(id, test, stats, cost)),
       `</tbody></table></div>`,
+      ...beyond > 0 ? [`<p class="empty">${plural2(beyond, "less unreliable test")} not shown.</p>`] : [],
       `<p class="legend"><i class="p"></i> passed <i class="r"></i> passed after a retry <i class="f"></i> failed</p>`
     );
   }
   return page(`notmyfault: ${key}`, body);
+}
+function unreliableTests(history, context) {
+  return Object.entries(history.tests).map(([id, test]) => ({ id, test, stats: computeStats(test, context.now, context.evidenceTtlDays), cost: estimateCost(test, history) })).filter(({ test, stats }) => test.outcomes.includes(FAIL) || test.outcomes.includes(RETRY) || stats.confirmed);
+}
+function sortByCost(rows) {
+  return rows.sort((a, b) => (b.cost ?? -1) - (a.cost ?? -1) || score(b.stats) - score(a.stats) || a.id.localeCompare(b.id));
+}
+function tableHeader(leading = []) {
+  const columns = [...leading, "Test", "Verdict", "Remembered runs, oldest first", "Failed", "Retried", "Last failure", "Proof of flakiness", "Median duration", "Estimated cost"];
+  return `<thead><tr>${columns.map((column) => `<th>${column}</th>`).join("")}</tr></thead>`;
 }
 function renderIndexPage(keys, context) {
   const items = keys.map((key) => `<li><a href="${escapeAttribute(reportPath(key))}">${escapeHtml(key)}</a></li>`);
@@ -896,27 +1491,38 @@ function renderIndexPage(keys, context) {
     `</ul>`
   ]);
 }
-function renderRow(id, test, stats) {
+function renderRow(id, test, stats, cost, leading = []) {
   const [label, tone] = verdict(stats);
   const outcomes = [...test.outcomes];
   const failed = outcomes.filter((outcome) => outcome === FAIL).length;
   const retried = outcomes.filter((outcome) => outcome === RETRY).length;
   const summary = `${outcomes.length - failed - retried} passed, ${retried} passed after a retry, ${failed} failed`;
   const timeline = outcomes.map((outcome) => `<i class="${outcome === FAIL ? "f" : outcome === RETRY ? "r" : "p"}"></i>`).join("");
-  const proof = stats.latestEvidence ? `${stats.latestEvidence.kind === "rerun" ? "Passed on re-run" : "Passed after a retry"}, ${stats.latestEvidence.at.slice(0, 10)}` : "";
+  const proof = stats.latestEvidence ? `${stats.latestEvidence.kind === "rerun" ? "Passed on re-run" : "Passed after a retry"}, ${escapeHtml(stats.latestEvidence.at.slice(0, 10))}` : "";
   const durations = test.durations ?? [];
   return [
     `<tr>`,
+    ...leading.map((cell) => `<td>${cell}</td>`),
     `<td class="test"><code>${escapeHtml(id)}</code></td>`,
-    `<td><span class="verdict ${tone}">${label}</span></td>`,
+    `<td><span class="verdict ${tone}">${label}</span>${tone === "broken" && stats.failingSince ? since(stats.failingSince) : ""}</td>`,
     `<td><span class="timeline" role="img" aria-label="${summary}">${timeline}</span></td>`,
     `<td class="number">${failed}</td>`,
     `<td class="number">${retried}</td>`,
-    `<td>${lastFailure(test) ?? ""}</td>`,
+    `<td>${escapeHtml(lastFailure(test) ?? "")}</td>`,
     `<td>${proof}</td>`,
     `<td class="number">${durations.length > 0 ? duration(median2(durations)) : ""}</td>`,
+    `<td class="number">${cost === void 0 ? "" : duration(cost)}</td>`,
     `</tr>`
   ].join("");
+}
+function since(failing) {
+  const commit = link(failing.url, `<code>${escapeHtml(failing.sha.slice(0, 7))}</code>`);
+  const change = failing.change ? ` from ${link(failing.change.url, escapeHtml(failing.change.ref))}` : "";
+  return `<span class="since">since ${commit}${change}, ${escapeHtml(failing.at.slice(0, 10))}</span>`;
+}
+function link(url, text) {
+  const safe = linkable(url);
+  return safe ? `<a href="${escapeAttribute(safe)}">${text}</a>` : text;
 }
 function verdict(stats) {
   switch (verdictFor(stats)) {
@@ -936,7 +1542,7 @@ function score(stats) {
 }
 function lastFailure(test) {
   const days = [test.lastFailure, ...(test.evidence ?? []).map((evidence) => evidence.at.slice(0, 10))];
-  return days.filter((day) => day !== void 0).sort().at(-1);
+  return days.filter((day2) => day2 !== void 0).sort().at(-1);
 }
 function median2(values) {
   const sorted = [...values].sort((a, b) => a - b);
@@ -944,15 +1550,15 @@ function median2(values) {
   return sorted.length % 2 === 1 ? sorted[middle] : Math.round((sorted[middle - 1] + sorted[middle]) / 2);
 }
 function formatTime(iso) {
-  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+  return escapeHtml(`${iso.slice(0, 10)} ${iso.slice(11, 16)}`) + " UTC";
 }
 function plural2(n, word) {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 function escapeAttribute(value) {
-  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
-function page(title, body) {
+function page(title, body, footer2 = "rewritten on every update of the history") {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -979,6 +1585,7 @@ td.test { white-space: normal; min-width: 18rem; }
 /* Text colors keep every chip at a contrast of 4.5:1 or more. */
 .verdict { display: inline-block; padding: 0.1rem 0.55rem; border-radius: 1rem; color: #1f2328; font-size: 0.8rem; font-weight: 600; }
 .verdict.new { background: #c93c3c; color: #fff; } .verdict.broken { background: var(--broken); color: var(--on-broken); }
+.since { display: block; margin-top: 0.25rem; color: var(--muted); font-size: 0.8rem; }
 .verdict.suspect { background: var(--suspect); } .verdict.flaky { background: var(--flaky); } .verdict.passed { background: var(--passed); }
 .timeline { display: inline-flex; gap: 1px; }
 i { display: inline-block; width: 5px; height: 16px; border-radius: 1px; }
@@ -991,7 +1598,7 @@ footer { margin-top: 2rem; font-size: 0.85rem; }
 <body>
 <main>
 ${body.join("\n")}
-<footer>Generated by <a href="${PROJECT_URL2}">notmyfault</a>, rewritten on every update of the history.</footer>
+<footer>Generated by <a href="${PROJECT_URL2}">notmyfault</a>, ${footer2}.</footer>
 </main>
 </body>
 </html>
@@ -1059,7 +1666,7 @@ function planFlakyIssues(suites, issues, context) {
         postponed++;
       } else {
         created++;
-        actions.push({ kind: "create", title: issueTitle(result?.title ?? id), body: body() });
+        actions.push({ kind: "create", title: issueTitle(result?.title ?? id), body: body(), assignees: assignees(result, context) });
       }
     }
   }
@@ -1083,22 +1690,31 @@ function renderFlakyIssue(key, id, test, stats, result, context) {
     "",
     `- **Test:** ${code(result?.title ?? id)}`,
     `- **Suite:** \`${key}\``,
+    ...owners(result, context),
     `- **Verdict on ${where}:** ${verdict2(stats)}`,
     `- **Runs on ${where}:** failed ${stats.failures} of the last ${plural3(stats.runs, "run")}${retries}`,
     `- **Last failure:** ${lastFailureDay(test) ?? "unknown"}`
   ];
   if (stats.latestEvidence) {
-    const day = stats.latestEvidence.at.slice(0, 10);
+    const day2 = stats.latestEvidence.at.slice(0, 10);
     lines.push(
-      `- **Proof:** ${stats.latestEvidence.kind === "rerun" ? "passed when the same commit was re-run" : "passed after a retry"} on ${day}`
+      `- **Proof:** ${stats.latestEvidence.kind === "rerun" ? "passed when the same commit was re-run" : "passed after a retry"} on ${day2}`
     );
   }
   if (result?.outcome === "failed" || result?.outcome === "flaky") lines.push("", latestFailure(result, context));
-  lines.push("", `Until it is fixed, [quarantine mode](${QUARANTINE_URL}) keeps it from blocking pull requests.`);
+  lines.push("", `Until it is fixed, [quarantine mode](${QUARANTINE_URL}) keeps it from blocking ${context.pullRequest ?? "pull request"}s.`);
   return lines.join("\n");
 }
+function assignees(result, context) {
+  if (!context.assignOwners || !result || !context.owners) return [];
+  return context.owners(result).filter((owner) => !owner.includes("/")).map((owner) => owner.slice(1));
+}
+function owners(result, context) {
+  const found = result && context.owners ? context.owners(result) : [];
+  return found.length > 0 ? [`- **Owners:** ${found.join(" ")}`] : [];
+}
 function latestFailure(result, context) {
-  const run3 = context.runUrl ? `, in [this workflow run](${context.runUrl})` : "";
+  const run3 = context.runUrl ? `, in [this ${context.runName ?? "workflow run"}](${context.runUrl})` : "";
   const what = result.outcome === "flaky" ? "Latest retry" : "Latest failure";
   const message = result.message ? `<pre>${escapeHtml(result.message)}</pre>` : "_The report has no failure message._";
   return [`**${what}**, on commit \`${context.sha.slice(0, 12)}\`${run3}:`, "", message].join("\n");
@@ -1106,7 +1722,7 @@ function latestFailure(result, context) {
 function verdict2(stats) {
   switch (verdictFor(stats)) {
     case "broken":
-      return `already failing, failed the last ${plural3(stats.trailingFailures, "run")}`;
+      return `already failing, failed the last ${plural3(stats.trailingFailures, "run")}${stats.failingSince ? ` since ${sinceCommit(stats.failingSince)}` : ""}`;
     case "flaky":
       return stats.confirmed ? "known flaky" : "probably flaky";
     case "suspect":
@@ -1117,11 +1733,11 @@ function verdict2(stats) {
 }
 function lastFailureDay(test) {
   const days = [test.lastFailure, ...(test.evidence ?? []).map((evidence) => evidence.at.slice(0, 10))];
-  return days.filter((day) => day !== void 0).sort().at(-1);
+  return days.filter((day2) => day2 !== void 0).sort().at(-1);
 }
 function quietComment(lastFailure2, context) {
-  const since = lastFailure2 ? ` since ${lastFailure2}` : "";
-  return `No failure on ${branches2(context)}${since}, for more than ${QUIET_DAYS} days: closing this issue. notmyfault reopens it if the test fails again.`;
+  const since2 = lastFailure2 ? ` since ${lastFailure2}` : "";
+  return `No failure on ${branches2(context)}${since2}, for more than ${QUIET_DAYS} days: closing this issue. notmyfault reopens it if the test fails again.`;
 }
 function issueTitle(title) {
   const short = title.length > MAX_TITLE_LENGTH ? `${title.slice(0, MAX_TITLE_LENGTH - 1)}\u2026` : title;
@@ -1137,15 +1753,62 @@ function times2(n) {
   return n === 1 ? "once" : n === 2 ? "twice" : `${n} times`;
 }
 
+// src/glob.ts
+function matchGlob(pattern, text, singleChar = false) {
+  let p = 0;
+  let t = 0;
+  let star = -1;
+  let mark = 0;
+  while (t < text.length) {
+    if (pattern[p] === "*") {
+      star = p++;
+      mark = t;
+      while (pattern[p] === "*") p++;
+    } else if (p < pattern.length && (pattern[p] === text[t] || singleChar && pattern[p] === "?")) {
+      p++;
+      t++;
+    } else if (star >= 0) {
+      p = star + 1;
+      t = ++mark;
+    } else {
+      return false;
+    }
+  }
+  while (pattern[p] === "*") p++;
+  return p === pattern.length;
+}
+function matchSegments(pattern, path) {
+  let p = 0;
+  let t = 0;
+  let star = -1;
+  let mark = 0;
+  while (t < path.length) {
+    if (pattern[p] === "**") {
+      star = p++;
+      mark = t;
+    } else if (p < pattern.length && matchGlob(pattern[p], path[t], true)) {
+      p++;
+      t++;
+    } else if (star >= 0) {
+      p = star + 1;
+      t = ++mark;
+    } else {
+      return false;
+    }
+  }
+  while (pattern[p] === "**") p++;
+  return p === pattern.length;
+}
+
 // src/quarantine.ts
 var LINE = /^(\d{4}-\d{2}-\d{2})\s+(.+?)(?:\s+#\s+(.*))?$/;
-function parseQuarantine(input) {
+function parseQuarantine(input, label = 'Input "quarantine"') {
   const entries = [];
   for (const line of input.split("\n").map((part) => part.trim()).filter(Boolean)) {
     const match = LINE.exec(line);
     const until = match?.[1];
     if (!match || !until || Number.isNaN(Date.parse(`${until}T00:00:00Z`)) || (/* @__PURE__ */ new Date(`${until}T00:00:00Z`)).toISOString().slice(0, 10) !== until) {
-      throw new Error(`Input "quarantine" expects "YYYY-MM-DD test name # reason" per line, got "${line}"`);
+      throw new Error(`${label} expects "YYYY-MM-DD test name # reason" per line, got "${line}"`);
     }
     const entry = { pattern: match[2].trim(), until };
     if (match[3]?.trim()) entry.reason = match[3].trim();
@@ -1157,9 +1820,12 @@ function isActive(entry, now) {
   return now.toISOString().slice(0, 10) <= entry.until;
 }
 function matches(entry, test) {
-  const escaped = entry.pattern.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const pattern = new RegExp(`(?:^|\\s\u203A\\s)${escaped.join(".*")}$`);
-  return pattern.test(test.title) || pattern.test(test.id);
+  return names(test.title).concat(names(test.id)).some((name) => matchGlob(entry.pattern, name));
+}
+function names(name) {
+  const parts = [name];
+  for (const match of name.matchAll(/\s›\s/g)) parts.push(name.slice(match.index + match[0].length));
+  return parts;
 }
 function applyQuarantine(analysis, entries, now) {
   const active = entries.filter((entry) => isActive(entry, now));
@@ -1175,7 +1841,8 @@ function applyQuarantine(analysis, entries, now) {
 
 // src/renames.ts
 var MIN_SIMILARITY = 0.6;
-var SEPARATOR = " \u203A ";
+var SEPARATOR2 = " \u203A ";
+var MAX_COMPARED = 200;
 function detectRenames(history, results) {
   const previousRun = history.runs;
   if (previousRun === 0) return [];
@@ -1195,10 +1862,20 @@ function detectRenames(history, results) {
     if (result.outcome !== "skipped" && !known) group(result.id).added.push(result.id);
   }
   const renames = [];
+  const paired = /* @__PURE__ */ new Set();
   for (const { missing, added } of groups.values()) {
     if (missing.length !== 1 || added.length !== 1) continue;
     const [from, to] = [missing[0], added[0]];
-    if (similarity(lastPart(from), lastPart(to)) >= MIN_SIMILARITY) renames.push({ from, to });
+    if (similarity(lastPart(from), lastPart(to)) < MIN_SIMILARITY) continue;
+    renames.push({ from, to });
+    paired.add(from).add(to);
+  }
+  const groupsWithout = (kind) => [...groups.values()].filter((entry) => entry[kind].length === 0);
+  const gone = byName(groupsWithout("added").flatMap((entry) => entry.missing), paired);
+  const fresh = byName(groupsWithout("missing").flatMap((entry) => entry.added), paired);
+  for (const [name, from] of gone) {
+    const to = fresh.get(name);
+    if (from && to && prefix(from) !== prefix(to)) renames.push({ from, to, moved: true });
   }
   return renames.sort((a, b) => a.to.localeCompare(b.to));
 }
@@ -1218,16 +1895,26 @@ function applyRenames(history, renames) {
     delete history.tests[from];
   }
 }
+function byName(ids, paired) {
+  const found = /* @__PURE__ */ new Map();
+  for (const id of ids) {
+    if (paired.has(id)) continue;
+    const name = lastPart(id);
+    found.set(name, found.has(name) ? void 0 : id);
+  }
+  return found;
+}
 function prefix(id) {
-  const index = id.lastIndexOf(SEPARATOR);
+  const index = id.lastIndexOf(SEPARATOR2);
   return index === -1 ? "" : id.slice(0, index);
 }
 function lastPart(id) {
-  const index = id.lastIndexOf(SEPARATOR);
-  return index === -1 ? id : id.slice(index + SEPARATOR.length);
+  const index = id.lastIndexOf(SEPARATOR2);
+  return index === -1 ? id : id.slice(index + SEPARATOR2.length);
 }
 function similarity(a, b) {
   if (a === b) return 1;
+  if (a.length > MAX_COMPARED || b.length > MAX_COMPARED) return similarity(a.slice(0, MAX_COMPARED), b.slice(0, MAX_COMPARED));
   let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
   for (let i = 1; i <= a.length; i++) {
     const current = [i];
@@ -1239,106 +1926,10 @@ function similarity(a, b) {
   return 1 - previous[b.length] / Math.max(a.length, b.length);
 }
 
-// src/github.ts
-var GitHubApiError = class extends Error {
-  constructor(status, path, body) {
-    super(`GitHub API ${status} on ${path}: ${body.slice(0, 200)}`);
-    this.status = status;
-    this.path = path;
-  }
-  status;
-  path;
-};
-var GitHubClient = class {
-  constructor(token, apiUrl, repository) {
-    this.token = token;
-    this.apiUrl = apiUrl;
-    this.repository = repository;
-  }
-  token;
-  apiUrl;
-  repository;
-  /**
-   * Updates the comment carrying `marker`, or creates one when `create` is true.
-   * Resolves to what happened.
-   */
-  async upsertComment(issue, marker, body, create) {
-    const existing = await this.findComment(issue, marker);
-    if (existing) {
-      await this.request("PATCH", `/repos/${this.repository}/issues/comments/${existing.id}`, { body });
-      return "updated";
-    }
-    if (!create) return "skipped";
-    await this.addComment(issue, body);
-    return "created";
-  }
-  async addComment(issue, body) {
-    await this.request("POST", `/repos/${this.repository}/issues/${issue}/comments`, { body });
-  }
-  /** Issues, open or closed, carrying `label`. Pull requests are left out. */
-  async listIssues(label) {
-    const issues = [];
-    let path = `/repos/${this.repository}/issues?labels=${encodeURIComponent(label)}&state=all&per_page=100`;
-    while (path) {
-      const response = await this.request("GET", path);
-      for (const item of await response.json()) {
-        if (!item.pull_request) issues.push({ number: item.number, state: item.state, body: item.body ?? "" });
-      }
-      path = nextPage(response.headers.get("link"), this.apiUrl);
-    }
-    return issues;
-  }
-  async createIssue(title, body, labels) {
-    const response = await this.request("POST", `/repos/${this.repository}/issues`, { title, body, labels });
-    return (await response.json()).number;
-  }
-  async updateIssue(issue, changes) {
-    await this.request("PATCH", `/repos/${this.repository}/issues/${issue}`, changes);
-  }
-  /** Creates the label unless it exists. */
-  async ensureLabel(name, color, description) {
-    try {
-      await this.request("GET", `/repos/${this.repository}/labels/${encodeURIComponent(name)}`);
-    } catch (error) {
-      if (!(error instanceof GitHubApiError) || error.status !== 404) throw error;
-      await this.request("POST", `/repos/${this.repository}/labels`, { name, color, description });
-    }
-  }
-  async findComment(issue, marker) {
-    let path = `/repos/${this.repository}/issues/${issue}/comments?per_page=100`;
-    while (path) {
-      const response = await this.request("GET", path);
-      const comments = await response.json();
-      const match = comments.find((comment2) => comment2.body?.startsWith(marker));
-      if (match) return match;
-      path = nextPage(response.headers.get("link"), this.apiUrl);
-    }
-    return void 0;
-  }
-  async request(method, path, body) {
-    const response = await fetch(`${this.apiUrl}${path}`, {
-      method,
-      headers: {
-        Accept: "application/vnd.github+json",
-        Authorization: `Bearer ${this.token}`,
-        "User-Agent": "notmyfault",
-        "X-GitHub-Api-Version": "2022-11-28",
-        ...body === void 0 ? {} : { "Content-Type": "application/json" }
-      },
-      ...body === void 0 ? {} : { body: JSON.stringify(body) }
-    });
-    if (!response.ok) throw new GitHubApiError(response.status, path, await response.text());
-    return response;
-  }
-};
-function nextPage(link, apiUrl) {
-  const match = link?.match(/<([^>]+)>;\s*rel="next"/);
-  if (!match?.[1]) return void 0;
-  return match[1].startsWith(apiUrl) ? match[1].slice(apiUrl.length) : void 0;
-}
-
 // src/xml.ts
 var MAX_TEXT_LENGTH = 64 * 1024;
+var MAX_ATTRIBUTE_LENGTH = 4 * 1024;
+var MAX_DEPTH = 256;
 var NAMED_ENTITIES = {
   lt: "<",
   gt: ">",
@@ -1383,12 +1974,8 @@ function parseXml(input) {
     } else if (input[lt + 1] === "/") {
       const end = input.indexOf(">", lt + 2);
       const name = input.slice(lt + 2, end === -1 ? length : end).trim();
-      for (let k = stack.length - 1; k > 0; k--) {
-        if (stack[k].name === name) {
-          stack.length = k;
-          break;
-        }
-      }
+      const open = stack.findLastIndex((element, depth) => depth > 0 && element.name === name);
+      if (open > 0) stack.length = open;
       i = end === -1 ? length : end + 1;
     } else {
       i = parseStartTag(input, lt, stack);
@@ -1399,6 +1986,9 @@ function parseXml(input) {
 function appendText(element, text) {
   if (element.text.length >= MAX_TEXT_LENGTH) return;
   element.text += text.slice(0, MAX_TEXT_LENGTH - element.text.length);
+}
+function attribute(raw) {
+  return decodeEntities(raw.length > MAX_ATTRIBUTE_LENGTH ? raw.slice(0, MAX_ATTRIBUTE_LENGTH) : raw);
 }
 function skipPast(input, terminator, from) {
   const end = input.indexOf(terminator, from);
@@ -1454,22 +2044,25 @@ function parseStartTag(input, lt, stack) {
     if (quote === '"' || quote === "'") {
       const end = input.indexOf(quote, j + 1);
       const stop = end === -1 ? length : end;
-      element.attrs[attrName] = decodeEntities(input.slice(j + 1, stop));
+      element.attrs[attrName] = attribute(input.slice(j + 1, stop));
       j = stop + 1;
     } else {
       const valueStart = j;
       while (j < length && !isSpace(input[j]) && input[j] !== ">") j++;
-      element.attrs[attrName] = decodeEntities(input.slice(valueStart, j));
+      element.attrs[attrName] = attribute(input.slice(valueStart, j));
     }
   }
-  stack[stack.length - 1].children.push(element);
+  if (stack.length <= MAX_DEPTH) stack[stack.length - 1].children.push(element);
   if (!selfClosing) stack.push(element);
   return j;
 }
 
 // src/junit.ts
 var MAX_MESSAGE_LENGTH = 300;
+var MAX_NAME_LENGTH = 500;
 var MAX_REFERENCES = 20;
+var ANSI = /\u001b\[[0-9;?]*[ -\/]*[@-~]/g;
+var CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g;
 var REFERENCE = /(?:^|[\s(['"])((?:[\w@.-]+\/|\/)*[\w@-][\w@.-]*\.[a-z][a-z0-9]{0,5}):(\d+)/gi;
 function parseJUnit(xml) {
   const root = [];
@@ -1544,7 +2137,10 @@ function toResult(testcase, suite) {
   if (message) result.message = message;
   const seconds = Number(testcase.attrs.time);
   if (testcase.attrs.time?.trim() && Number.isFinite(seconds) && seconds >= 0) result.duration = Math.round(seconds * 1e3);
-  if (outcome === "failed") result.hints = locationHints(testcase, suite, failures);
+  if (outcome !== "skipped") {
+    const hints = locationHints(testcase, suite, failures);
+    if (hints.file || hints.names.length > 0 || hints.references.length > 0) result.hints = hints;
+  }
   return result;
 }
 function locationHints(testcase, suite, failures) {
@@ -1586,13 +2182,14 @@ function mergeAttempt(previous, next) {
 }
 function firstMessage(element) {
   if (!element) return void 0;
-  const raw = element.attrs.message || element.text;
+  const raw = (element.attrs.message || element.text).replace(ANSI, "").replace(CONTROL, "");
   const line = raw.split("\n").map((part) => part.trim()).find((part) => part.length > 0);
   if (!line) return void 0;
   return line.length > MAX_MESSAGE_LENGTH ? `${line.slice(0, MAX_MESSAGE_LENGTH - 1)}\u2026` : line;
 }
 function normalize(value) {
-  return value.replace(/\s+/g, " ").trim();
+  const clean = value.replace(ANSI, "").replace(CONTROL, "").replace(/\s+/g, " ").trim();
+  return clean.length > MAX_NAME_LENGTH ? `${clean.slice(0, MAX_NAME_LENGTH - 1)}\u2026` : clean;
 }
 function joinDistinct(parts) {
   const kept = [];
@@ -1646,6 +2243,64 @@ function sameFile(reference, file, workspace) {
   return relative2 !== void 0 && (relative2 === file || file.endsWith(`/${relative2}`));
 }
 
+// src/codeowners.ts
+import { readFileSync as readFileSync2 } from "node:fs";
+import { join as join2 } from "node:path";
+var MAX_PATTERN_LENGTH = 256;
+var MAX_RULES = 2e3;
+var MAX_PATH_LENGTH = 1024;
+function parseCodeowners(text) {
+  const rules = [];
+  let section = 0;
+  let defaults = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    const header = /^\^?\[[^\]]+\](?:\[\d+\])?\s*(.*)$/.exec(line);
+    if (header) {
+      section++;
+      defaults = mentions(header[1].split(/\s+/));
+      continue;
+    }
+    const [pattern, ...owners2] = line.split(/\s+/);
+    const segments = toSegments(pattern);
+    if (!segments || rules.length >= MAX_RULES) continue;
+    const listed = mentions(owners2);
+    rules.push({ section, pattern: segments, owners: owners2.length > 0 ? listed : defaults });
+  }
+  return rules;
+}
+function ownersOf(path, rules) {
+  if (path.length > MAX_PATH_LENGTH) return [];
+  const segments = path.split("/").filter((segment) => segment !== "");
+  const bySection = /* @__PURE__ */ new Map();
+  for (const rule of rules) if (matchSegments(rule.pattern, segments)) bySection.set(rule.section, rule.owners);
+  return [...new Set([...bySection.values()].flat())];
+}
+function readCodeowners(workspace, paths) {
+  for (const path of paths) {
+    try {
+      return { path, rules: parseCodeowners(readFileSync2(join2(workspace, path), "utf8")) };
+    } catch {
+    }
+  }
+  return void 0;
+}
+function mentions(tokens) {
+  return tokens.filter((token) => /^@[\w.\-/]+$/.test(token));
+}
+function toSegments(pattern) {
+  if (pattern.length > MAX_PATTERN_LENGTH) return void 0;
+  const anchored = pattern.startsWith("/") || pattern.slice(0, -1).includes("/");
+  const directory = pattern.endsWith("/");
+  const body = pattern.replace(/^\//, "").replace(/\/$/, "");
+  const shallow = /(^|\/)\*$/.test(body);
+  const segments = body.split("/").filter((segment) => segment !== "");
+  if (segments.length === 0) return void 0;
+  const under = directory ? ["*", "**"] : shallow ? [] : ["**"];
+  return [...anchored ? [] : ["**"], ...segments, ...under];
+}
+
 // src/main.ts
 var EVIDENCE_TTL_DAYS = 30;
 var RETENTION_DAYS = 90;
@@ -1656,50 +2311,77 @@ var RERUN_MARKER = "notmyfault: only flaky tests failed";
 var VERDICTS = ["new", "suspect", "broken", "flaky"];
 var BRANCH_README = `# notmyfault history
 
-This branch is maintained by the [notmyfault](https://github.com/tashikomaaa/notmyfault) GitHub Action.
+This branch is maintained by [notmyfault](https://github.com/tashikomaaa/notmyfault).
 It stores the recent outcome of each test, so failures can be told apart: new, flaky or already broken.
 
 - \`history/<key>.json\`: the history of a test suite.
 - \`badges/<key>.json\`: a [shields.io endpoint](https://shields.io/badges/endpoint-badge) counting its flaky tests.
-- \`reports/<key>.html\` and \`index.html\`: pages listing its unreliable tests, to publish with GitHub Pages.
+- \`reports/<key>.html\` and \`index.html\`: pages listing its unreliable tests, to publish as a static site.
 
 The branch is rewritten as a single commit on every update. Deleting it simply resets the history.
 `;
 async function run2(env = process.env, io = new ActionIO(env), now = /* @__PURE__ */ new Date()) {
+  let platform;
   try {
-    const context = readContext(env);
-    const settings = readSettings(io, context);
+    platform = env.FORGEJO_ACTIONS === "true" || env.GITEA_ACTIONS === "true" ? forgejoPlatform(env, io) : githubPlatform(env, io);
+  } catch (error) {
+    io.error(errorMessage(error));
+    return 1;
+  }
+  return runOn(platform, now);
+}
+async function runOn(platform, now = /* @__PURE__ */ new Date()) {
+  const { context, io } = platform;
+  try {
+    const settings = readSettings(platform);
     io.mask(settings.token);
+    if (context.local && !settings.record) {
+      io.info(`Not in a CI system: the history is read, not recorded. Set ${io.inputName("record")}=true to record this run.`);
+    }
+    const redact = (text) => settings.token ? text.split(settings.token).join("***") : text;
     const loaded = [];
     for (const suite of settings.suites) {
       const results = await loadResults(suite, settings.suites.length > 1, context.workspace, io);
       if (!results) return 1;
+      for (const result of results) {
+        result.id = redact(result.id);
+        result.title = redact(result.title);
+        if (result.message) result.message = redact(result.message);
+      }
       loaded.push({ ...suite, results });
     }
     const store = new GitStore({
-      remoteUrl: `${context.serverUrl}/${context.repository}.git`,
+      remoteUrl: context.remoteUrl ?? `${context.serverUrl}/${context.repository}.git`,
       branch: settings.branch,
       token: settings.token,
-      tempDir: context.tempDir
+      username: platform.gitUser(settings.token),
+      author: platform.gitAuthor,
+      pushOptions: platform.pushOptions,
+      ...context.tempDir ? { tempDir: context.tempDir } : {}
     });
     try {
-      return await evaluate(loaded, context, settings, store, io, now);
+      return await evaluate(loaded, platform, settings, store, now);
     } finally {
       await store.dispose();
     }
   } catch (error) {
     io.error(errorMessage(error));
     return 1;
+  } finally {
+    io.finish();
   }
 }
-async function evaluate(loaded, context, settings, store, io, now) {
+async function evaluate(loaded, platform, settings, store, now) {
+  const { context, io } = platform;
   const suites = [];
   const tracked = isTracked(context, settings);
   for (const suite of loaded) {
     const history = await loadHistory(store, historyPath(suite.key), settings, io);
     const renames = tracked ? detectRenames(history, suite.results) : [];
     applyRenames(history, renames);
-    suites.push({ ...suite, history, renames, analysis: analyze(suite.results, history, now, EVIDENCE_TTL_DAYS) });
+    const analysis = analyze(suite.results, history, now, EVIDENCE_TTL_DAYS);
+    if (!settings.missingTests) analysis.missing = [];
+    suites.push({ ...suite, history, renames, analysis });
   }
   const named = suites.length > 1;
   for (const entry of settings.quarantine.filter((candidate) => !isActive(candidate, now))) {
@@ -1708,7 +2390,11 @@ async function evaluate(loaded, context, settings, store, io, now) {
     );
   }
   const quarantined = suites.reduce((total, suite) => total + applyQuarantine(suite.analysis, settings.quarantine, now), 0);
-  const sum = (count3) => suites.reduce((total, suite) => total + count3(suite.analysis), 0);
+  if (context.pullRequest && suites.some((suite) => suite.analysis.missing.length > 0)) {
+    const deleted = await deletedFiles(platform, settings);
+    for (const suite of suites) markDeleted(suite.analysis.missing, deleted);
+  }
+  const sum = (count4) => suites.reduce((total, suite) => total + count4(suite.analysis), 0);
   const failures = suites.flatMap((suite) => suite.analysis.failures);
   const blocking = suites.flatMap((suite) => blockingFailures(suite.analysis, settings.tolerated));
   const reportContext = {
@@ -1718,10 +2404,10 @@ async function evaluate(loaded, context, settings, store, io, now) {
     mode: settings.mode,
     tolerated: settings.tolerated,
     blocking: blocking.length,
-    quarantined
+    quarantined,
+    runLink: platform.text.runLink,
+    ...context.runUrl ? { runUrl: context.runUrl } : {}
   };
-  const url = runUrl(context);
-  if (url) reportContext.runUrl = url;
   for (const { key, analysis } of suites) {
     io.group(
       `notmyfault${named ? ` ${key}` : ""}: ${analysis.failures.length} failed, ${analysis.retried.length} retried, ${analysis.fixed.length} fixed, ${analysis.total} total`
@@ -1729,14 +2415,20 @@ async function evaluate(loaded, context, settings, store, io, now) {
     for (const failure of analysis.failures) {
       const reason = failure.usually ? ` (${failure.usually} on ${settings.trackedBranches.join(", ")}, but with a new error)` : "";
       const byHand = failure.quarantined ? ` (quarantined until ${failure.quarantined.until})` : "";
-      io.info(`${failure.verdict.padEnd(8)} ${failure.test.title}${reason}${byHand}`);
+      const since2 = failure.verdict === "broken" && failure.failingSince ? ` (failing since ${failure.failingSince.sha.slice(0, 7)})` : "";
+      io.info(`${failure.verdict.padEnd(8)} ${failure.test.title}${since2}${reason}${byHand}`);
     }
     for (const test of analysis.retried) io.info(`retried  ${test.title}`);
     for (const fixed of analysis.fixed) io.info(`fixed    ${fixed.test.title}`);
     for (const slow of analysis.slower) io.info(`slower   ${slow.test.title} (${duration(slow.duration)}, usually ${duration(slow.usual)})`);
+    for (const group of analysis.missing) {
+      if (group.deletedFile) io.info(`deleted  ${group.group} (${group.ids.length} test(s), with ${group.deletedFile})`);
+      else if (group.whole && group.group && group.ids.length > 1) io.info(`missing  ${group.group} (all ${group.ids.length} tests)`);
+      else for (const id of group.ids) io.info(`missing  ${id}`);
+    }
     io.endGroup();
   }
-  const onlyFlaky = failures.length > 0 && failures.every((failure) => failure.verdict === "flaky");
+  const onlyFlaky = platform.rerunNotice && failures.length > 0 && failures.every((failure) => failure.verdict === "flaky");
   if (onlyFlaky) {
     io.annotation(
       "notice",
@@ -1746,11 +2438,16 @@ async function evaluate(loaded, context, settings, store, io, now) {
   }
   if (settings.annotations) annotate(failures, reportContext, context.workspace, io, onlyFlaky ? 1 : 0);
   if (settings.record) {
-    for (const suite of suites) await recordHistory(store, suite.key, suite.results, context, settings, io, now);
+    const commit = tracked && !context.pullRequest?.fromFork ? await describeCommit(suites, platform, settings) : void 0;
+    for (const suite of suites) await recordHistory(store, suite.key, suite.results, platform, settings, now, commit);
   }
-  for (const { renames } of suites) for (const { from, to } of renames) io.info(`renamed  ${from} \u2192 ${to}`);
+  for (const { renames } of suites) for (const { from, to, moved } of renames) io.info(`${moved ? "moved  " : "renamed"}  ${from} \u2192 ${to}`);
   if (settings.flakyIssues && isTracked(context, settings) && !context.pullRequest?.fromFork) {
-    await manageFlakyIssues(suites, context, settings, reportContext.runUrl, io, now);
+    await manageFlakyIssues(suites, platform, settings, now);
+  }
+  if (settings.rerunFlaky && rerunWorthIt(failures, blocking, settings)) {
+    const url = await rerun(platform, settings);
+    if (url) reportContext.rerunUrl = url;
   }
   const reports = suites.map((suite) => {
     const ranking = rankFlakyTests(suite.history, now, EVIDENCE_TTL_DAYS, RANKING_SIZE);
@@ -1766,43 +2463,47 @@ async function evaluate(loaded, context, settings, store, io, now) {
   });
   io.appendSummary(renderSuitesSummary(reports, reportContext));
   if (settings.comment && context.pullRequest) {
-    const noteworthy = sum((a) => a.failures.length + a.retried.length + a.fixed.length) > 0;
-    await comment(context, settings, renderSuitesComment(reports, reportContext), noteworthy, io);
+    const noteworthy = sum((a) => a.failures.length + a.retried.length + a.fixed.length + missingCount(a)) > 0;
+    await comment(platform, settings, renderSuitesComment(reports, reportContext), noteworthy);
   }
-  const count2 = (verdicts) => failures.filter((f) => verdicts.includes(f.verdict)).length;
+  if (settings.check) await reportCheck(settings.check, platform, settings, renderCheck(reports, reportContext), blocking.length === 0);
+  const count3 = (verdicts) => failures.filter((f) => verdicts.includes(f.verdict)).length;
   io.setOutput("total", sum((a) => a.total));
   io.setOutput("failed", failures.length);
-  io.setOutput("new-failures", count2(["new", "suspect"]));
-  io.setOutput("flaky-failures", count2(["flaky"]));
-  io.setOutput("broken-failures", count2(["broken"]));
+  io.setOutput("new-failures", count3(["new", "suspect"]));
+  io.setOutput("flaky-failures", count3(["flaky"]));
+  io.setOutput("broken-failures", count3(["broken"]));
   io.setOutput("retried", sum((a) => a.retried.length));
   io.setOutput("fixed", sum((a) => a.fixed.length));
   io.setOutput("slower", sum((a) => a.slower.length));
+  io.setOutput("missing", sum(missingCount));
   io.setOutput("quarantined", quarantined);
   io.setOutput("blocking", blocking.length);
   if (settings.mode === "quarantine" && blocking.length > 0) {
-    const names = blocking.slice(0, 5).map((f) => f.test.title).join(", ");
-    io.error(`${blocking.length} failing test(s) are not tolerated in quarantine mode: ${names}`);
+    const names2 = blocking.slice(0, 5).map((f) => f.test.title).join(", ");
+    io.error(`${blocking.length} failing test(s) are not tolerated in quarantine mode: ${names2}`);
     return 1;
   }
   return 0;
 }
-function readSettings(io, context) {
-  const suites = readSuites(io, `${context.workflow}-${context.job}`);
+function readSettings(platform) {
+  const { context, io } = platform;
+  const suites = readSuites(io, context.defaultKey);
   const mode = io.input("mode", "report");
   if (mode !== "report" && mode !== "quarantine") {
-    throw new Error(`Input "mode" must be "report" or "quarantine", got "${mode}"`);
+    throw new Error(`${io.describeInput("mode")} must be "report" or "quarantine", got "${mode}"`);
   }
   const tolerated = /* @__PURE__ */ new Set();
   for (const value of splitList(io.input("tolerate", "flaky"))) {
     if (!VERDICTS.includes(value)) {
-      throw new Error(`Input "tolerate" accepts ${VERDICTS.join(", ")}; got "${value}"`);
+      throw new Error(`${io.describeInput("tolerate")} accepts ${VERDICTS.join(", ")}; got "${value}"`);
     }
     tolerated.add(value);
   }
-  const quarantine = parseQuarantine(io.input("quarantine"));
-  const token = io.input("token");
-  if (!token) throw new Error('Input "token" is empty. Pass `token: ${{ github.token }}`.');
+  const quarantine = parseQuarantine(io.input("quarantine"), io.describeInput("quarantine"));
+  const token = io.input("token") || context.defaultToken || "";
+  const needsToken = /^https?:\/\//.test(context.remoteUrl ?? `${context.serverUrl}/`);
+  if (!token && needsToken) throw new Error(platform.text.tokenMissing);
   return {
     suites,
     mode,
@@ -1815,29 +2516,38 @@ function readSettings(io, context) {
     comment: io.booleanInput("comment", true),
     annotations: io.booleanInput("annotations", true),
     flakyIssues: io.booleanInput("flaky-issues", false),
-    record: io.booleanInput("record", true),
+    missingTests: io.booleanInput("missing-tests", true),
+    ...io.booleanInput("check", false) ? { check: io.input("check-name", "notmyfault") } : {},
+    rerunFlaky: io.booleanInput("rerun-flaky", false),
+    mentionOwners: io.booleanInput("mention-owners", false),
+    assignOwners: io.booleanInput("assign-owners", false),
+    record: io.booleanInput("record", !context.local),
     window: io.integerInput("window", 50, 5)
   };
 }
 function readSuites(io, defaultKey) {
-  const list = io.input("suites");
-  if (!list) {
+  const list2 = io.input("suites");
+  if (!list2) {
     const patterns = splitList(io.input("junit"));
     if (patterns.length === 0) {
-      throw new Error('Input "junit" is required: a glob matching your JUnit XML reports. Or list several suites in "suites".');
+      throw new Error(
+        `${io.describeInput("junit")} is required: a glob matching your JUnit XML reports. Or list several suites in ${io.inputName("suites")}.`
+      );
     }
     return [{ key: sanitizeKey(io.input("key", defaultKey)), patterns }];
   }
   if (io.input("junit") || io.input("key")) {
-    throw new Error('Inputs "junit" and "key" cannot be used with "suites": name each suite and its reports in "suites".');
+    throw new Error(
+      `${io.describeInputs(["junit", "key"])} cannot be used with ${io.inputName("suites")}: name each suite and its reports in ${io.inputName("suites")}.`
+    );
   }
   const suites = [];
-  for (const line of list.split("\n").map((part) => part.trim()).filter(Boolean)) {
+  for (const line of list2.split("\n").map((part) => part.trim()).filter(Boolean)) {
     const match = /^([^:]+):(.*)$/.exec(line);
     const patterns = splitList(match?.[2] ?? "");
-    if (!match || patterns.length === 0) throw new Error(`Input "suites" expects one "name: glob" per line, got "${line}"`);
+    if (!match || patterns.length === 0) throw new Error(`${io.describeInput("suites")} expects one "name: glob" per line, got "${line}"`);
     const key = sanitizeKey(match[1]);
-    if (suites.some((suite) => suite.key === key)) throw new Error(`Input "suites" names the suite "${key}" twice.`);
+    if (suites.some((suite) => suite.key === key)) throw new Error(`${io.describeInput("suites")} names the suite "${key}" twice.`);
     suites.push({ key, patterns });
   }
   return suites;
@@ -1882,7 +2592,7 @@ async function findFiles(patterns, workspace) {
   return [...found].sort();
 }
 function annotate(failures, context, workspace, io, noticesAlready) {
-  const isFile = (path) => statSync(join2(workspace, path), { throwIfNoEntry: false })?.isFile() ?? false;
+  const isFile = (path) => statSync(join3(workspace, path), { throwIfNoEntry: false })?.isFile() ?? false;
   const emitted = { error: 0, notice: noticesAlready };
   for (const failure of failures) {
     const level = (failure.verdict === "new" || failure.verdict === "suspect") && !failure.quarantined ? "error" : "notice";
@@ -1906,9 +2616,10 @@ async function loadHistory(store, path, settings, io) {
 function historyPath(key) {
   return `history/${key}.json`;
 }
-async function recordHistory(store, key, results, context, settings, io, now) {
+async function recordHistory(store, key, results, platform, settings, now, commit) {
+  const { context, io } = platform;
   if (context.pullRequest?.fromFork) {
-    io.info("Pull request from a fork: the token is read-only, history is not recorded.");
+    io.info(`${capitalize2(platform.text.pullRequest)} from a fork: the token is read-only, history is not recorded.`);
     return;
   }
   const tracked = isTracked(context, settings);
@@ -1923,12 +2634,13 @@ async function recordHistory(store, key, results, context, settings, io, now) {
           tracked,
           now,
           window: settings.window,
-          retentionDays: RETENTION_DAYS
+          retentionDays: RETENTION_DAYS,
+          ...commit ? { commit } : {}
         });
         return changed ? serializeHistory(history) : void 0;
       },
       {
-        message: `Record ${key} (run ${context.runId || "local"}, attempt ${context.runAttempt})`,
+        message: `Record ${key} (${context.runDescription})`,
         extraFiles: { "README.md": BRANCH_README, ".nojekyll": "" },
         derivedFiles: (content, existingPaths) => {
           const history = parseHistory(content);
@@ -1945,16 +2657,31 @@ async function recordHistory(store, key, results, context, settings, io, now) {
     );
     io.info(pushed ? `History updated on branch "${settings.branch}".` : "Nothing new to record.");
   } catch (error) {
-    io.warning(
-      `Could not record history on branch "${settings.branch}". Does the job have "contents: write" permission? ${errorMessage(error)}`
-    );
+    io.warning(`Could not record history on branch "${settings.branch}". ${platform.text.recordDenied} ${errorMessage(error)}`);
   }
 }
-function isTracked(context, settings) {
-  return !context.eventName.startsWith("pull_request") && context.ref === `refs/heads/${context.refName}` && settings.trackedBranches.includes(context.refName);
+async function describeCommit(suites, platform, settings) {
+  const { context, io, text } = platform;
+  const startsFailing = suites.some(
+    (suite) => suite.results.some((result) => result.outcome === "failed" && !suite.history.tests[result.id]?.outcomes.endsWith(FAIL))
+  );
+  if (!startsFailing) return void 0;
+  const commit = { url: platform.commitUrl(context.sha) };
+  try {
+    const change = await platform.forge(settings.token).changeOf(context.sha);
+    if (change) commit.change = { ref: `${text.changePrefix}${change.number}`, url: change.url };
+  } catch (error) {
+    io.info(`Could not tell which ${text.pullRequest} commit ${context.sha.slice(0, 7)} came from: ${errorMessage(error)}`);
+  }
+  return commit;
 }
-async function manageFlakyIssues(suites, context, settings, runUrl2, io, now) {
-  const client = new GitHubClient(settings.token, context.apiUrl, context.repository);
+function isTracked(context, settings) {
+  return context.branch !== void 0 && settings.trackedBranches.includes(context.branch);
+}
+async function manageFlakyIssues(suites, platform, settings, now) {
+  const { context, io } = platform;
+  const runUrl = context.runUrl;
+  const client = platform.forge(settings.token);
   try {
     const after = suites.map((suite) => {
       const history = structuredClone(suite.history);
@@ -1966,7 +2693,11 @@ async function manageFlakyIssues(suites, context, settings, runUrl2, io, now) {
       now,
       evidenceTtlDays: EVIDENCE_TTL_DAYS,
       sha: context.sha,
-      ...runUrl2 ? { runUrl: runUrl2 } : {}
+      ...runUrl ? { runUrl } : {},
+      runName: platform.text.runName,
+      pullRequest: platform.text.pullRequest,
+      ...settings.mentionOwners || settings.assignOwners ? codeOwners(platform) : {},
+      assignOwners: settings.assignOwners
     });
     if (actions.some((action) => action.kind === "create")) {
       await client.ensureLabel(FLAKY_LABEL.name, FLAKY_LABEL.color, FLAKY_LABEL.description);
@@ -1974,7 +2705,8 @@ async function manageFlakyIssues(suites, context, settings, runUrl2, io, now) {
     const done = { created: 0, updated: 0, closed: 0 };
     for (const action of actions) {
       if (action.kind === "create") {
-        await client.createIssue(action.title, action.body, [FLAKY_LABEL.name]);
+        const issue = await client.createIssue(action.title, action.body, [FLAKY_LABEL.name]);
+        if (action.assignees.length > 0 && client.assign) await client.assign(issue, action.assignees);
         done.created++;
       } else if (action.kind === "update") {
         await client.updateIssue(action.issue, {
@@ -1992,21 +2724,107 @@ async function manageFlakyIssues(suites, context, settings, runUrl2, io, now) {
     const later = postponed > 0 ? ` ${postponed} more flaky test(s) will get an issue on the next runs.` : "";
     io.info(`Flaky test issues: ${done.created} created, ${done.updated} updated, ${done.closed} closed.${later}`);
   } catch (error) {
-    const hint = error instanceof GitHubApiError && error.status === 403 ? ' Does the job have "issues: write" permission?' : "";
+    const hint = error instanceof ApiError && error.denied ? ` ${platform.text.issuesDenied}` : "";
     io.warning(`Could not update flaky test issues.${hint} ${errorMessage(error)}`);
   }
 }
-async function comment(context, settings, body, create, io) {
+function missingCount(analysis) {
+  return analysis.missing.filter((group) => !group.deletedFile).reduce((total, group) => total + group.ids.length, 0);
+}
+async function deletedFiles(platform, settings) {
+  const { context, io, text } = platform;
+  const forge = platform.forge(settings.token);
+  if (!forge.deletedFiles || !context.pullRequest) return [];
+  try {
+    return await forge.deletedFiles(context.pullRequest.number);
+  } catch (error) {
+    io.info(`Could not read the files of the ${text.pullRequest}: ${errorMessage(error)}`);
+    return [];
+  }
+}
+function codeOwners(platform) {
+  const { context, io } = platform;
+  const codeowners = readCodeowners(context.workspace, platform.codeownersPaths);
+  if (!codeowners) {
+    io.info(`No CODEOWNERS file in ${platform.codeownersPaths.join(", ")}: flaky test issues mention no owners.`);
+    return {};
+  }
+  const isFile = (path) => statSync(join3(context.workspace, path), { throwIfNoEntry: false })?.isFile() ?? false;
+  return {
+    owners: (result) => {
+      const location = locate(result, context.workspace, isFile);
+      return location ? ownersOf(location.file, codeowners.rules) : [];
+    }
+  };
+}
+async function comment(platform, settings, body, create) {
+  const { context, io, text } = platform;
   const pullRequest = context.pullRequest;
   if (!pullRequest) return;
-  const client = new GitHubClient(settings.token, context.apiUrl, context.repository);
   try {
-    const result = await client.upsertComment(pullRequest.number, commentMarker(settings.commentKey), body, create);
-    if (result !== "skipped") io.info(`Pull request comment ${result}.`);
+    const result = await platform.forge(settings.token).upsertComment(pullRequest.number, commentMarker(settings.commentKey), body, create);
+    if (result !== "skipped") io.info(`${capitalize2(text.pullRequest)} comment ${result}.`);
   } catch (error) {
-    const hint = error instanceof GitHubApiError && error.status === 403 ? pullRequest.fromFork ? " Tokens are read-only on pull requests from forks; the job summary has the full report." : ' Does the job have "pull-requests: write" permission?' : "";
-    io.warning(`Could not comment on the pull request.${hint} ${errorMessage(error)}`);
+    const hint = error instanceof ApiError && error.denied ? ` ${pullRequest.fromFork ? text.commentFromFork : text.commentDenied}` : "";
+    io.warning(`Could not comment on the ${text.pullRequest}.${hint} ${errorMessage(error)}`);
   }
+}
+function rerunWorthIt(failures, blocking, settings) {
+  const flaky = (failure) => failure.verdict === "flaky";
+  if (settings.mode === "report") return failures.length > 0 && failures.every(flaky);
+  return blocking.length > 0 && blocking.every(flaky);
+}
+async function rerun(platform, settings) {
+  const { context, io, text } = platform;
+  const forge = platform.forge(settings.token);
+  if (!forge.rerun) {
+    io.warning(
+      `${io.describeInput("rerun-flaky")} is ignored: only GitLab lets a job start its pipeline again. On GitHub, use a companion workflow instead: https://github.com/tashikomaaa/notmyfault/blob/main/docs/recipes.md#re-run-flaky-failures-automatically`
+    );
+    return void 0;
+  }
+  try {
+    const url = await forge.rerun({
+      sha: context.sha,
+      ...context.pullRequest ? { mergeRequest: context.pullRequest.number } : context.branch ? { branch: context.branch } : {}
+    });
+    io.info(
+      url ? `Only flaky tests failed: started a new pipeline for this commit, ${url}` : "Only flaky tests failed, but this commit already had another pipeline, or moved on: not re-running."
+    );
+    return url;
+  } catch (error) {
+    const hint = error instanceof ApiError && error.denied ? ` ${text.rerunDenied}` : "";
+    io.warning(`Could not start a new pipeline.${hint} ${errorMessage(error)}`);
+    return void 0;
+  }
+}
+async function reportCheck(name, platform, settings, output, success) {
+  const { context, io, text } = platform;
+  const forge = platform.forge(settings.token);
+  if (!forge.createCheck) {
+    io.warning(`${io.describeInput("check")} is ignored: checks only exist on GitHub. The notmyfault job or step is the check here.`);
+    return;
+  }
+  if (context.pullRequest?.fromFork) {
+    io.info(`${capitalize2(text.pullRequest)} from a fork: the token is read-only, no check is created.`);
+    return;
+  }
+  try {
+    const url = await forge.createCheck({
+      name,
+      sha: context.pullRequest?.headSha ?? context.sha,
+      success,
+      ...output,
+      ...context.runUrl ? { detailsUrl: context.runUrl } : {}
+    });
+    io.info(`Check "${name}" ${success ? "passed" : "failed"}: ${url}`);
+  } catch (error) {
+    const hint = error instanceof ApiError && error.denied ? ` ${text.checkDenied}` : "";
+    io.warning(`Could not create the check "${name}".${hint} ${errorMessage(error)}`);
+  }
+}
+function capitalize2(value) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 function splitList(value) {
   return value.split(/[\n,]/).map((part) => part.trim()).filter((part) => part.length > 0);

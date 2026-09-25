@@ -7,10 +7,12 @@ import type { TestResult } from "../src/junit";
 import {
   commentMarker,
   duration,
+  plainExplanation,
   renderComment,
   renderSuitesComment,
   renderSuitesSummary,
   renderSummary,
+  sinceCommit,
   type ReportContext,
 } from "../src/report";
 
@@ -140,6 +142,70 @@ describe("renderComment", () => {
     expect(body).toContain("**Already failing on `main`.** Failed the last 2 runs there.");
   });
 
+  it("says since which commit and change a test has been failing", () => {
+    const history = emptyHistory();
+    const since = {
+      sha: "0123456789ab",
+      at: "2026-09-14T09:30:00.000Z",
+      url: "https://github.com/o/r/commit/0123456789abcdef",
+      change: { ref: "#42", url: "https://github.com/o/r/pull/42" },
+    };
+    history.tests = {
+      streak: { outcomes: "ppfff", lastSeen: "2026-09-16", failingSince: since },
+      latest: { outcomes: "pppf", lastSeen: "2026-09-16", failingSince: { sha: "fedcba987654", at: "2026-09-16T08:00:00.000Z" } },
+      fixed: { outcomes: "ppff", lastSeen: "2026-09-16", failingSince: since },
+    };
+    const analysis = analyze(
+      [
+        { id: "streak", title: "streak", outcome: "failed" },
+        { id: "latest", title: "latest", outcome: "failed" },
+        { id: "fixed", title: "fixed", outcome: "passed" },
+      ],
+      history,
+      NOW,
+      30,
+    );
+    const body = renderComment(analysis, context());
+    expect(body).toContain(
+      "**Already failing on `main`.** Failed the last 3 runs there. Failing since [`0123456`](https://github.com/o/r/commit/0123456789abcdef) from [#42](https://github.com/o/r/pull/42), on 2026-09-14.",
+    );
+    expect(body).toContain("**Already failing on `main`.** The latest run there failed too, on `fedcba9`.");
+    expect(body).toContain(
+      "- <code>fixed</code>, failed the last 2 runs there, since [`0123456`](https://github.com/o/r/commit/0123456789abcdef) from [#42](https://github.com/o/r/pull/42)",
+    );
+    const streak = analysis.failures.find((failure) => failure.test.id === "streak")!;
+    expect(plainExplanation(streak, context())).toBe(
+      "Already failing on main. Failed the last 3 runs there. Failing since 0123456 from #42, on 2026-09-14.",
+    );
+  });
+
+  it("does not let a stored link run a script or break out of the comment", () => {
+    // A history branch anyone can push to must not decide what a comment links to.
+    expect(sinceCommit({ sha: "0123456789ab", at: "2026-09-14T09:30:00.000Z", url: "javascript:alert(1)" })).toBe("`0123456`");
+    const crafted = sinceCommit({
+      sha: "0123456789ab",
+      at: "2026-09-14T09:30:00.000Z",
+      url: "https://github.com/o/r/commit/0123456789abcdef",
+      change: { ref: "#42](https://evil.test) [click me", url: "https://github.com/o/r/pull/42" },
+    });
+    expect(crafted.startsWith("[`0123456`](https://github.com/o/r/commit/0123456789abcdef) from [")).toBe(true);
+    expect(crafted).not.toContain("](https://evil.test)");
+    expect(crafted.endsWith("](https://github.com/o/r/pull/42)")).toBe(true);
+  });
+
+  it("lists missing tests, a whole file on one line", () => {
+    const history = emptyHistory();
+    history.runs = 3;
+    const ids = ["cart.test.ts › adds", "cart.test.ts › removes", "search.test.ts › finds", "search.test.ts › ranks", "pay.test.ts › charges"];
+    for (const id of ids) history.tests[id] = { outcomes: "ppp", lastSeen: "2026-09-16", lastRun: 3 };
+    const analysis = analyze([{ id: "search.test.ts › ranks", title: "ranks", outcome: "passed" }], history, NOW, 30);
+    const body = renderComment(analysis, context());
+    expect(body).toMatch(badge("passed", "✅", "All 1 test passed"));
+    expect(body).toContain(
+      "👻 **Missing:** 4 tests of the latest run on `main` did not run here. Deleted or renamed on purpose? Nothing to do. Otherwise, check that the test runner still finds them.\n\n- <code>cart.test.ts</code>: all 2 tests\n- <code>pay.test.ts › charges</code>\n- <code>search.test.ts › finds</code>\n",
+    );
+  });
+
   it("tells proven flakiness apart from a probable one", () => {
     const history = emptyHistory();
     history.tests = {
@@ -206,7 +272,18 @@ describe("renderComment", () => {
   });
 
   it("formats durations in the unit that reads best", () => {
-    expect([0, 999, 1000, 2450, 59_949, 60_000, 125_400].map(duration)).toEqual(["0 ms", "999 ms", "1.0 s", "2.5 s", "59.9 s", "1 min 0 s", "2 min 5 s"]);
+    expect([0, 999, 1000, 2450, 59_949, 60_000, 119_700, 125_400, 3_599_700, 5_000_000].map(duration)).toEqual([
+      "0 ms",
+      "999 ms",
+      "1.0 s",
+      "2.5 s",
+      "59.9 s",
+      "1 min 0 s",
+      "2 min 0 s",
+      "2 min 5 s",
+      "1 h 0 min",
+      "1 h 23 min",
+    ]);
   });
 
   it("says which failures are quarantined by hand", () => {
@@ -269,6 +346,25 @@ describe("renderSummary", () => {
     expect(summary).toContain("| <code>api › flaky</code> | 2 / 10 | 0 | yes |");
     const slowest = renderSummary(analysis, [], context());
     expect(slowest).not.toContain("Slowest tests");
+  });
+
+  it("ranks unreliable tests by what they cost, when durations tell", () => {
+    const history = emptyHistory();
+    history.runs = 10;
+    history.runDurations = [60_000, 90_000, 120_000];
+    history.tests = {
+      // 2 failures: 2 re-runs of a 90 s suite.
+      rare: { outcomes: "pfppppfppp", lastSeen: "2026-09-16", evidence: [{ at: "2026-09-12T08:00:00Z", sha: "a", kind: "rerun" }] },
+      // 1 failure and 3 retries of a 2 s test.
+      retried: { outcomes: "rprprpfppp", lastSeen: "2026-09-16", durations: [2000, 2000, 2000] },
+    };
+    const ranking = rankFlakyTests(history, NOW, 30, 10);
+    expect(ranking.map((t) => [t.id, t.cost])).toEqual([["rare", 180_000], ["retried", 96_000]]);
+    const summary = renderSummary(analyze([], history, NOW, 30), ranking, context());
+    expect(summary).toContain("<summary>Most unreliable tests on `main`, costing about 4 min 36 s of test time</summary>");
+    expect(summary).toContain("| Test | Failed runs | Passed on retry | Proven flaky | Estimated cost |");
+    expect(summary).toContain("| <code>rare</code> | 2 / 10 | 0 | yes | 3 min 0 s |");
+    expect(summary).toContain("_Each failure counts as a re-run of the suite");
   });
 
   it("charts the failure rate of the most unreliable tests in the summary", () => {

@@ -46,9 +46,11 @@ The test failed once or twice on the tracked branch, each time between two succe
 
 <img align="right" alt="Already failing" src="assets/verdict-broken.png" width="104">
 
-> **Already failing on `main`.** Failed the last 3 runs there.
+> **Already failing on `main`.** Failed the last 3 runs there. Failing since `3f2a1b9` from #42, on 2026-09-14.
 
 The most recent runs on the tracked branch failed too, so the problem predates your pull request.
+
+When notmyfault saw the streak start, it names the commit of the first failed run on the tracked branch, and the pull request that commit came from, both linked: most of the time, the change that broke the test, and the people to ask. The job logs, the flaky test issues and the history pages show it too, and the list of tests a pull request fixes says since when they were failing.
 
 **What to do:** nothing in your pull request. Once the tracked branch is fixed, update your branch.
 
@@ -116,6 +118,25 @@ A test that passes, but takes much longer than usual, is listed as **slower**:
 
 A test getting slower is often a test about to time out, or a change that made the code slower. It does not make notmyfault comment on its own, and it never fails the step: the `slower` output counts them if you want to act on it.
 
+## Missing tests
+
+A test that ran in the latest run on the tracked branch, but is not in the reports of this run, is listed as **missing**:
+
+> 👻 **Missing:** 3 tests of the latest run on `main` did not run here. Deleted or renamed on purpose? Nothing to do. Otherwise, check that the test runner still finds them.
+>
+> - `test/search.test.ts`: all 2 tests
+> - `test/cart.test.ts › checkout > applies percentage discount codes`
+
+A pull request that skips a suite by mistake or breaks test discovery turns green: fewer tests, no failure. This makes it visible. A whole file or suite missing reads as one line, and tests skipped on purpose are not missing: they are in the reports.
+
+**Tests deleted on purpose are told apart.** notmyfault asks the platform which files the pull request deletes, and the tests that lived in them are listed separately, as a fact rather than a warning:
+
+> 🗑️ **Deleted:** 4 tests no longer run, with the file `test/search.test.ts` this change removes.
+
+They are not counted by the `missing` output, and they never make notmyfault comment on their own. Without the permission to read the files of the pull request, or outside GitHub, GitLab, Forgejo and Gitea, every missing test is reported as missing.
+
+Missing tests never fail the step, but they make notmyfault comment on a pull request, and the `missing` output counts them. Turn them off with [`missing-tests: false`](configuration.md#missing-tests) when runs only cover part of the tests.
+
 ## Annotations
 
 When the report tells where a failed test lives, notmyfault annotates it with its verdict and the first line of its failure message. Annotations appear in the workflow run and, on pull requests, next to the code in the **Files changed** tab when the annotated file is part of the change.
@@ -152,16 +173,28 @@ The [demo repository](https://github.com/tashikomaaa/notmyfault-demo) runs notmy
 
 ## The job summary
 
-The job summary contains the same report, lists the [renamed tests](how-it-works.md#renamed-tests) whose history followed them, and ranks the tests of the tracked branch twice.
+The job summary contains the same report, lists the [renamed tests](how-it-works.md#renamed-and-moved-tests) whose history followed them, and ranks the tests of the tracked branch twice.
 
 The **slowest tests**, up to 10, by median duration over their last 10 runs, with their fastest and slowest runs. A wide range often means a test depends on timing.
 
-The **most unreliable tests**, up to 10, known flaky tests first, then by share of failed runs. For the first 3 of them with at least 15 remembered runs, a chart shows how their failure rate evolved: each point is the share of failed runs among the 10 runs ending there, so you can see whether a test is getting worse, or whether a fix worked.
+The **most unreliable tests**, up to 10, the costliest first when reports give durations, see [Cost of unreliable tests](#cost-of-unreliable-tests), otherwise known flaky tests first, then by share of failed runs. For the first 3 of them with at least 15 remembered runs, a chart shows how their failure rate evolved: each point is the share of failed runs among the 10 runs ending there, so you can see whether a test is getting worse, or whether a fix worked.
 
 | Column | Meaning |
 |---|---|
 | Failed runs | Failed runs out of the runs remembered for this test |
 | Passed on retry | Runs that passed only after a retry |
 | Proven flaky | `yes` for known flaky tests, `probably` otherwise |
+| Estimated cost | Test time their failures and retries cost, when reports give durations |
 
 GitHub draws the charts from Mermaid blocks. Where Mermaid is not rendered, the summary shows their source, which still lists the rates.
+
+### Cost of unreliable tests
+
+Flaky tests get tolerated because their cost is invisible. When reports give durations, the job summary and the [history pages](recipes.md#publish-the-history-with-github-pages) estimate what each unreliable test cost over its remembered runs on the tracked branch, rank tests by it, and add up their total:
+
+> Most unreliable tests on `main`, costing about 1 h 12 min of test time
+
+- **Each failure** costs a re-run of the whole suite: someone re-runs the job, or the pipeline fails and is pushed again. It counts as the median total test time of the last 10 runs.
+- **Each retry** costs another run of the test, at its median duration.
+
+It is an estimate of test time, not of CI minutes: installing dependencies and starting the job are not in the reports, and tests running in parallel add up to more than the time they took. It says which tests are worth fixing first, not what to bill.

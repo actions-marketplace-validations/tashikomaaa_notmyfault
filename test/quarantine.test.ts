@@ -64,4 +64,12 @@ describe("quarantine entries", () => {
       search: undefined,
     });
   });
+
+  it("matches a crafted pattern from the repository without stalling the job", () => {
+    const entry = { pattern: `${"*a".repeat(40)}*b`, until: "2026-10-01" };
+    const test = { id: "x", title: `checkout › ${"a".repeat(300)}`, outcome: "failed" as const };
+    const started = Date.now();
+    expect(matches(entry, test)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
 });

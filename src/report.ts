@@ -4,11 +4,13 @@ import {
   type FailureTrend,
   type FailureVerdict,
   type FixedTest,
+  type MissingTests,
   type RankedTest,
   type SlowerTest,
   type SlowTest,
   type Verdict,
 } from "./analyze";
+import type { FailingSince } from "./history";
 import type { TestResult } from "./junit";
 import type { Rename } from "./renames";
 
@@ -27,7 +29,14 @@ export interface ReportContext {
   /** Failures not covered by the tolerated verdicts. */
   blocking: number;
   runUrl?: string;
+  /** Label of the link to the run. Defaults to "Workflow run". */
+  runLink?: string;
+  /** The pipeline notmyfault started to re-run flaky failures. */
+  rerunUrl?: string;
 }
+
+/** Longest summary a check run accepts. */
+const MAX_CHECK_SUMMARY = 65_535;
 
 /** The analysis of one test suite, with its own history. */
 export interface SuiteReport {
@@ -49,6 +58,7 @@ const MAX_ROWS = 30;
 const MAX_MESSAGES = 10;
 const MAX_FIXED = 10;
 const MAX_SLOWER = 10;
+const MAX_MISSING = 10;
 const MAX_CHART_TITLE = 60;
 const PROJECT_URL = "https://github.com/tashikomaaa/notmyfault";
 // Comments already posted keep pointing at these images: never rename or remove them.
@@ -78,16 +88,32 @@ export function renderSuitesComment(suites: SuiteReport[], context: ReportContex
   return [commentMarker(context.key), ...renderBody(suites, context)].join("\n");
 }
 
+/**
+ * The report as a check: the headline as its title, and the comment as its summary, ending with whether failures
+ * are tolerated, as in quarantine mode, whatever the mode.
+ */
+export function renderCheck(suites: SuiteReport[], context: ReportContext): { title: string; summary: string } {
+  const lines = renderBody(suites, { ...context, mode: "quarantine" }, "Check");
+  const title = lines[0]!.replace(/^### (<img [^>]*> )?/, "");
+  const summary = lines.slice(2).join("\n");
+  return {
+    title,
+    summary: summary.length > MAX_CHECK_SUMMARY ? `${summary.slice(0, MAX_CHECK_SUMMARY - 30)}\n\n_…report truncated_` : summary,
+  };
+}
+
 export function renderSuitesSummary(suites: SuiteReport[], context: ReportContext): string {
   const lines = renderBody(suites, context);
   for (const suite of suites) {
     const of = suites.length > 1 ? ` of ${suite.name}` : "";
     if (suite.renames?.length) {
+      const moved = suite.renames.filter((rename) => rename.moved).length;
+      const what = moved === suite.renames.length ? "new file" : moved > 0 ? "new name or file" : "new name";
       lines.push(
         "",
-        `✏️ **Renamed:** the history of ${plural(suite.renames.length, "test")}${of} followed ${suite.renames.length === 1 ? "its" : "their"} new name. If a rename is wrong, the new test inherited the history of another one: see [Test identity](${PROJECT_URL}/blob/main/docs/how-it-works.md#test-identity).`,
+        `✏️ **Renamed:** the history of ${plural(suite.renames.length, "test")}${of} followed ${suite.renames.length === 1 ? "it to its" : "them to their"} ${what}. If a match is wrong, the new test inherited the history of another one: see [Test identity](${PROJECT_URL}/blob/main/docs/how-it-works.md#test-identity).`,
         "",
-        ...suite.renames.map(({ from, to }) => `- ${code(from)} → ${code(to)}`),
+        ...suite.renames.map(({ from, to, moved: isMoved }) => `- ${code(from)} → ${code(to)}${isMoved ? " _(moved)_" : ""}`),
       );
     }
     if (suite.slowest?.length) {
@@ -105,16 +131,26 @@ export function renderSuitesSummary(suites: SuiteReport[], context: ReportContex
       );
     }
     if (suite.ranking?.length) {
+      const costs = suite.ranking.some((t) => t.cost !== undefined);
+      const total = suite.ranking.reduce((sum, t) => sum + (t.cost ?? 0), 0);
+      const costing = total > 0 ? `, costing about ${duration(total)} of test time` : "";
       lines.push(
         "",
-        `<details><summary>Most unreliable tests${of} on ${branches(context)}</summary>`,
+        `<details><summary>Most unreliable tests${of} on ${branches(context)}${costing}</summary>`,
         "",
-        "| Test | Failed runs | Passed on retry | Proven flaky |",
-        "|---|--:|--:|:-:|",
+        `| Test | Failed runs | Passed on retry | Proven flaky |${costs ? " Estimated cost |" : ""}`,
+        `|---|--:|--:|:-:|${costs ? "--:|" : ""}`,
         ...suite.ranking.map(
-          (t) => `| ${code(t.id)} | ${t.failures} / ${t.runs} | ${t.retries} | ${t.confirmed ? "yes" : "probably"} |`,
+          (t) =>
+            `| ${code(t.id)} | ${t.failures} / ${t.runs} | ${t.retries} | ${t.confirmed ? "yes" : "probably"} |${costs ? ` ${t.cost === undefined ? "" : duration(t.cost)} |` : ""}`,
         ),
         "",
+        ...(costs
+          ? [
+              `_Each failure counts as a re-run of the suite, each retry as another run of the test, at their median durations. See [Cost of unreliable tests](${PROJECT_URL}/blob/main/docs/verdicts.md#cost-of-unreliable-tests)._`,
+              "",
+            ]
+          : []),
         "</details>",
       );
     }
@@ -149,7 +185,7 @@ function renderTrends(trends: FailureTrend[], of: string, context: ReportContext
   return lines;
 }
 
-function renderBody(suites: SuiteReport[], context: ReportContext): string[] {
+function renderBody(suites: SuiteReport[], context: ReportContext, decision = "Quarantine"): string[] {
   const all = combine(suites.map((suite) => suite.analysis));
   const lines = [`### ${headline(all)}`, ""];
 
@@ -170,8 +206,15 @@ function renderBody(suites: SuiteReport[], context: ReportContext): string[] {
     const tolerated = `${verdicts}${byHand}`;
     lines.push(
       context.blocking === 0
-        ? `🛡️ **Quarantine:** every failure is tolerated (${tolerated}), so this check passes.`
-        : `❌ **Quarantine:** ${plural(context.blocking, "failure")} not tolerated (${tolerated}), so this check fails.`,
+        ? `🛡️ **${decision}:** every failure is tolerated (${tolerated}), so this check passes.`
+        : `❌ **${decision}:** ${plural(context.blocking, "failure")} not tolerated (${tolerated}), so this check fails.`,
+      "",
+    );
+  }
+
+  if (context.rerunUrl) {
+    lines.push(
+      `🔁 **Re-run:** only flaky tests stand in the way, so notmyfault started [a new pipeline](${context.rerunUrl}) for this commit. Passing there proves them flaky.`,
       "",
     );
   }
@@ -198,6 +241,7 @@ function combine(analyses: Analysis[]): Analysis {
     retried: analyses.flatMap((a) => a.retried),
     fixed: analyses.flatMap((a) => a.fixed),
     slower: analyses.flatMap((a) => a.slower),
+    missing: analyses.flatMap((a) => a.missing),
   };
 }
 
@@ -220,6 +264,37 @@ function renderSuite(analysis: Analysis, context: ReportContext): string[] {
 
   if (analysis.fixed.length > 0) lines.push(...renderFixed(analysis.fixed, context));
   if (analysis.slower.length > 0) lines.push(...renderSlower(analysis.slower, context));
+  const missing = analysis.missing.filter((group) => !group.deletedFile);
+  const deleted = analysis.missing.filter((group) => group.deletedFile);
+  if (missing.length > 0) lines.push(...renderMissing(missing, context));
+  if (deleted.length > 0) lines.push(...renderDeleted(deleted));
+  return lines;
+}
+
+function renderDeleted(deleted: MissingTests[]): string[] {
+  const count = deleted.reduce((sum, group) => sum + group.ids.length, 0);
+  const files = [...new Set(deleted.map((group) => group.deletedFile!))];
+  return [
+    `🗑️ **Deleted:** ${plural(count, "test")} ${count === 1 ? "no longer runs" : "no longer run"}, with ${files.length === 1 ? "the file" : "the files"} ${files.slice(0, MAX_MISSING).map(code).join(", ")} this change removes.`,
+    "",
+  ];
+}
+
+function renderMissing(missing: MissingTests[], context: ReportContext): string[] {
+  const count = missing.reduce((sum, group) => sum + group.ids.length, 0);
+  // A whole file or suite gone reads as one line.
+  const items = missing.flatMap((group) =>
+    group.whole && group.group && group.ids.length > 1
+      ? [`- ${code(group.group)}: all ${group.ids.length} tests`]
+      : group.ids.map((id) => `- ${code(id)}`),
+  );
+  const lines = [
+    `👻 **Missing:** ${plural(count, "test")} of the latest run on ${branches(context)} did not run here. Deleted or renamed on purpose? Nothing to do. Otherwise, check that the test runner still finds ${count === 1 ? "it" : "them"}.`,
+    "",
+    ...items.slice(0, MAX_MISSING),
+  ];
+  if (items.length > MAX_MISSING) lines.push(`- _…and ${items.length - MAX_MISSING} more_`);
+  lines.push("");
   return lines;
 }
 
@@ -244,7 +319,30 @@ export function quarantineNote(quarantined: { until: string; reason?: string }, 
 
 /** The explanation of a verdict without Markdown, for annotations. */
 export function plainExplanation(failure: FailureVerdict, context: ReportContext): string {
-  return explain(failure, context).replace(/\*\*|`/g, "");
+  return explain(failure, context)
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\*\*|`/g, "");
+}
+
+/** The commit a failure streak started with, linked, and the pull or merge request it came from: "`abc1234` from #42". */
+export function sinceCommit(since: FailingSince): string {
+  const sha = `\`${since.sha.slice(0, 7)}\``;
+  const url = linkable(since.url);
+  const commit = url ? `[${sha}](${url})` : sha;
+  if (!since.change) return commit;
+  // "#42", "!9": anything else is escaped rather than trusted to stay inside the link.
+  const ref = /^[\w#!.\-/ ]{1,40}$/.test(since.change.ref) ? since.change.ref : escapeHtml(since.change.ref);
+  const changeUrl = linkable(since.change.url);
+  return `${commit} from ${changeUrl ? `[${ref}](${changeUrl})` : ref}`;
+}
+
+/**
+ * The addresses notmyfault turns into links. Everything else, from a history
+ * file or an API, is rendered as text: a link must open a page in a browser,
+ * never run a script, and never end the Markdown or HTML it sits in.
+ */
+export function linkable(url: string | undefined): string | undefined {
+  return url !== undefined && /^https?:\/\/[^\s<>"'`()\\]+$/i.test(url) ? url : undefined;
 }
 
 function explain(failure: FailureVerdict, context: ReportContext): string {
@@ -257,10 +355,14 @@ function explain(failure: FailureVerdict, context: ReportContext): string {
         : `**New failure.** No history for this test on ${where}.`;
     case "suspect":
       return `**Suspect.** Failed in isolation ${times(failure.isolatedFailures)} in the last ${plural(failure.runs, "run")} on ${where}.`;
-    case "broken":
-      return failure.trailingFailures === 1
-        ? `**Already failing on ${where}.** The latest run there failed too.`
-        : `**Already failing on ${where}.** Failed the last ${failure.trailingFailures} runs there${failure.confirmed ? ", too many in a row to be flakiness" : ""}.`;
+    case "broken": {
+      const since = failure.failingSince;
+      if (failure.trailingFailures === 1) {
+        return `**Already failing on ${where}.** The latest run there failed too${since ? `, on ${sinceCommit(since)}` : ""}.`;
+      }
+      const streak = `**Already failing on ${where}.** Failed the last ${failure.trailingFailures} runs there${failure.confirmed ? ", too many in a row to be flakiness" : ""}.`;
+      return since ? `${streak} Failing since ${sinceCommit(since)}, on ${since.at.slice(0, 10)}.` : streak;
+    }
     case "flaky": {
       const parts: string[] = [];
       if (failure.failures > 0) parts.push(`failed ${failure.failures} of the last ${plural(failure.runs, "run")} on ${where}`);
@@ -310,7 +412,7 @@ function renderFixed(fixed: FixedTest[], context: ReportContext): string[] {
       .slice(0, MAX_FIXED)
       .map(
         (f) =>
-          `- ${code(f.test.title)}, ${f.trailingFailures === 1 ? "failed the latest run" : `failed the last ${f.trailingFailures} runs`} there`,
+          `- ${code(f.test.title)}, ${f.trailingFailures === 1 ? "failed the latest run" : `failed the last ${f.trailingFailures} runs`} there${f.failingSince ? `, since ${sinceCommit(f.failingSince)}` : ""}`,
       ),
   ];
   if (fixed.length > MAX_FIXED) lines.push(`- _…and ${fixed.length - MAX_FIXED} more_`);
@@ -335,8 +437,11 @@ function renderSlower(slower: SlowerTest[], context: ReportContext): string[] {
 export function duration(ms: number): string {
   if (ms < 1000) return `${ms} ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
-  const minutes = Math.floor(ms / 60_000);
-  return `${minutes} min ${Math.round((ms - minutes * 60_000) / 1000)} s`;
+  // Rounded first, so that 119.7 s reads 2 min 0 s, not 1 min 60 s.
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
+  const minutes = Math.round(ms / 60_000);
+  return `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }
 
 function footer(retried: TestResult[], context: ReportContext): string {
@@ -346,7 +451,7 @@ function footer(retried: TestResult[], context: ReportContext): string {
     const more = retried.length > 5 ? ` and ${retried.length - 5} more` : "";
     parts.push(`🔁 Passed only after a retry: ${names}${more}`);
   }
-  if (context.runUrl) parts.push(`[Workflow run](${context.runUrl})`);
+  if (context.runUrl) parts.push(`[${context.runLink ?? "Workflow run"}](${context.runUrl})`);
   parts.push(`Reported by [notmyfault](${PROJECT_URL})`);
   return `<sub>${parts.join(" · ")}</sub>`;
 }

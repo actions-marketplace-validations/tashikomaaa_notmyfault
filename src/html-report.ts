@@ -1,6 +1,6 @@
-import { computeStats, verdictFor, type TestStats } from "./analyze";
-import { FAIL, RETRY, type History, type TestHistory } from "./history";
-import { duration, escapeHtml } from "./report";
+import { computeStats, estimateCost, verdictFor, type TestStats } from "./analyze";
+import { FAIL, RETRY, type FailingSince, type History, type TestHistory } from "./history";
+import { duration, escapeHtml, linkable } from "./report";
 
 export interface PageContext {
   trackedBranches: string[];
@@ -9,6 +9,8 @@ export interface PageContext {
 }
 
 const PROJECT_URL = "https://github.com/tashikomaaa/notmyfault";
+/** Rows of one page: past this, the page stops being readable, and a report full of made-up tests stops being a weight. */
+const MAX_ROWS = 500;
 
 /** Where the page of a key lives on the history branch. */
 export function reportPath(key: string): string {
@@ -21,31 +23,60 @@ export function reportPath(key: string): string {
  * listing thousands of them would bury the ones worth fixing.
  */
 export function renderSuitePage(key: string, history: History, context: PageContext): string {
-  const rows = Object.entries(history.tests)
-    .map(([id, test]) => ({ id, test, stats: computeStats(test, context.now, context.evidenceTtlDays) }))
-    .filter(({ test, stats }) => test.outcomes.includes(FAIL) || test.outcomes.includes(RETRY) || stats.confirmed);
-  rows.sort((a, b) => score(b.stats) - score(a.stats) || a.id.localeCompare(b.id));
+  const rows = unreliableTests(history, context);
+  sortByCost(rows);
+  const total = rows.reduce((sum, row) => sum + (row.cost ?? 0), 0);
+  const costing = total > 0 ? ` Their failures and retries cost about ${duration(total)} of test time.` : "";
   const stable = Object.keys(history.tests).length - rows.length;
+  const listed = rows.slice(0, MAX_ROWS);
+  const beyond = rows.length - listed.length;
   const where = context.trackedBranches.map((branch) => `<code>${escapeHtml(branch)}</code>`).join(", ");
 
   const body = [
     `<p class="back"><a href="../index.html">All test suites</a></p>`,
     `<h1>${escapeHtml(key)}</h1>`,
-    `<p class="lede">${history.runs} runs recorded on ${where}, last updated ${formatTime(history.updatedAt)}. ${plural(rows.length, "unreliable test")} listed, ${plural(stable, "stable test")} not listed.</p>`,
+    `<p class="lede">${history.runs} runs recorded on ${where}, last updated ${formatTime(history.updatedAt)}. ${plural(rows.length, "unreliable test")} listed, ${plural(stable, "stable test")} not listed.${costing}</p>`,
   ];
   if (rows.length === 0) {
     body.push(`<p class="empty">No test failed or needed a retry in the remembered runs.</p>`);
   } else {
     body.push(
       `<div class="scroll"><table>`,
-      `<thead><tr><th>Test</th><th>Verdict</th><th>Remembered runs, oldest first</th><th>Failed</th><th>Retried</th><th>Last failure</th><th>Proof of flakiness</th><th>Median duration</th></tr></thead>`,
+      tableHeader(),
       `<tbody>`,
-      ...rows.map(({ id, test, stats }) => renderRow(id, test, stats)),
+      ...listed.map(({ id, test, stats, cost }) => renderRow(id, test, stats, cost)),
       `</tbody></table></div>`,
+      ...(beyond > 0 ? [`<p class="empty">${plural(beyond, "less unreliable test")} not shown.</p>`] : []),
       `<p class="legend"><i class="p"></i> passed <i class="r"></i> passed after a retry <i class="f"></i> failed</p>`,
     );
   }
   return page(`notmyfault: ${key}`, body);
+}
+
+export interface UnreliableTest {
+  id: string;
+  test: TestHistory;
+  stats: TestStats;
+  /** Estimated test time lost to its failures and retries, see estimateCost. */
+  cost: number | undefined;
+}
+
+/** The tests of a history that failed or needed a retry in their remembered runs, or are proven flaky. */
+export function unreliableTests(history: History, context: PageContext): UnreliableTest[] {
+  return Object.entries(history.tests)
+    .map(([id, test]) => ({ id, test, stats: computeStats(test, context.now, context.evidenceTtlDays), cost: estimateCost(test, history) }))
+    .filter(({ test, stats }) => test.outcomes.includes(FAIL) || test.outcomes.includes(RETRY) || stats.confirmed);
+}
+
+/** The costliest first when durations tell, the most unreliable otherwise. */
+export function sortByCost<T extends { id: string; stats: TestStats; cost: number | undefined }>(rows: T[]): T[] {
+  return rows.sort((a, b) => (b.cost ?? -1) - (a.cost ?? -1) || score(b.stats) - score(a.stats) || a.id.localeCompare(b.id));
+}
+
+/** The header of the table of unreliable tests, after the columns in `leading`. */
+export function tableHeader(leading: string[] = []): string {
+  const columns = [...leading, "Test", "Verdict", "Remembered runs, oldest first", "Failed", "Retried", "Last failure", "Proof of flakiness", "Median duration", "Estimated cost"];
+  return `<thead><tr>${columns.map((column) => `<th>${column}</th>`).join("")}</tr></thead>`;
 }
 
 /** The home page of the history branch, linking to the page of each key. */
@@ -60,7 +91,8 @@ export function renderIndexPage(keys: string[], context: PageContext): string {
   ]);
 }
 
-function renderRow(id: string, test: TestHistory, stats: TestStats): string {
+/** A row of the table of unreliable tests, after the cells in `leading`, already HTML. */
+export function renderRow(id: string, test: TestHistory, stats: TestStats, cost: number | undefined, leading: string[] = []): string {
   const [label, tone] = verdict(stats);
   const outcomes = [...test.outcomes];
   const failed = outcomes.filter((outcome) => outcome === FAIL).length;
@@ -68,21 +100,35 @@ function renderRow(id: string, test: TestHistory, stats: TestStats): string {
   const summary = `${outcomes.length - failed - retried} passed, ${retried} passed after a retry, ${failed} failed`;
   const timeline = outcomes.map((outcome) => `<i class="${outcome === FAIL ? "f" : outcome === RETRY ? "r" : "p"}"></i>`).join("");
   const proof = stats.latestEvidence
-    ? `${stats.latestEvidence.kind === "rerun" ? "Passed on re-run" : "Passed after a retry"}, ${stats.latestEvidence.at.slice(0, 10)}`
+    ? `${stats.latestEvidence.kind === "rerun" ? "Passed on re-run" : "Passed after a retry"}, ${escapeHtml(stats.latestEvidence.at.slice(0, 10))}`
     : "";
   const durations = test.durations ?? [];
   return [
     `<tr>`,
+    ...leading.map((cell) => `<td>${cell}</td>`),
     `<td class="test"><code>${escapeHtml(id)}</code></td>`,
-    `<td><span class="verdict ${tone}">${label}</span></td>`,
+    `<td><span class="verdict ${tone}">${label}</span>${tone === "broken" && stats.failingSince ? since(stats.failingSince) : ""}</td>`,
     `<td><span class="timeline" role="img" aria-label="${summary}">${timeline}</span></td>`,
     `<td class="number">${failed}</td>`,
     `<td class="number">${retried}</td>`,
-    `<td>${lastFailure(test) ?? ""}</td>`,
+    `<td>${escapeHtml(lastFailure(test) ?? "")}</td>`,
     `<td>${proof}</td>`,
     `<td class="number">${durations.length > 0 ? duration(median(durations)) : ""}</td>`,
+    `<td class="number">${cost === undefined ? "" : duration(cost)}</td>`,
     `</tr>`,
   ].join("");
+}
+
+function since(failing: FailingSince): string {
+  const commit = link(failing.url, `<code>${escapeHtml(failing.sha.slice(0, 7))}</code>`);
+  const change = failing.change ? ` from ${link(failing.change.url, escapeHtml(failing.change.ref))}` : "";
+  return `<span class="since">since ${commit}${change}, ${escapeHtml(failing.at.slice(0, 10))}</span>`;
+}
+
+/** Links the already escaped text when the address is one a browser opens as a page, and leaves it as text otherwise. */
+export function link(url: string | undefined, text: string): string {
+  const safe = linkable(url);
+  return safe ? `<a href="${escapeAttribute(safe)}">${text}</a>` : text;
 }
 
 function verdict(stats: TestStats): [string, string] {
@@ -115,19 +161,19 @@ function median(values: number[]): number {
   return sorted.length % 2 === 1 ? sorted[middle]! : Math.round((sorted[middle - 1]! + sorted[middle]!) / 2);
 }
 
-function formatTime(iso: string): string {
-  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+export function formatTime(iso: string): string {
+  return escapeHtml(`${iso.slice(0, 10)} ${iso.slice(11, 16)}`) + " UTC";
 }
 
-function plural(n: number, word: string): string {
+export function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
-function escapeAttribute(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+export function escapeAttribute(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function page(title: string, body: string[]): string {
+export function page(title: string, body: string[], footer = "rewritten on every update of the history"): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -154,6 +200,7 @@ td.test { white-space: normal; min-width: 18rem; }
 /* Text colors keep every chip at a contrast of 4.5:1 or more. */
 .verdict { display: inline-block; padding: 0.1rem 0.55rem; border-radius: 1rem; color: #1f2328; font-size: 0.8rem; font-weight: 600; }
 .verdict.new { background: #c93c3c; color: #fff; } .verdict.broken { background: var(--broken); color: var(--on-broken); }
+.since { display: block; margin-top: 0.25rem; color: var(--muted); font-size: 0.8rem; }
 .verdict.suspect { background: var(--suspect); } .verdict.flaky { background: var(--flaky); } .verdict.passed { background: var(--passed); }
 .timeline { display: inline-flex; gap: 1px; }
 i { display: inline-block; width: 5px; height: 16px; border-radius: 1px; }
@@ -166,7 +213,7 @@ footer { margin-top: 2rem; font-size: 0.85rem; }
 <body>
 <main>
 ${body.join("\n")}
-<footer>Generated by <a href="${PROJECT_URL}">notmyfault</a>, rewritten on every update of the history.</footer>
+<footer>Generated by <a href="${PROJECT_URL}">notmyfault</a>, ${footer}.</footer>
 </main>
 </body>
 </html>

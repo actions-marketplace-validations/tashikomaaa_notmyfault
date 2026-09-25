@@ -94,6 +94,22 @@ describe("parseJUnit", () => {
     expect(result!.message).toHaveLength(300);
     expect(result!.message!.endsWith("…")).toBe(true);
   });
+
+  it("strips terminal escapes and control characters from names and messages", () => {
+    const esc = String.fromCharCode(27);
+    const xml = `<testsuites><testsuite name="unit"><testcase classname="cart" name="pays ${esc}[2K${esc}[1Gerased\u0007">` +
+      `<failure message="boom ${esc}[31mred${esc}[0m\u0000">out</failure></testcase></testsuite></testsuites>`;
+    const [result] = parseJUnit(xml);
+    expect(result!.title).toBe("cart › pays erased");
+    expect(result!.message).toBe("boom red");
+    expect(JSON.stringify(result)).not.toContain(esc);
+  });
+
+  it("cuts names longer than any real test name", () => {
+    const [result] = parseJUnit(`<testsuites><testsuite name="unit"><testcase name="${"a".repeat(900)}"/></testsuite></testsuites>`);
+    // Each part of a name is cut on its own, here the suite name and the test name.
+    expect(result!.title).toBe(`unit › ${"a".repeat(499)}…`);
+  });
 });
 
 describe("durations", () => {
@@ -108,9 +124,9 @@ describe("durations", () => {
 });
 
 describe("location hints", () => {
-  it("are collected for failed tests only", () => {
+  it("are collected for tests that ran, with file references for failures only", () => {
     const results = fixture("vitest.xml");
-    expect(results.find((r) => r.outcome === "passed")!.hints).toBeUndefined();
+    expect(results.find((r) => r.outcome === "passed")!.hints).toEqual({ names: ["test/cart.test.ts"], references: [] });
     expect(results.find((r) => r.outcome === "failed")!.hints).toEqual({
       names: ["test/cart.test.ts"],
       references: [{ file: "test/cart.test.ts", line: 14 }],

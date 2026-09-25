@@ -24,6 +24,12 @@
 | [`comment`](#comment) | `true` | Comment on pull requests |
 | [`annotations`](#annotations) | `true` | Annotate failed tests next to their code |
 | [`flaky-issues`](#flaky-issues) | `false` | Open an issue for each flaky test |
+| [`mention-owners`](#mention-owners) | `false` | Mention the owners of each flaky test in its issue |
+| [`assign-owners`](#assign-owners) | `false` | Assign each flaky test issue to its owners |
+| [`missing-tests`](#missing-tests) | `true` | Report tests of the latest tracked run missing from this run |
+| [`check`](#check) | `false` | Report the run as a check of its own |
+| [`check-name`](#check-name) | `notmyfault` | Name of that check |
+| [`rerun-flaky`](#rerun-flaky) | `false` | GitLab only: re-run pipelines blocked only by flaky tests |
 | [`record`](#record) | `true` | Record the run in the history |
 | [`window`](#window) | `50` | Runs remembered per test |
 
@@ -132,6 +138,51 @@ permissions:
 
 Pull request runs never touch issues. Assign, discuss and label the issues as you like: notmyfault only rewrites their description. See [How it works](how-it-works.md#flaky-test-issues).
 
+### `mention-owners`
+
+With [`flaky-issues`](#flaky-issues), when `true`, each flaky test issue mentions the owners of the test file, from the `CODEOWNERS` file of the repository:
+
+> - **Owners:** @acme/payments @ana
+
+The file is looked for where the platform does: `.github/CODEOWNERS`, `CODEOWNERS` and `docs/CODEOWNERS` on GitHub, `CODEOWNERS`, `docs/CODEOWNERS` and `.gitlab/CODEOWNERS` on GitLab, including GitLab sections. The owners of a file are those of the last pattern matching it. Only owners that can be mentioned, starting with `@`, are listed, users and teams alike.
+
+The test file is found the way [annotations](verdicts.md#annotations) find it, from the report. Mentions notify people, which is why it is off by default: owners are notified when the issue is created, not again on each update.
+
+### `assign-owners`
+
+With [`flaky-issues`](#flaky-issues), when `true`, each flaky test issue is assigned, when it is created, to the owners of the test file who are **users**: teams and groups can be mentioned but not assigned, see [`mention-owners`](#mention-owners). Owners the platform does not know, or who cannot be assigned, are left out.
+
+Only the creation assigns: whatever you change afterwards is kept, so an issue you hand over to someone else stays theirs. It works on GitHub, GitLab and Forgejo or Gitea.
+
+### `missing-tests`
+
+When `true`, notmyfault compares the tests of the run with the tests of the latest run on a tracked branch, and lists the ones missing from the reports: deleted, renamed, or no longer found by the test runner. A whole file or suite missing reads as one line. Tests skipped on purpose are in the reports, so they are not missing. See [Missing tests](verdicts.md#missing-tests).
+
+Tests whose file the pull request deletes are listed as deleted instead, and are not counted, see [Missing tests](verdicts.md#missing-tests).
+
+Missing tests never fail the step, but they make notmyfault comment on a pull request. Set `missing-tests: false` when runs are expected to cover only part of the tests, like pull requests running only the tests affected by their changes, or when several jobs with different tests share one [`key`](#key).
+
+### `check`
+
+When `true`, notmyfault reports each run as a check of its own on the commit, on the head of the pull request for pull request runs. The check **fails when a failure is not covered by [`tolerate`](#tolerate)** and passes otherwise, whatever the mode and whatever the job status, with the report as its summary. It needs the `checks: write` permission:
+
+```yaml
+permissions:
+  contents: write
+  pull-requests: write
+  checks: write
+```
+
+Branch protection can then require that check instead of the job: failures that look real block the merge, flaky ones do not, and the test step keeps failing the job as usual. See [Require the notmyfault check](quarantine.md#require-the-notmyfault-check). Pull requests from forks get no check, their token being read-only. Checks only exist on GitHub.
+
+### `check-name`
+
+The name of the check, `notmyfault` by default. Jobs reporting different suites need different names, as a new check with the same name on the same commit replaces the previous one.
+
+### `rerun-flaky`
+
+GitLab only, as `NOTMYFAULT_RERUN_FLAKY`: when only flaky tests stand in the way, notmyfault starts a new pipeline for the commit, once. See [Re-run flaky failures](gitlab.md#re-run-flaky-failures). On GitHub, a job cannot re-run its own workflow run: the input is ignored with a warning, and a [companion workflow](recipes.md#re-run-flaky-failures-automatically) does it instead.
+
 ### `record`
 
 When `true`, the run is recorded in the history. Pull requests from forks are never recorded, because their token is read-only. Set `record: false` for jobs that should read the history without influencing it, for example experimental runs.
@@ -153,6 +204,7 @@ How many recent runs on tracked branches are remembered for each test. Minimum 5
 | `fixed` | Tests failing on a tracked branch that pass in this run |
 | `quarantined` | Failures of tests quarantined by hand |
 | `slower` | Passing tests that took much longer than usual on a tracked branch |
+| `missing` | Tests of the latest run on a tracked branch missing from this run |
 | `blocking` | Failures not covered by `tolerate` |
 
 Outputs are numbers written as strings. Give the step an `id` to use them:
@@ -183,3 +235,5 @@ It never fails because of its own infrastructure. If the history cannot be read 
 ## Environment
 
 notmyfault runs on the `node24` runtime and needs `git` on the runner. It uses the default variables set by GitHub Actions, notably `GITHUB_SERVER_URL`, `GITHUB_API_URL`, `GITHUB_SHA` and `RUNNER_TEMP`, and needs no other configuration.
+
+On GitLab CI/CD, every input is a `NOTMYFAULT_*` variable and the outputs are dotenv variables, see [GitLab CI/CD](gitlab.md#variables).

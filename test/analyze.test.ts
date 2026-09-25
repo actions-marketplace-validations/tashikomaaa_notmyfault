@@ -3,6 +3,7 @@ import {
   analyze,
   blockingFailures,
   brokenStreak,
+  markDeleted,
   rankSlowTests,
   failureTrends,
   isolatedFailures,
@@ -95,6 +96,63 @@ describe("slower tests", () => {
       { id: "b", median: 2000, fastest: 1000, slowest: 3000, runs: 2 },
       { id: "a", median: 200, fastest: 100, slowest: 300, runs: 3 },
     ]);
+  });
+});
+
+describe("missing tests", () => {
+  const passing = (id: string): TestResult => ({ id, title: id, outcome: "passed" });
+
+  it("lists tests of the latest tracked run missing from this one, by file or suite", () => {
+    const history = historyWith({
+      "cart.test.ts › adds": { lastRun: 50 },
+      "cart.test.ts › removes": { lastRun: 50 },
+      "search.test.ts › finds": { lastRun: 50 },
+      "search.test.ts › ranks": { lastRun: 50 },
+      "search.test.ts › skipped on purpose": { lastRun: 50 },
+      // Not in the latest tracked run: removed long ago, or recorded before lastRun existed.
+      "old.test.ts › gone": { lastRun: 42 },
+      "legacy.test.ts › unknown": {},
+    });
+    const results = [passing("cart.test.ts › adds"), { ...passing("search.test.ts › skipped on purpose"), outcome: "skipped" as const }];
+    expect(analyze(results, history, NOW, 30).missing).toEqual([
+      { group: "cart.test.ts", ids: ["cart.test.ts › removes"], whole: false },
+      { group: "search.test.ts", ids: ["search.test.ts › finds", "search.test.ts › ranks"], whole: false },
+    ]);
+    expect(analyze([passing("search.test.ts › skipped on purpose")], history, NOW, 30).missing).toContainEqual({
+      group: "cart.test.ts",
+      ids: ["cart.test.ts › adds", "cart.test.ts › removes"],
+      whole: true,
+    });
+  });
+
+  it("marks the tests whose file the change deletes", () => {
+    const history = historyWith({
+      "test/search.test.ts › finds": { lastRun: 50 },
+      "test/search.test.ts › ranks": { lastRun: 50 },
+      "cart › adds": { lastRun: 50 },
+      "tests.test_pay › charges": { lastRun: 50 },
+    });
+    const missing = analyze([], history, NOW, 30).missing;
+    markDeleted(missing, ["test/search.test.ts", "src/pay.ts"]);
+    expect(missing.map((group) => [group.group, group.deletedFile])).toEqual([
+      ["cart", undefined],
+      ["test/search.test.ts", "test/search.test.ts"],
+      ["tests.test_pay", undefined],
+    ]);
+    // A class or module name matches the file it lives in, when that file looks like a test file.
+    const named = analyze([], history, NOW, 30).missing;
+    markDeleted(named, ["src/cart.ts", "test/cart.test.ts", "tests/test_pay.py"]);
+    expect(named.map((group) => [group.group, group.deletedFile])).toEqual([
+      ["cart", "test/cart.test.ts"],
+      ["test/search.test.ts", undefined],
+      ["tests.test_pay", "tests/test_pay.py"],
+    ]);
+  });
+
+  it("finds nothing without a tracked run", () => {
+    const history = historyWith({ "a › b": { lastRun: 0 } });
+    history.runs = 0;
+    expect(analyze([], history, NOW, 30).missing).toEqual([]);
   });
 });
 

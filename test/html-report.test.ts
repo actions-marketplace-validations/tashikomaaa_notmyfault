@@ -37,6 +37,49 @@ describe("renderSuitePage", () => {
     expect(page).toContain('<td class="number">900 ms</td>');
   });
 
+  it("says since which commit an already failing test fails", () => {
+    const failing = history();
+    failing.tests["unit › broken"] = {
+      outcomes: "pppfff",
+      lastSeen: "2026-09-16",
+      failingSince: { sha: "0123456789ab", at: "2026-09-15T08:00:00.000Z", url: "https://x/c", change: { ref: "!7", url: "https://x/mr" } },
+    };
+    expect(renderSuitePage("ci-test", failing, CONTEXT)).toContain(
+      '<span class="verdict broken">Already failing</span><span class="since">since <a href="https://x/c"><code>0123456</code></a> from <a href="https://x/mr">&#33;7</a>, 2026-09-15</span>',
+    );
+  });
+
+  it("renders a history written by someone else as text, never as markup or a script", () => {
+    const hostile = history();
+    hostile.updatedAt = '2026-09-16T10:04:12.000Z"><script>alert(1)</script>';
+    hostile.tests["unit › crafted"] = {
+      outcomes: "pppfff",
+      lastSeen: "2026-09-16",
+      lastFailure: '2026-09-16"><img src=x onerror=alert(1)>',
+      failingSince: {
+        sha: "0123456789ab",
+        at: '2026-09-15"><script>alert(1)</script>',
+        url: "javascript:alert(document.cookie)",
+        change: { ref: "<img src=x onerror=alert(1)>", url: "javascript:alert(1)" },
+      },
+    };
+    const page = renderSuitePage("ci-test", hostile, CONTEXT);
+    expect(page).not.toContain("<script>alert");
+    expect(page).not.toContain("<img src=x");
+    expect(page).not.toContain("javascript:");
+    // The commit and the change stay readable, only unlinked.
+    expect(page).toContain("<code>0123456</code>");
+  });
+
+  it("puts the costliest tests first, with the time they cost", () => {
+    const costly = history();
+    costly.runDurations = [30_000];
+    const page = renderSuitePage("ci-test", costly, CONTEXT);
+    expect(page).toContain("Their failures and retries cost about 1 min 31 s of test time.");
+    expect(page).toContain('<td class="number">900 ms</td><td class="number">1 min 1 s</td>');
+    expect(page).toContain('<td class="number"></td><td class="number">30.0 s</td>');
+  });
+
   it("says when no test failed", () => {
     const quiet = emptyHistory();
     quiet.tests = { stable: { outcomes: "ppp", lastSeen: "2026-09-16" } };

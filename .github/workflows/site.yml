@@ -10,6 +10,12 @@ on:
       - brand/social-preview.jpg
       - scripts/site.ts
       - .github/workflows/site.yml
+      - src/dashboard**
+      - dashboard/**
+      - dist/dashboard.js
+  # The dashboard of the demos follows their history.
+  schedule:
+    - cron: "0 5 * * *"
   workflow_dispatch:
 
 permissions:
@@ -26,14 +32,24 @@ jobs:
       name: site
       url: https://notmyfault.aldwin.fr
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
 
       - name: Build
         run: node scripts/site.ts _site
+
+      - name: Build the dashboard of the demos
+        uses: ./dashboard
+        with:
+          title: notmyfault demos
+          output: _site/dashboard
+          repositories: |
+            tashikomaaa/notmyfault
+            tashikomaaa/notmyfault-demo
+            https://gitlab.aldwin.fr/notmyfault/notmyfault-demo.git
 
       - name: Upload to notmyfault.aldwin.fr
         env:

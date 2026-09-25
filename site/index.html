@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>notmyfault: is that failing test your fault?</title>
-  <meta name="description" content="A GitHub Action that remembers how every test behaves on your main branch, and tells each pull request which failures are new, which tests are flaky and which were already broken.">
+  <meta name="description" content="For GitHub, GitLab, Forgejo and Gitea: notmyfault remembers how every test behaves on your main branch, and tells each pull request which failures are new, which tests are flaky and which were already broken.">
   <meta name="theme-color" content="#F7C65C" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#2B1D10" media="(prefers-color-scheme: dark)">
   <link rel="canonical" href="https://notmyfault.aldwin.fr/">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://notmyfault.aldwin.fr/">
   <meta property="og:title" content="notmyfault: is that failing test your fault?">
-  <meta property="og:description" content="A GitHub Action that tells each pull request which failures are new, which tests are flaky and which were already broken.">
+  <meta property="og:description" content="For GitHub, GitLab, Forgejo and Gitea: notmyfault tells each pull request which failures are new, which tests are flaky and which were already broken.">
   <meta property="og:image" content="https://notmyfault.aldwin.fr/assets/social-preview.jpg">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" type="image/png" href="favicon.png">
@@ -32,6 +32,7 @@
       <ul>
         <li><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/README.md">Documentation</a></li>
         <li><a href="#demo">Demo</a></li>
+        <li><a href="#gitlab">GitLab</a></li>
         <li><a href="https://github.com/tashikomaaa/notmyfault">GitHub</a></li>
       </ul>
     </nav>
@@ -44,7 +45,7 @@
           <a class="button" href="#quick-start">Add it to your workflow</a>
           <a class="button button-quiet" href="https://github.com/tashikomaaa/notmyfault-demo/pull/1">See a real pull request</a>
         </p>
-        <p class="fineprint">A free GitHub Action. MIT licensed, nothing to host.</p>
+        <p class="fineprint">Free, for GitHub, GitLab, Forgejo, Gitea and any CI with Node.js. MIT licensed, nothing to host.</p>
       </div>
 
       <figure class="hero-comment">
@@ -110,8 +111,8 @@
             <img src="assets/verdict-broken.png" alt="" width="245" height="245" loading="lazy">
             <div>
               <h3>Already failing</h3>
-              <p>The latest runs on main failed too, so the problem predates your pull request. For a flaky test, it takes more failures in a row than bad luck explains.</p>
-              <p class="todo"><strong>What to do:</strong> nothing in your pull request. Update your branch once main is fixed.</p>
+              <p>The latest runs on main failed too, so the problem predates your pull request. For a flaky test, it takes more failures in a row than bad luck explains. The comment names the commit and the pull request the failures started with.</p>
+              <p class="todo"><strong>What to do:</strong> nothing in your pull request. Tell whoever broke it, and update your branch once main is fixed.</p>
             </div>
           </article>
           <article class="verdict">
@@ -126,7 +127,7 @@
             <img src="assets/verdict-passed.png" alt="" width="244" height="244" loading="lazy">
             <div>
               <h3>Fixed</h3>
-              <p>And when a test failing on main passes in your pull request, the comment says so, even if nothing else failed.</p>
+              <p>And when a test failing on main passes in your pull request, the comment says so, even if nothing else failed. Tests that ran on main but no longer run in your pull request are listed too.</p>
             </div>
           </article>
         </div>
@@ -204,6 +205,42 @@ jobs:
       </div>
     </section>
 
+    <section class="band" id="gitlab" aria-labelledby="gitlab-title">
+      <div class="wrap start gitlab">
+        <div class="start-copy">
+          <h2 id="gitlab-title">On GitLab too</h2>
+          <p>The same history and the same verdicts in GitLab CI/CD, from a job of its own that reads the reports of your tests, whatever their language.</p>
+          <ul class="notes">
+            <li>Merge requests get the same comment, kept up to date on every push.</li>
+            <li>Failed tests show up in the Code Quality widget, with their verdict.</li>
+            <li>The counts become variables for later jobs, and flaky tests can get an issue each.</li>
+            <li>A project access token in <code>NOTMYFAULT_TOKEN</code> lets it store the history and comment.</li>
+            <li>Also a CI/CD Catalog component, and a job publishing the history pages with GitLab Pages.</li>
+          </ul>
+          <p>On Forgejo and Gitea, whose workflows follow GitHub Actions, the action itself runs as it is. Jenkins, CircleCI, Buildkite and the others run the same bundle with <code>npx notmyfault</code>, with the report in the log and a summary file.</p>
+          <p class="more"><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/gitlab.md">Set it up on GitLab</a> · <a href="https://gitlab.aldwin.fr/notmyfault/notmyfault-demo/-/merge_requests">See merge requests</a> · <a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/forgejo.md">Forgejo and Gitea</a> · <a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/any-ci.md">Any CI</a></p>
+        </div>
+        <div class="code">
+          <button class="copy" type="button" data-copy="gitlab-ci" hidden>Copy</button>
+          <pre id="gitlab-ci"><code>include:
+  - remote: https://raw.githubusercontent.com/tashikomaaa/notmyfault/v1/templates/notmyfault.gitlab-ci.yml
+
+test:
+  script: npm test      # writes JUnit XML to reports/
+  artifacts:
+    when: always
+    paths: [reports/]
+
+notmyfault:
+  extends: .notmyfault
+  needs: [test]
+  variables:
+    NOTMYFAULT_JUNIT: reports/*.xml
+    NOTMYFAULT_KEY: test</code></pre>
+        </div>
+      </div>
+    </section>
+
     <section class="band band-butter" aria-labelledby="quarantine-title">
       <div class="wrap quarantine">
         <img src="assets/sticker-works-on-main.png" alt="The croissant mascot in sunglasses, above the words &quot;Works on main (sometimes)&quot;." width="331" height="283" loading="lazy">
@@ -217,6 +254,7 @@ jobs:
   with:
     junit: reports/**/*.xml
     mode: quarantine</code></pre>
+          <p>Or keep your tests failing the job as usual, and have branch protection require the <code>notmyfault</code> check instead, which only fails on failures that look real.</p>
           <p class="more"><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/quarantine.md">Read the quarantine guide</a></p>
         </div>
       </div>
@@ -231,15 +269,15 @@ jobs:
         <dl class="facts facts-wide">
           <div>
             <dt><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/configuration.md#flaky-issues">An issue per flaky test</a></dt>
-            <dd>Opened when a test is proven flaky, updated with its latest failure, closed once it stops failing.</dd>
+            <dd>Opened when a test is proven flaky, mentioning its owners from CODEOWNERS, updated with its latest failure, closed once it stops failing.</dd>
           </div>
           <div>
             <dt><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/recipes.md#show-a-flaky-tests-badge">A badge and a report</a></dt>
-            <dd>A badge counting your flaky tests, and <a href="https://tashikomaaa.github.io/notmyfault-demo/">pages listing them</a> with their runs, ready for GitHub Pages.</dd>
+            <dd>A badge counting your flaky tests, and <a href="https://tashikomaaa.github.io/notmyfault-demo/">pages listing them</a> with their runs and the test time they cost, ready for GitHub Pages.</dd>
           </div>
           <div>
             <dt><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/recipes.md#re-run-flaky-failures-automatically">Re-runs on their own</a></dt>
-            <dd>When only flaky tests failed, a small companion workflow re-runs the failed jobs, once.</dd>
+            <dd>When only flaky tests stand in the way, the run happens again, once: a small companion workflow on GitHub, notmyfault itself on GitLab.</dd>
           </div>
           <div>
             <dt><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/quarantine.md#quarantine-tests-by-hand">Quarantine by hand</a></dt>
@@ -250,8 +288,24 @@ jobs:
             <dd>A passing test taking twice as long as usual is flagged before it starts timing out.</dd>
           </div>
           <div>
-            <dt><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/how-it-works.md#renamed-tests">Renames followed</a></dt>
+            <dt><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/how-it-works.md#renamed-and-moved-tests">Renames followed</a></dt>
             <dd>Rename a test on your main branch, and it keeps its history.</dd>
+          </div>
+          <div>
+            <dt><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/verdicts.md#missing-tests">Vanished tests caught</a></dt>
+            <dd>A pull request that deletes or stops running tests gets told, even when everything passes.</dd>
+          </div>
+          <div>
+            <dt><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/dashboard.md">One dashboard for all</a></dt>
+            <dd>The flakiest tests of every repository, ranked together by what they cost: <a href="https://notmyfault.aldwin.fr/dashboard/">see the one of the demos</a>.</dd>
+          </div>
+          <div>
+            <dt><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/security.md#supply-chain">Verifiable releases</a></dt>
+            <dd>Every release is rebuilt from its tag, checked and attested, with a checksum to pin.</dd>
+          </div>
+          <div>
+            <dt><a href="https://github.com/tashikomaaa/notmyfault/blob/main/docs/security.md#what-comes-from-outside">Nothing taken on trust</a></dt>
+            <dd>Reports, CODEOWNERS files and the history are read as if a stranger wrote them, and your token never reaches a log, a link or another host.</dd>
           </div>
         </dl>
       </div>
@@ -292,7 +346,7 @@ jobs:
       <div class="wrap host">
         <div class="section-head">
           <h2 id="host-title">Nothing to host</h2>
-          <p>notmyfault runs inside your workflow and keeps everything in your repository.</p>
+          <p>notmyfault runs inside your GitHub workflow or GitLab pipeline, and keeps everything in your repository.</p>
         </div>
         <dl class="facts">
           <div>
@@ -309,7 +363,7 @@ jobs:
           </div>
           <div>
             <dt>Free</dt>
-            <dd>MIT licensed. It runs in your own workflows and calls no paid service.</dd>
+            <dd>MIT licensed. It runs in your own pipelines and calls no paid service.</dd>
           </div>
         </dl>
       </div>

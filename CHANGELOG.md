@@ -4,6 +4,81 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [1.12.1] - 2026-09-18
+
+### Fixed
+
+- The GitLab template of 1.12.0 was refused by GitLab: one of the commands added to check the checksum held a colon, which YAML reads as a key rather than as part of the command. Pipelines including the template or the component at `v1` failed with `jobs:notmyfault:script config should be a string`. A test now reads every command of the templates the way YAML does.
+
+## [1.12.0] - 2026-09-18
+
+### Security
+
+A pass over everything notmyfault reads, prints and publishes ([#31](https://github.com/tashikomaaa/notmyfault/issues/31)). See [Permissions and security](docs/security.md).
+
+- **Tokens.** Outside GitHub Actions, the token is replaced by `***` in the log, the job summary, `notmyfault.env` and the GitLab Code Quality report, where nothing was masking it before. It is also replaced in test names and identities, not only in failure messages. A repository URL carrying a user name and a password is split before use, so the dashboard and the log never publish the password, and git only receives the credential for the origin of the remote.
+- **The API clients** follow the pages of a listing only on the host and path they were given, and no longer follow a redirect off the server, which could have sent the token to another host.
+- **Reports, CODEOWNERS, quarantine files and the history** are read as written by someone else: control characters and terminal escapes are stripped from names and messages, names and lengths are capped, XML is parsed with a bounded depth, glob patterns are matched without regular expressions, and every field of the history is checked against the shape notmyfault writes. A test named `__proto__` is a test like any other.
+- **Rendered links** are only links when they are `http` or `https` addresses: a crafted history cannot put a `javascript:` address in a comment, an issue or a history page.
+- **The GitLab template** pins the release it downloads and always checks its checksum, and the workflows that push to the wiki and to the GitLab mirror scope their credential to the host they push to.
+
+## [1.11.0] - 2026-09-18
+
+### Added
+
+- `assign-owners: true` assigns each flaky test issue, when it is created, to the owners of the test file who are users, on GitHub, GitLab, Forgejo and Gitea. Teams stay mentioned ([#28](https://github.com/tashikomaaa/notmyfault/issues/28)).
+- Tests moved to another file or suite keep their history, when their name is the only clue needed: nothing else left or appeared under that name, the file they left gained no test and the file they joined lost none. The job summary marks them as moved ([#27](https://github.com/tashikomaaa/notmyfault/issues/27)).
+- Tests whose file a pull request deletes are listed as deleted rather than missing, from the files the platform reports as removed: they are not counted by the `missing` output and never make notmyfault comment on their own ([#26](https://github.com/tashikomaaa/notmyfault/issues/26)).
+- notmyfault is published on [npm](https://www.npmjs.com/package/notmyfault), with provenance: `npx notmyfault@1` runs it in any CI system ([#22](https://github.com/tashikomaaa/notmyfault/issues/22)).
+- The dashboard of the demo repositories is published at [notmyfault.aldwin.fr/dashboard](https://notmyfault.aldwin.fr/dashboard/), rebuilt every day ([#29](https://github.com/tashikomaaa/notmyfault/issues/29)).
+
+### Changed
+
+- Gitea Actions are checked like Forgejo: the history, comments, flaky test issues with their owners, deleted test files and the pull request a streak started with all work on Gitea 1.27 ([#30](https://github.com/tashikomaaa/notmyfault/issues/30)).
+
+## [1.10.0] - 2026-09-17
+
+### Added
+
+- notmyfault is a component of the GitLab CI/CD Catalog, with inputs, published from the repository by a release job when a GitLab mirror gets a release tag. The template gets a `.notmyfault-pages` job, which publishes the history pages with GitLab Pages ([#24](https://github.com/tashikomaaa/notmyfault/issues/24)).
+
+## [1.9.0] - 2026-09-17
+
+### Added
+
+- `notmyfault.mjs` runs in any other CI system, like Jenkins, CircleCI or Buildkite: it reads its configuration from `NOTMYFAULT_*` variables, the variables of common CI systems and git, pushes the history over HTTPS with a token or over SSH, and reports in the log, a Markdown summary, a dotenv file and its exit code. Outside CI systems, it records nothing unless told to ([#22](https://github.com/tashikomaaa/notmyfault/issues/22)).
+- A dashboard action, `tashikomaaa/notmyfault/dashboard`, reads the history branches of several repositories and ranks their unreliable tests together, the costliest first, in a static page ready for GitHub Pages ([#25](https://github.com/tashikomaaa/notmyfault/issues/25)).
+
+## [1.8.0] - 2026-09-17
+
+### Added
+
+- notmyfault runs in Forgejo and Gitea Actions: the same action detects them, uses their API for comments, flaky test issues and the pull request of a commit, looks for CODEOWNERS where they do, and leaves out checks, which they do not have ([#21](https://github.com/tashikomaaa/notmyfault/issues/21)).
+- The job summary and the history pages estimate the test time each unreliable test cost over its remembered runs, a re-run of the suite per failure and another run of the test per retry, rank tests by it and add it up. The history records the total test time of the last runs as `runDurations` ([#20](https://github.com/tashikomaaa/notmyfault/issues/20)).
+
+## [1.7.0] - 2026-09-17
+
+### Added
+
+- `check: true` reports each run as a check of its own, named by `check-name`, failing only on failures not covered by `tolerate`: branch protection can require it instead of the job, without quarantine mode or `continue-on-error`. It needs the `checks: write` permission ([#19](https://github.com/tashikomaaa/notmyfault/issues/19)).
+- On GitLab, `NOTMYFAULT_RERUN_FLAKY: "true"` starts a new pipeline for the commit when only flaky tests stand in the way, once per commit, and says so in the comment ([#18](https://github.com/tashikomaaa/notmyfault/issues/18)).
+- `mention-owners: true` mentions the owners of each flaky test, from CODEOWNERS, GitLab sections included, in its issue ([#17](https://github.com/tashikomaaa/notmyfault/issues/17)).
+
+## [1.6.0] - 2026-09-17
+
+### Added
+
+- Tests already failing on the tracked branch say since when: the commit of the first failed run of the streak and the pull or merge request it came from, both linked, in the comment, the logs, the annotations, the flaky test issues and the history pages. The history records it as `failingSince` ([#15](https://github.com/tashikomaaa/notmyfault/issues/15)).
+- Tests that ran in the latest run on the tracked branch but are missing from a run are listed as missing, a whole file or suite on one line: deleted, renamed or no longer found by the test runner. They make notmyfault comment on pull requests, never fail the step, and are counted by the `missing` output. Turn it off with `missing-tests: false` ([#16](https://github.com/tashikomaaa/notmyfault/issues/16)).
+- Releases attest the build provenance of `dist/index.js` and `dist/notmyfault.mjs`, rebuilt from the tag, and attach `notmyfault.mjs.sha256`. The GitLab template checks `NOTMYFAULT_SHA256`, when set, before running the file ([#23](https://github.com/tashikomaaa/notmyfault/issues/23)).
+
+## [1.5.0] - 2026-09-17
+
+### Added
+
+- notmyfault runs in GitLab CI/CD. `dist/notmyfault.mjs`, the same code bundled in one file, reads `NOTMYFAULT_*` variables, comments on merge requests, lists failed tests in the Code Quality widget, writes its outputs as dotenv variables and its summary as an artifact, and manages flaky test issues. A template runs it in a job of its own, whatever the language of the tests ([#14](https://github.com/tashikomaaa/notmyfault/issues/14)).
+- Each release attaches `notmyfault.mjs`.
+
 ## [1.4.0] - 2026-09-16
 
 ### Added
@@ -76,7 +151,16 @@ All notable changes to this project are documented here. The format follows [Kee
 - Pull request comment kept up to date, job summary with the most unreliable tests, and step outputs.
 - Quarantine mode, so that known flaky tests stop blocking merges.
 
-[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/tashikomaaa/notmyfault/compare/v1.12.1...HEAD
+[1.12.1]: https://github.com/tashikomaaa/notmyfault/compare/v1.12.0...v1.12.1
+[1.12.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.11.0...v1.12.0
+[1.11.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.10.0...v1.11.0
+[1.10.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.9.0...v1.10.0
+[1.9.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.8.0...v1.9.0
+[1.8.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.7.0...v1.8.0
+[1.7.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.6.0...v1.7.0
+[1.6.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.5.0...v1.6.0
+[1.5.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/tashikomaaa/notmyfault/compare/v1.1.0...v1.2.0

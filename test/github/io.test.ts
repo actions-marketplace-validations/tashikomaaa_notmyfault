@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ActionIO } from "../src/actions";
+import { ActionIO } from "../../src/github/io";
 
 describe("ActionIO", () => {
   it("escapes the properties and the message of annotations", () => {

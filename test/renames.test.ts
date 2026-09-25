@@ -22,6 +22,36 @@ describe("detectRenames", () => {
     ]);
   });
 
+  it("follows tests moved to another file, keeping their name", () => {
+    const h = history({
+      "cart.test.ts › adds up the basket": {},
+      "cart.test.ts › applies discount codes": {},
+      "cart.test.ts › computes the total": {},
+    });
+    // The suite is split: two tests move to a file of their own, one stays.
+    const results = [
+      result("cart.test.ts › adds up the basket"),
+      result("discounts.test.ts › applies discount codes"),
+      result("totals.test.ts › computes the total"),
+    ];
+    expect(detectRenames(h, results)).toEqual([
+      { from: "cart.test.ts › applies discount codes", to: "discounts.test.ts › applies discount codes", moved: true },
+      { from: "cart.test.ts › computes the total", to: "totals.test.ts › computes the total", moved: true },
+    ]);
+  });
+
+  it("leaves a move alone when the name is not the only clue", () => {
+    // Two tests of the same name leave, one appears: which one moved cannot be told.
+    const twice = history({ "cart.test.ts › totals": {}, "checkout.test.ts › totals": {} });
+    expect(detectRenames(twice, [result("orders.test.ts › totals")])).toEqual([]);
+
+    // The file that lost the test also gained one: it reads as a rename in place, not as a move.
+    const mixed = history({ "cart.test.ts › totals": {}, "cart.test.ts › adds up": {} });
+    expect(detectRenames(mixed, [result("cart.test.ts › adds up"), result("cart.test.ts › sums up"), result("orders.test.ts › totals")])).toEqual(
+      [],
+    );
+  });
+
   it("leaves alone dissimilar names, several candidates, other files and older tests", () => {
     const h = history({
       "cart.test.ts › applies discount codes": {},

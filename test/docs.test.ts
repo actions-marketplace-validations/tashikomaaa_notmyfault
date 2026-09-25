@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -105,5 +106,84 @@ describe("action.yml", () => {
   it.each(names(outputs))("sets and documents the %s output", (output) => {
     expect(main).toContain(`setOutput("${output}"`);
     expect(configuration).toContain(`| \`${output}\` |`);
+  });
+});
+
+describe("dashboard/action.yml", () => {
+  const action = read("dashboard/action.yml");
+  const inputs = action.slice(action.indexOf("\ninputs:\n"), action.indexOf("\noutputs:\n"));
+  const names = [...inputs.matchAll(/^ {2}([\w-]+):$/gm)].map((match) => match[1]!);
+
+  it.each(names)("reads and documents the %s input", (input) => {
+    expect(read("src/dashboard-action.ts")).toMatch(new RegExp(`(input|integerInput)\\("${input}"`));
+    expect(read("docs/dashboard.md")).toContain(`| \`${input}\` |`);
+  });
+
+  it("runs the bundle built for it", () => {
+    expect(action).toContain("main: ../dist/dashboard.js");
+    expect(existsSync(join(root, "dist", "dashboard.js"))).toBe(true);
+  });
+});
+
+describe("templates/notmyfault/template.yml", () => {
+  const component = read("templates/notmyfault/template.yml");
+  const spec = component.slice(0, component.indexOf("\n---\n"));
+  const inputs = [...spec.matchAll(/^ {4}([\w-]+):$/gm)].map((match) => match[1]!);
+
+  it.each(inputs)("uses and documents the %s input", (input) => {
+    expect(component.slice(component.indexOf("\n---\n"))).toContain(`$[[ inputs.${input} ]]`);
+    expect(read("docs/gitlab.md")).toContain(`| \`${input}\` |`);
+  });
+
+  it("downloads the bundle of the commit of its version", () => {
+    expect(component).toContain("https://raw.githubusercontent.com/tashikomaaa/notmyfault/$[[ component.sha ]]/dist/notmyfault.mjs");
+  });
+});
+
+describe("templates/notmyfault.gitlab-ci.yml", () => {
+  it("downloads the bundle committed in dist/", () => {
+    const template = read("templates/notmyfault.gitlab-ci.yml");
+    const path = template.match(/raw\.githubusercontent\.com\/tashikomaaa\/notmyfault\/\$\{NOTMYFAULT_REF\}\/([\w./-]+)"/)?.[1];
+    expect(path).toBe("dist/notmyfault.mjs");
+    expect(existsSync(join(root, path!))).toBe(true);
+  });
+
+  it("publishes the pages of the history branch with GitLab Pages", () => {
+    const template = read("templates/notmyfault.gitlab-ci.yml");
+    const pages = template.slice(template.indexOf("\n.notmyfault-pages:"));
+    expect(pages).toContain("git --work-tree=public checkout FETCH_HEAD -- index.html reports badges");
+    expect(pages).toContain("paths: [public]");
+  });
+
+  it("checks the checksum of the file it downloads, before running it", () => {
+    const script = read("templates/notmyfault.gitlab-ci.yml");
+    const check = script.indexOf('echo "$NOTMYFAULT_SHA256  /tmp/notmyfault.mjs" | sha256sum -c -');
+    expect(check).toBeGreaterThan(script.indexOf("wget"));
+    expect(check).toBeLessThan(script.indexOf("node /tmp/notmyfault.mjs"));
+    // An empty checksum, or a ref that could walk out of the repository, stops the job.
+    expect(script).toContain('test -n "$NOTMYFAULT_SHA256" ||');
+    expect(script).toContain('case "$NOTMYFAULT_REF" in *[!A-Za-z0-9._-]*)');
+  });
+
+  it("keeps every command a string GitLab can read", () => {
+    // A plain YAML scalar holding ": " is read as a mapping, and GitLab refuses the job.
+    for (const file of ["templates/notmyfault.gitlab-ci.yml", "templates/notmyfault/template.yml"]) {
+      let inScript = false;
+      for (const line of read(file).split("\n")) {
+        if (/^\s*script:\s*$/.test(line)) inScript = true;
+        else if (/^\s*[\w.-]+:/.test(line)) inScript = false;
+        const command = inScript ? /^\s+- (.*)$/.exec(line)?.[1] : undefined;
+        if (!command || command.startsWith("'") || command.startsWith('"')) continue;
+        expect(`${file} | ${command}`).not.toContain(": ");
+      }
+    }
+  });
+
+  it("is pinned to the version it was built with", () => {
+    const script = read("templates/notmyfault.gitlab-ci.yml");
+    const version = (JSON.parse(read("package.json")) as { version: string }).version;
+    const checksum = createHash("sha256").update(readFileSync(join(root, "dist", "notmyfault.mjs"))).digest("hex");
+    expect(script).toContain(`NOTMYFAULT_REF: v${version}`);
+    expect(script).toContain(`NOTMYFAULT_SHA256: ${checksum}`);
   });
 });

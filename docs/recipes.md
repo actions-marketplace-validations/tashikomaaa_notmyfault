@@ -137,7 +137,7 @@ Filter them with the `flaky-test` label, or assign them in your triage routine.
 
 ## Re-run flaky failures automatically
 
-Re-running the same commit is the fastest way to prove a test flaky, and it unblocks the change. When every failed test is known or probably flaky, notmyfault adds a notice titled `notmyfault: only flaky tests failed` to its step. A second workflow can watch for it and re-run the failed jobs once, on its own:
+Re-running the same commit is the fastest way to prove a test flaky, and it unblocks the change. On GitLab, notmyfault does it itself, see [Re-run flaky failures](gitlab.md#re-run-flaky-failures). When every failed test is known or probably flaky, notmyfault adds a notice titled `notmyfault: only flaky tests failed` to its step. A second workflow can watch for it and re-run the failed jobs once, on its own:
 
 ```yaml
 # .github/workflows/rerun-flaky.yml
@@ -166,8 +166,12 @@ jobs:
         run: |
           failed=$(gh api "repos/$REPO/actions/runs/$RUN/jobs?per_page=100" --jq '.jobs[] | select(.conclusion == "failure") | .id')
           [ -n "$failed" ] || exit 0
+          # The whole notice, not only a title anything could carry.
+          notice='select(.annotation_level == "notice" and .title == "notmyfault: only flaky tests failed"
+                  and (.message | startswith("Every failed test is known or probably flaky")))'
           for job in $failed; do
-            if ! gh api "repos/$REPO/check-runs/$job/annotations?per_page=100" --jq '.[].title' | grep -qx "notmyfault: only flaky tests failed"; then
+            found=$(gh api "repos/$REPO/check-runs/$job/annotations?per_page=100" --jq "[.[] | $notice] | length")
+            if [ "$found" -eq 0 ]; then
               echo "Job $job did not fail only because of flaky tests: not re-running."
               exit 0
             fi
